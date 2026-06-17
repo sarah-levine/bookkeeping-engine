@@ -201,9 +201,10 @@ def get_cell_style(client_name, acct_key, recon_dates, client_keys, today=None,
         if nxt_close > today:
             # Next closing hasn't happened yet
             if last_done and last_done >= curr_close:
-                # Current cycle done, next not due yet — nothing to do
+                # Current cycle reconciled and next statement not due yet —
+                # nothing to do, so show it as up to date (not blocked).
                 nxt_str = nxt_close.strftime("%m/%d/%y")
-                return "#fff7ed", "#c2410c", f"🔒 Next statement due {nxt_str}", None
+                return "#dcfce7", "#166534", f"✅ CC up to date — next due {nxt_str}", None
             else:
                 # Current cycle not done and next not due — overdue
                 return "#fce7f3", "#9d174d", f"⚠️ Overdue — due {curr_close.strftime('%m/%d/%y')}", None
