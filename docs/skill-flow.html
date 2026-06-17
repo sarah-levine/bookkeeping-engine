@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bookkeeping Skill Flow — Mode Router</title>
+<link rel="preconnect" href="https://unpkg.com">
+<style>
+  html, body { margin: 0; padding: 0; background: #0f1117; }
+  /* tiny cross-nav bar */
+  .xnav {
+    position: fixed; top: 12px; right: 16px; z-index: 50;
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+  }
+  .xnav a {
+    color: #94a3b8; text-decoration: none; background: #181c27;
+    border: 1px solid #252a3a; border-radius: 6px; padding: 6px 12px;
+  }
+  .xnav a:hover { color: #4f8ef7; border-color: #4f8ef7; }
+</style>
+</head>
+<body>
+<div class="xnav"><a href="pipeline.html">← Pipeline diagram</a></div>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState } = React;
+
+const palette = {
+  bg: "#0f1117",
+  surface: "#181c27",
+  border: "#252a3a",
+  accent: "#4f8ef7",
+  green: "#34d399",
+  yellow: "#fbbf24",
+  red: "#f87171",
+  purple: "#a78bfa",
+  text: "#e2e8f0",
+  muted: "#64748b",
+  cardBg: "#1a1f30",
+};
+
+const modeColors = {
+  A: { bg: "#1e2d4a", border: "#4f8ef7", accent: "#4f8ef7", label: "MODE A" },
+  B: { bg: "#1e3a2e", border: "#34d399", accent: "#34d399", label: "MODE B" },
+  C: { bg: "#2d2518", border: "#fbbf24", accent: "#fbbf24", label: "MODE C" },
+  D: { bg: "#2d1f3a", border: "#a78bfa", accent: "#a78bfa", label: "MODE D" },
+  E: { bg: "#2d1e1e", border: "#f87171", accent: "#f87171", label: "MODE E" },
+};
+
+function Badge({ mode }) {
+  const c = modeColors[mode];
+  return (
+    <span style={{
+      background: c.bg,
+      border: `1px solid ${c.border}`,
+      color: c.accent,
+      borderRadius: 4,
+      padding: "2px 8px",
+      fontSize: 10,
+      fontFamily: "'IBM Plex Mono', monospace",
+      fontWeight: 700,
+      letterSpacing: 1,
+    }}>{c.label}</span>
+  );
+}
+
+function Arrow({ label, color = palette.muted }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", margin: "4px 0", gap: 2 }}>
+      {label && <span style={{ color: palette.muted, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}>{label}</span>}
+      <svg width="16" height="28" viewBox="0 0 16 28">
+        <line x1="8" y1="0" x2="8" y2="20" stroke={color} strokeWidth="1.5" strokeDasharray="3 2" />
+        <polygon points="4,18 12,18 8,26" fill={color} />
+      </svg>
+    </div>
+  );
+}
+
+function HArrow({ label, color = palette.muted }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>
+      {label && <span style={{ color: palette.muted, fontSize: 9, fontFamily: "'IBM Plex Mono', monospace", marginBottom: 2, whiteSpace: "nowrap" }}>{label}</span>}
+      <svg width="40" height="16" viewBox="0 0 40 16">
+        <line x1="0" y1="8" x2="32" y2="8" stroke={color} strokeWidth="1.5" strokeDasharray="3 2" />
+        <polygon points="30,4 38,8 30,12" fill={color} />
+      </svg>
+    </div>
+  );
+}
+
+function Card({ title, subtitle, children, mode, highlight, style = {} }) {
+  const c = mode ? modeColors[mode] : null;
+  return (
+    <div style={{
+      background: c ? c.bg : palette.cardBg,
+      border: `1px solid ${c ? c.border : (highlight ? palette.accent : palette.border)}`,
+      borderRadius: 10,
+      padding: "14px 16px",
+      position: "relative",
+      boxShadow: c ? `0 0 18px ${c.border}22` : "none",
+      ...style,
+    }}>
+      {mode && (
+        <div style={{ position: "absolute", top: -10, left: 12 }}>
+          <Badge mode={mode} />
+        </div>
+      )}
+      {title && <div style={{ color: c ? c.accent : palette.text, fontWeight: 700, fontSize: 13, marginBottom: 2, fontFamily: "'IBM Plex Mono', monospace", marginTop: mode ? 4 : 0 }}>{title}</div>}
+      {subtitle && <div style={{ color: palette.muted, fontSize: 11, marginBottom: 8, fontFamily: "'IBM Plex Mono', monospace" }}>{subtitle}</div>}
+      {children}
+    </div>
+  );
+}
+
+function Step({ icon, text, color = palette.muted }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 5 }}>
+      <span style={{ color, fontSize: 13, minWidth: 16, lineHeight: "18px" }}>{icon}</span>
+      <span style={{ color: palette.text, fontSize: 12, lineHeight: "18px", fontFamily: "'IBM Plex Mono', monospace" }}>{text}</span>
+    </div>
+  );
+}
+
+function LogBadge({ name }) {
+  return (
+    <span style={{
+      background: "#1a1f30",
+      border: `1px solid ${palette.border}`,
+      color: palette.yellow,
+      borderRadius: 4,
+      padding: "1px 7px",
+      fontSize: 10,
+      fontFamily: "'IBM Plex Mono', monospace",
+    }}>{name}</span>
+  );
+}
+
+function Section({ label, color, children }) {
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ color, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, letterSpacing: 1, marginBottom: 4, textTransform: "uppercase" }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+const MODES = ["A", "B", "C", "D", "E"];
+const MODE_LABELS = {
+  A: "Reconciliation",
+  B: "Payroll Journal Entry",
+  C: "Payroll + Tie-Out",
+  D: "QA Verification",
+  E: "CC Payment Tie-Out",
+};
+
+function BookkeepingWorkflow() {
+  const [active, setActive] = useState(null);
+
+  return (
+    <div style={{
+      background: palette.bg,
+      minHeight: "100vh",
+      padding: "32px 20px 60px",
+      fontFamily: "'IBM Plex Mono', monospace",
+      color: palette.text,
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&display=swap');
+        * { box-sizing: border-box; }
+        .mode-btn:hover { opacity: 0.85; transform: translateY(-1px); transition: all 0.15s; }
+        .mode-btn { transition: all 0.15s; cursor: pointer; }
+      `}</style>
+
+      {/* Header */}
+      <div style={{ textAlign: "center", marginBottom: 32 }}>
+        <div style={{ fontSize: 11, letterSpacing: 3, color: palette.muted, marginBottom: 6 }}>SARAH'S BOOKKEEPING SYSTEM</div>
+        <div style={{ fontSize: 26, fontWeight: 700, color: palette.text, letterSpacing: -0.5 }}>Workflow Diagram</div>
+        <div style={{ color: palette.muted, fontSize: 11, marginTop: 6 }}>Click a mode tab to highlight its flow</div>
+      </div>
+
+      {/* Mode Tabs */}
+      <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 32, flexWrap: "wrap" }}>
+        {MODES.map(m => {
+          const c = modeColors[m];
+          const sel = active === m;
+          return (
+            <button key={m} className="mode-btn"
+              onClick={() => setActive(sel ? null : m)}
+              style={{
+                background: sel ? c.bg : "transparent",
+                border: `1px solid ${sel ? c.border : palette.border}`,
+                color: sel ? c.accent : palette.muted,
+                borderRadius: 6,
+                padding: "6px 14px",
+                fontSize: 11,
+                fontFamily: "'IBM Plex Mono', monospace",
+                cursor: "pointer",
+                fontWeight: sel ? 700 : 400,
+                boxShadow: sel ? `0 0 12px ${c.border}44` : "none",
+              }}>
+              {c.label} — {MODE_LABELS[m]}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ─── ENTRY POINT ─── */}
+      <div style={{ maxWidth: 860, margin: "0 auto" }}>
+
+        <Card title="📥  INPUT DETECTION" subtitle="bookkeeping skill — mode router" highlight style={{ marginBottom: 0 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginTop: 8 }}>
+            {[
+              { label: "CC Statement PDF", mode: "A" },
+              { label: "Checking Statement PDF", mode: "A", note: "+ auto C + E" },
+              { label: "ADP Payroll PDF", mode: "B" },
+              { label: "Payroll + Checking PDFs", mode: "C" },
+              { label: "QuickBooks Screenshots", mode: "D" },
+              { label: '"CC payment tie out?"', mode: "E" },
+            ].map(({ label, mode, note }) => {
+              const c = modeColors[mode];
+              const isActive = active === null || active === mode;
+              return (
+                <div key={label} style={{
+                  background: isActive ? c.bg : "#13161f",
+                  border: `1px solid ${isActive ? c.border : palette.border}`,
+                  borderRadius: 7,
+                  padding: "8px 10px",
+                  transition: "all 0.2s",
+                  opacity: isActive ? 1 : 0.35,
+                }}>
+                  <div style={{ color: c.accent, fontSize: 10, fontWeight: 700, marginBottom: 3 }}>{c.label}</div>
+                  <div style={{ color: palette.text, fontSize: 11 }}>{label}</div>
+                  {note && <div style={{ color: palette.yellow, fontSize: 10, marginTop: 2 }}>{note}</div>}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        <Arrow label="git pull / clone repo" />
+
+        {/* ─── SHARED SETUP ─── */}
+        <Card title="⚙️  SHARED SETUP" subtitle="all modes" style={{ marginBottom: 0 }}>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+            <Step icon="①" text="Clone / pull sarah-levine/Bookkeeping repo" />
+            <Step icon="②" text="pip install pdfplumber pypdf anthropic pymupdf" />
+            <Step icon="③" text="Locate uploaded PDFs in /mnt/user-data/uploads/" />
+          </div>
+        </Card>
+
+        <Arrow />
+
+        {/* ─── FOUR MODE COLUMNS ─── */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+
+          {/* MODE A */}
+          <div style={{ opacity: (active === null || active === "A" || active === "C") ? 1 : 0.2, transition: "opacity 0.2s" }}>
+            <Card mode="A" title="reconcile_comprehensive.py" subtitle="bank / CC statement PDF">
+              <Section label="Script does" color={palette.accent}>
+                <Step icon="▸" text="Detects client key from PDF" color={palette.accent} />
+                <Step icon="▸" text="Extracts txns via pdfplumber" color={palette.accent} />
+                <Step icon="▸" text="Vision fallback if scan fails" color={palette.accent} />
+                <Step icon="▸" text="Prints full reconciliation report" color={palette.accent} />
+              </Section>
+              <Section label="Outputs" color={palette.muted}>
+                <Step icon="💾" text="Report .txt → /mnt/user-data/outputs/" />
+                <Step icon="📋" text="Upserts row in:" />
+                <div style={{ paddingLeft: 20, marginTop: 2 }}><LogBadge name="reconciliation_log.csv" /></div>
+              </Section>
+              <Section label="Claude shows Sarah" color={palette.muted}>
+                <Step icon="🖨" text="FULL verbatim report (no summarising)" />
+                <Step icon="📎" text="present_files() download link" />
+              </Section>
+            </Card>
+          </div>
+
+          {/* MODE B */}
+          <div style={{ opacity: (active === null || active === "B" || active === "C") ? 1 : 0.2, transition: "opacity 0.2s" }}>
+            <Card mode="B" title="payroll.py" subtitle="ADP Payroll Details PDF">
+              <Section label="Client mapping" color={palette.green}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+                  {["delta","charlie","bravo_salon","acme_salon","echo","foxtrot"].map(k => (
+                    <span key={k} style={{ background: "#1e3a2e", border: "1px solid #34d39944", color: palette.green, borderRadius: 3, padding: "1px 6px", fontSize: 10 }}>{k}</span>
+                  ))}
+                </div>
+              </Section>
+              <Section label="Script does" color={palette.green}>
+                <Step icon="▸" text="Parses ADP earnings / deductions" color={palette.green} />
+                <Step icon="▸" text="Builds QB journal entry table" color={palette.green} />
+                <Step icon="▸" text="Calculates bank_credit amount" color={palette.green} />
+              </Section>
+              <Section label="Outputs" color={palette.muted}>
+                <Step icon="💾" text="Journal entry table shown to Sarah" />
+                <Step icon="📋" text="Upserts row in:" />
+                <div style={{ paddingLeft: 20, marginTop: 2 }}><LogBadge name="payroll_log.csv" /></div>
+              </Section>
+              <Section label="Special flags" color={palette.muted}>
+                <Step icon="🔑" text="echo: needs Liability PDF too" />
+                <Step icon="🔑" text="foxtrot: two divisions → two entries" />
+                <Step icon="🔑" text="acme_salon: --pay-by-pay flag" />
+              </Section>
+            </Card>
+          </div>
+
+          {/* MODE C */}
+          <div style={{ opacity: (active === null || active === "C") ? 1 : 0.2, transition: "opacity 0.2s" }}>
+            <Card mode="C" title="Payroll + Checking Tie-Out" subtitle="cross-checks ADP debit on bank statement">
+              <Section label="Step 1 — expected bank_credit" color={palette.yellow}>
+                <Step icon="▸" text="From payroll_log.csv (prior session)" color={palette.yellow} />
+                <Step icon="▸" text="OR run payroll.py now (live)" color={palette.yellow} />
+              </Section>
+              <Section label="Step 2 — run Mode A on checking" color={palette.yellow}>
+                <Step icon="▸" text="Find ADP WAGE PAY debit on statement" color={palette.yellow} />
+              </Section>
+              <Section label="Results" color={palette.muted}>
+                <Step icon="✓" text="Ties out to the penny" color={palette.green} />
+                <Step icon="✗" text="Does not tie — shows variance" color={palette.red} />
+                <Step icon="⚠" text="Payroll out of balance warning" color={palette.yellow} />
+              </Section>
+            </Card>
+          </div>
+
+          {/* MODE D */}
+          <div style={{ opacity: (active === null || active === "D") ? 1 : 0.2, transition: "opacity 0.2s" }}>
+            <Card mode="D" title="qa_reconciliation.py" subtitle="QuickBooks screenshot comparison">
+              <Section label="Step 1 — build qb_data.json" color={palette.purple}>
+                <Step icon="▸" text="Read all QB Reconcile screenshots" color={palette.purple} />
+                <Step icon="▸" text="Extract checked items only" color={palette.purple} />
+                <Step icon="▸" text="Save to Bookkeeping/qb_data.json" color={palette.purple} />
+              </Section>
+              <Section label="Step 2 — qa_reconciliation.py" color={palette.purple}>
+                <Step icon="▸" text="Compare statement PDF vs QB data" color={palette.purple} />
+              </Section>
+              <Section label="Flags" color={palette.muted}>
+                <Step icon="❌" text="In QB but not in report" />
+                <Step icon="❌" text="Amount mismatch (data entry error)" />
+                <Step icon="❌" text="Item on report but missing in QB" />
+              </Section>
+            </Card>
+          </div>
+
+        </div>
+
+        <Arrow label="checking account auto-sequence" color={palette.yellow} />
+
+        {/* MODE E */}
+        <div style={{ opacity: (active === null || active === "E" || active === "C") ? 1 : 0.2, transition: "opacity 0.2s" }}>
+          <Card mode="E" title="CC Payment Tie-Out" subtitle="checking debit ↔ CC statement payment credit">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+              <div>
+                <div style={{ color: palette.red, fontSize: 10, fontWeight: 700, marginBottom: 6 }}>STEP 1 — CHECKING SIDE</div>
+                <Step icon="▸" text="grep CLIENT.*checking reconciliation_log.csv" color={palette.red} />
+                <Step icon="▸" text="Find CC payment keyword in report" color={palette.red} />
+                <div style={{ marginTop: 4, fontSize: 10, color: palette.muted }}>AMEX EPAYMENT · AUTOPAY<br/>CHASE CREDIT CRD · BOFA CREDIT</div>
+              </div>
+              <div>
+                <div style={{ color: palette.red, fontSize: 10, fontWeight: 700, marginBottom: 6 }}>STEP 2 — CC SIDE</div>
+                <Step icon="▸" text="grep CLIENT.*amex|chase_ink reconciliation_log.csv" color={palette.red} />
+                <Step icon="▸" text="Read total_payments column" color={palette.red} />
+                <Step icon="▸" text="If CC not yet reconciled → PENDING" color={palette.muted} />
+              </div>
+              <div>
+                <div style={{ color: palette.red, fontSize: 10, fontWeight: 700, marginBottom: 6 }}>STEP 3 — RESULT</div>
+                <Step icon="✓" text="Ties out" color={palette.green} />
+                <Step icon="✗" text="Shows variance + both sources" color={palette.red} />
+                <Step icon="⏳" text="PENDING if CC not reconciled" color={palette.yellow} />
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        <Arrow />
+
+        {/* LOG FILES */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 0 }}>
+          <Card title="📋  reconciliation_log.csv" subtitle="updated by reconcile_comprehensive.py">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+              {["client","client_name","account_type","account_ending","statement_date","beginning_balance","ending_balance","total_payments","run_timestamp"].map(col => (
+                <span key={col} style={{ background: palette.surface, border: `1px solid ${palette.border}`, color: palette.muted, borderRadius: 3, padding: "1px 6px", fontSize: 10 }}>{col}</span>
+              ))}
+            </div>
+          </Card>
+          <Card title="📋  payroll_log.csv" subtitle="updated by payroll.py">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+              {["client","client_name","check_date","bank_credit","balanced","run_timestamp"].map(col => (
+                <span key={col} style={{ background: palette.surface, border: `1px solid ${palette.border}`, color: palette.muted, borderRadius: 3, padding: "1px 6px", fontSize: 10 }}>{col}</span>
+              ))}
+            </div>
+            <div style={{ marginTop: 8, fontSize: 10, color: palette.muted }}>balanced = TRUE / FALSE · upsert logic (re-run replaces row)</div>
+          </Card>
+        </div>
+
+        <Arrow />
+
+        {/* CHECKING AUTO-SEQUENCE */}
+        <Card title="🔄  CHECKING ACCOUNT AUTO-SEQUENCE" subtitle="triggered automatically when statement is a checking account" style={{ borderColor: palette.yellow }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+            {[
+              { label: "Step 1", desc: "Mode A — Reconcile", color: palette.accent },
+              null,
+              { label: "Step 2", desc: "Mode C — Payroll tie-out", color: palette.yellow },
+              null,
+              { label: "Step 3", desc: "Mode E — CC payment tie-out", color: palette.red },
+            ].map((item, i) =>
+              item === null
+                ? <HArrow key={i} />
+                : (
+                  <div key={i} style={{ background: palette.cardBg, border: `1px solid ${item.color}44`, borderRadius: 7, padding: "8px 12px", textAlign: "center" }}>
+                    <div style={{ color: item.color, fontSize: 10, fontWeight: 700 }}>{item.label}</div>
+                    <div style={{ color: palette.text, fontSize: 11, marginTop: 2 }}>{item.desc}</div>
+                  </div>
+                )
+            )}
+          </div>
+          <div style={{ marginTop: 10, fontSize: 10, color: palette.muted }}>
+            Checking types: amex_checking · bofa_checking · bmo_checking · citi_checking · wells_fargo_checking · usbank_checking · northern_trust_checking
+          </div>
+        </Card>
+
+        <Arrow />
+
+        {/* OUTPUT */}
+        <Card title="✅  FINAL OUTPUT TO SARAH" highlight>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+            {[
+              { icon: "🖨", text: "Full verbatim reconciliation report in code block", color: palette.accent },
+              { icon: "📎", text: "Downloadable .txt file via present_files()", color: palette.accent },
+              { icon: "📊", text: "Journal entry table (Mode B)", color: palette.green },
+              { icon: "🔍", text: "QA mismatch table (Mode D)", color: palette.purple },
+              { icon: "✓/✗", text: "Tie-out result (Mode C & E)", color: palette.yellow },
+            ].map(({ icon, text, color }) => (
+              <div key={text} style={{ background: palette.surface, border: `1px solid ${palette.border}`, borderRadius: 6, padding: "8px 10px" }}>
+                <span style={{ color, fontSize: 13 }}>{icon}</span>
+                <span style={{ color: palette.text, fontSize: 11, marginLeft: 6 }}>{text}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* Error handling footer */}
+        <div style={{ marginTop: 20, background: "#1a1414", border: `1px solid ${palette.red}33`, borderRadius: 8, padding: "12px 16px" }}>
+          <div style={{ color: palette.red, fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>⚠  ERROR HANDLING</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+            {[
+              "ImportError → pip install & retry",
+              "Vision fallback unavailable → ANTHROPIC_API_KEY needed",
+              "PDF parse failure → report to Sarah",
+              "Auth failure on clone → PAT expired, ask Sarah",
+              "Log file missing → auto-created on next run",
+            ].map(e => (
+              <div key={e} style={{ color: palette.muted, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace" }}>• {e}</div>
+            ))}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<BookkeepingWorkflow />);
+</script>
+</body>
+</html>

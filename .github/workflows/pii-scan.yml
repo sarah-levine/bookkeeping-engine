@@ -1,0 +1,19 @@
+name: pii-scan
+
+# Safety net: fails the build if a real-looking name, account number, or
+# non-approved email reaches the repo. Tune via tools/pii_allowlist.txt.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pii-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run PII scan
+        run: python3 tools/pii_scan.py

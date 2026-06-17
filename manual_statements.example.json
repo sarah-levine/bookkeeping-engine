@@ -1,0 +1,22 @@
+{
+  "active": "example_jan_2026",
+  "statements": {
+    "example_jan_2026": {
+      "statement_type": "bmo_checking",
+      "client_name": "Example Client LLC",
+      "statement_period": "January 1 - January 31, 2026",
+      "beginning_balance": "10000.00",
+      "ending_balance": "10500.00",
+      "service_fees": "0.00",
+      "credits": [
+        { "date": "01/05/26", "vendor": "EXAMPLE DEPOSIT", "amount": "1500.00" }
+      ],
+      "checks": [
+        { "date": "01/10/26", "number": "1001", "vendor": "", "amount": "500.00" }
+      ],
+      "debits": [
+        { "date": "01/15/26", "vendor": "EXAMPLE ACH DEBIT", "amount": "500.00" }
+      ]
+    }
+  }
+}

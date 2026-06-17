@@ -1,0 +1,141 @@
+name: Morning Reconciliation Digest
+
+on:
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Log date to send (YYYY-MM-DD). Defaults to yesterday."
+        required: false
+        default: ""
+      cc:
+        description: "CC the configured cc_recipient on this manual send."
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  send-digest:
+    name: Send Morning Digest Email
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Clone Bookkeeping-clients (private logs + configs)
+        env:
+          PAT_BOOKKEEPING: ${{ secrets.PAT_BOOKKEEPING }}
+        run: |
+          git clone "https://x-access-token:${PAT_BOOKKEEPING}@github.com/sarah-levine/Bookkeeping-clients.git" /tmp/Bookkeeping-clients
+          echo "BOOKKEEPING_CLIENTS_DIR=/tmp/Bookkeeping-clients" >> $GITHUB_ENV
+
+      - name: Check for yesterday's or today's logs
+        id: check_log
+        run: |
+          LOG_FILE="$BOOKKEEPING_CLIENTS_DIR/recon_log.json"
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            LOG_DATE="${{ github.event.inputs.date }}"
+            TODAY="${LOG_DATE}"
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            LOG_DATE=$(date -d "yesterday" +%Y-%m-%d)
+            TODAY=$(date +%Y-%m-%d)
+          else
+            YESTERDAY=$(date -d "yesterday" +%Y-%m-%d)
+            TODAY=$(date +%Y-%m-%d)
+            LOG_DATE="${YESTERDAY},${TODAY}"
+          fi
+          echo "log_date=${LOG_DATE}" >> $GITHUB_OUTPUT
+          GREP_PATTERN="${LOG_DATE//,/|}"
+          if [ ! -f "$LOG_FILE" ]; then
+            echo "has_log=false" >> $GITHUB_OUTPUT
+            echo "⏭️ recon_log.json not found — skipping digest."
+          elif grep -qE "$GREP_PATTERN" "$LOG_FILE"; then
+            echo "has_log=true" >> $GITHUB_OUTPUT
+            echo "✅ recon_log.json has entries for ${LOG_DATE}"
+          else
+            echo "has_log=false" >> $GITHUB_OUTPUT
+            echo "⏭️ No entries for ${LOG_DATE} — skipping digest."
+          fi
+
+      - name: Write private config (fallback if not in the private repo clone)
+        env:
+          DIGEST_CONFIG: ${{ secrets.DIGEST_CONFIG }}
+        run: |
+          if [ -n "$DIGEST_CONFIG" ] && [ ! -f "$BOOKKEEPING_CLIENTS_DIR/digest_config.json" ]; then
+            echo "$DIGEST_CONFIG" > "$BOOKKEEPING_CLIENTS_DIR/digest_config.json"
+          fi
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send digest email
+        if: steps.check_log.outputs.has_log == 'true'
+        env:
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+        run: |
+          SCHEDULED_FLAG=""
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.cc }}" = "true" ]; then
+            SCHEDULED_FLAG="--scheduled"
+          fi
+          python send_morning_digest.py --date ${{ steps.check_log.outputs.log_date }} $SCHEDULED_FLAG
+
+      - name: Upload log artifact (for debugging)
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: recon-log-${{ github.run_id }}
+          path: /tmp/Bookkeeping-clients/recon_log.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  cc-due-check:
+    name: CC Statement Due Today
+    runs-on: ubuntu-latest
+    # Runs daily at 8am PT (16:00 UTC) — same time as morning digest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Clone Bookkeeping-clients (private logs + configs)
+        env:
+          PAT_BOOKKEEPING: ${{ secrets.PAT_BOOKKEEPING }}
+        run: |
+          git clone "https://x-access-token:${PAT_BOOKKEEPING}@github.com/sarah-levine/Bookkeeping-clients.git" /tmp/Bookkeeping-clients
+          echo "BOOKKEEPING_CLIENTS_DIR=/tmp/Bookkeeping-clients" >> $GITHUB_ENV
+
+      - name: Write private config (fallback if not in the private repo clone)
+        env:
+          DIGEST_CONFIG: ${{ secrets.DIGEST_CONFIG }}
+        run: |
+          if [ -n "$DIGEST_CONFIG" ] && [ ! -f "$BOOKKEEPING_CLIENTS_DIR/digest_config.json" ]; then
+            echo "$DIGEST_CONFIG" > "$BOOKKEEPING_CLIENTS_DIR/digest_config.json"
+          fi
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send CC-due action items email (if applicable)
+        env:
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+        run: |
+          SCHEDULED_FLAG=""
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.cc }}" = "true" ]; then
+            SCHEDULED_FLAG="--scheduled"
+          fi
+          python send_morning_digest.py --cc-due $SCHEDULED_FLAG

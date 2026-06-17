@@ -1,0 +1,31 @@
+{
+  "spreadsheet_id": "YOUR_GOOGLE_SHEET_ID_HERE",
+  "sheet_name": "Sheet1",
+  "cell_map": {
+    "ACME_INC|bofa_checking": "B4",
+    "ACME_INC|bofa_credit": "C4",
+    "ACME_INC|payroll": "D4"
+  },
+  "client_key_map": {
+    "ACME_INC": "ACME_INC",
+    "ACME": "ACME_INC"
+  },
+  "acct_type_map": {
+    "citi_visa_costco": "citi_costco",
+    "wells_fargo_credit": "wf_visa",
+    "wells_fargo_checking": "checking",
+    "northern_trust_checking": "northern"
+  },
+  "client_names": {
+    "ACME_INC": "ACME INC"
+  },
+  "account_labels": {
+    "bofa_checking": "BofA Checking",
+    "bofa_credit": "BofA Credit Card",
+    "payroll": "Payroll"
+  },
+  "client_label_aliases": {
+    "ACME_INC": "Acme Inc",
+    "ACME": "Acme Inc"
+  }
+}

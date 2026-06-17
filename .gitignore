@@ -1,0 +1,37 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.egg-info/
+dist/
+build/
+credentials.json
+
+# Client configs hold real data — keep them out of the public repo.
+# Real configs live in the private clients directory (see clients/README.md).
+clients/*.json
+!clients/example_client.json
+!clients/_schema.json
+
+# Test fixtures pulled from Google Drive — never commit real PDFs or the
+# manifest that maps them to clients.
+tests/fixtures_manifest.json
+tests/.fixture_cache/
+
+# Manually-keyed statement data holds real client transactions.
+manual_statements.json
+
+# Sheets cell-map / client-label tables hold client names.
+sheets_config.json
+
+# Morning digest config holds client names, account lists, and email addresses.
+digest_config.json
+
+# Payroll/reconciliation run artifacts hold real client financial data.
+output/
+
+# Operational log files hold real client names + financial data. They now live
+# in the private clients location (see log_utils.get_logs_dir), not this repo.
+recon_log.json
+reconciliation_log.csv
+payroll_log.csv

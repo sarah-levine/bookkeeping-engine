@@ -1,0 +1,29 @@
+{
+  "_comment": [
+    "Maps each statement format to a Google Drive fixture PDF.",
+    "Copy this file to fixtures_manifest.json (gitignored) and fill in real",
+    "Drive file IDs. Share the fixture PDFs (or their folder) with the service",
+    "account's client_email so the test harness can download them.",
+    "",
+    "Each entry:",
+    "  name          unique label for the test",
+    "  file_id       Google Drive file ID (the part after /d/ in the share URL)",
+    "  format        statement type key (matches parser_map in reconcile_comprehensive.py)",
+    "  expect_client optional: client_name the parser should detect (null to skip the check)"
+  ],
+  "statements": [
+    { "name": "bofa_checking_sample",   "file_id": "REPLACE_ME", "format": "bofa_checking",           "expect_client": null },
+    { "name": "bofa_credit_sample",     "file_id": "REPLACE_ME", "format": "bofa_credit",             "expect_client": null },
+    { "name": "citi_checking_sample",   "file_id": "REPLACE_ME", "format": "citi_checking",           "expect_client": null },
+    { "name": "citi_costco_sample",     "file_id": "REPLACE_ME", "format": "citi_visa_costco",         "expect_client": null },
+    { "name": "chase_ink_sample",       "file_id": "REPLACE_ME", "format": "chase_ink",               "expect_client": null },
+    { "name": "chase_united_sample",    "file_id": "REPLACE_ME", "format": "chase_united",            "expect_client": null },
+    { "name": "amex_sample",            "file_id": "REPLACE_ME", "format": "amex",                    "expect_client": null },
+    { "name": "amex_checking_sample",   "file_id": "REPLACE_ME", "format": "amex_checking",           "expect_client": null },
+    { "name": "bmo_checking_sample",    "file_id": "REPLACE_ME", "format": "bmo_checking",            "expect_client": null },
+    { "name": "usbank_checking_sample", "file_id": "REPLACE_ME", "format": "usbank_checking",         "expect_client": null },
+    { "name": "wells_fargo_credit",     "file_id": "REPLACE_ME", "format": "wells_fargo_credit",      "expect_client": null },
+    { "name": "wells_fargo_checking",   "file_id": "REPLACE_ME", "format": "wells_fargo_checking",    "expect_client": null },
+    { "name": "northern_trust_sample",  "file_id": "REPLACE_ME", "format": "northern_trust_checking", "expect_client": null }
+  ]
+}

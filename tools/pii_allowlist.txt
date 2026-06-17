@@ -1,0 +1,87 @@
+# pii_allowlist.txt — tokens pii_scan.py treats as known-safe.
+# One token or phrase per line; case-insensitive; '#' starts a comment.
+# Adding something here is a deliberate "this is generic or fictional" decision.
+# Real client / person / counterparty names must NOT be added — scrub those.
+
+# ── Banks / card issuers / products ─────────────────────────────────
+bank america american express national wells fargo bofa bmo citi citibank
+citicards citictp citibusiness chase jpmorgan amex northern trust us usbank
+costco visa mastercard master card sapphire ink freedom united club mileageplus
+ultimate rewards anywhere preferred reserve platinum gold green silver unlimited
+business advantage cash fundamentals relationship essential premium checking
+savings money market imma investment
+
+# ── Payment processors / national vendors / services ────────────────
+square stripe paypal venmo zelle gusto adp apple tmobile comcast xfinity amazon
+mktpl mktpla mktplace pmts ecomm whse saloncentric unitehairpro primo brands
+waterserv pge pacific gas electric applepay eftps
+
+# ── Government / payroll-tax line items ─────────────────────────────
+irs edd employment devel fedsocsec fedmedcare fedfuta fedfit fedfica casui casdi
+casit medcare socsec futa suta nettax netpay simpleira ira usatax usataxpymt
+eftpmt eftpay tax taxes wage pay payr payroll
+
+# ── Generic banking / statement vocabulary ─────────────────────────
+wire transfer domestic incoming outgoing online banking ach debit credit deposit
+withdrawal withdrawals deposits debits credits payment payments autopay
+electronic interest finance charge charges annual fee fees balance previous new
+total totals account ending closing date statement cardmember service cardholder
+summary description vendor payee amount check checks paid presented conventionally
+purchase purchases refund refunds return returns wireless automatic charged
+advances advance standard undeposited sales receipts transaction transactions
+history overdraft periodic teller atm pos eft micr instant late returned monthly
+days billing period inquiries percentage subject minimum limit available indn
+fsdd trns endtrns register inventory value item mismatch journal memo note number
+splitting combined analysis detail details format tipped professional departments
+distribution net gross epayment usa intl na
+
+# ── Adopted placeholders (fictional stand-ins — safe) ──────────────
+acme bravo charlie delta echo foxtrot golf hotel salon studio academy realty
+appliance dental capital partners hcp west contractors jane doe john roe example
+client customer contoso fabrikam landlord contract services outside beta gamma
+t&t fc club surf
+
+# ── Project's own generic labels ───────────────────────────────────
+client cardholder owner recipient counterparty bookkeeping sarah operator
+
+# ── Code / structural / tooling words ──────────────────────────────
+base parser parsers registry detection report helpers utilities log
+reconciliation comparison quickbooks qb pending clean issues found error
+handling critical rules verify output mode columns final shared setup interactive
+approval entry point silent failures write post main manual sender tracker scopes
+native directly exactly multiline dotall ignorecase true false match initiate
+both after before last back only your this that see from order no not name type
+reference formats parse trans svcs streamlined warning confirmation checked agency
+admin returns none convert how it works basic usage field staff unknown other
+message messages visit
+
+# ── Fonts / external products / file formats ───────────────────────
+ibm plex mono segoe ui roboto google sheet sheets drive gmail smtp api github
+actions json schema csv html pdf ocr pymupdf pytesseract tesseract http https
+ansi claude vision anthropic
+
+# ── Cities / generic geo that appear in vendor-stripping logic ─────
+san jose california ca
+
+# ── Statement/report vocabulary, status strings, code & test tokens ──
+activity americanexpress ask auto balanced beginning bill brand businesschecking cable city ckg
+coffee com company continued corp crd cred dd deducted doctype downtown due
+earned fail failed fin home inc incorporated insur lanczos llc local lot
+mazon missing mktp mm must next nj of office on out overwrite
+page parking pass passed pgande plain positive print program readme received sports
+ref requires restaurant same shop signify single sjc skip some sq staples
+svc tests thank to totally unmatched uppercase usps web www xxxx xxxxxxxxxxxxxxx
+year you yyyy
+
+# ── Fictional/example & infra emails and masked example accounts ──
+*****0000
+*****1234
+*0000
+*1234
+*1944
+bookkeeping@sarah-levine.com
+something@bookkeeping-498118.iam.gserviceaccount.com
+servicepower
+shipping
+town
+store

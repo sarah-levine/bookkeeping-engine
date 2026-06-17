@@ -1,0 +1,236 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/sarah-levine/Bookkeeping/clients/_schema.json",
+  "title": "Bookkeeping client config",
+  "description": "Configuration for one client of the reconciliation + payroll engine. One file per client. Real client files live in a private location (see clients/README.md); this schema documents the expected structure. Additional payroll-specific account fields are permitted beyond those listed here.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["client_name", "canonical_name"],
+  "properties": {
+    "client_name": {
+      "type": "string",
+      "description": "Exact legal/display name as it appears on statements."
+    },
+    "canonical_name": {
+      "type": "string",
+      "description": "UPPERCASE key used for client detection and reporting."
+    },
+    "aliases": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Other names the client appears as on statements (e.g. cardholder or DBA names). Matched case-insensitively."
+    },
+    "bank_account": {
+      "type": "string",
+      "description": "Human-readable label of the primary bank/GL account, e.g. \"1010 · Checking #1234\". May be empty."
+    },
+    "bofa_account_number": {
+      "type": "string",
+      "description": "Optional full account number used to disambiguate Bank of America statements."
+    },
+    "company_code": {
+      "type": "string",
+      "description": "Optional payroll provider company code (e.g. ADP) used to match payroll statements."
+    },
+    "statement_types": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "bofa_checking", "bofa_credit", "bofa_savings",
+          "wells_fargo_checking", "wells_fargo_credit",
+          "citi_checking", "citi_savings", "citi_visa_costco",
+          "chase_ink", "chase_sapphire", "chase_sapphire_preferred", "chase_sapphire_reserve", "chase_united",
+          "amex", "amex_checking",
+          "usbank_checking",
+          "northern_trust_checking",
+          "bmo_checking"
+        ]
+      },
+      "description": "Which parsers apply to this client's statements."
+    },
+    "account_endings": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Map a card/account last-4 to the account_type to use, e.g. {\"3551\": \"chase_sapphire\"}. Disambiguates statements whose product name only appears in a logo image (e.g. Chase Sapphire vs Ink) when a client holds multiple cards from the same bank."
+    },
+    "cardholders": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "For multi-cardholder credit-card statements (e.g. AmEx): the list of cardholder names."
+    },
+    "payroll_vendors": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Keywords that route a transaction into the Payroll section."
+    },
+    "cc_keywords": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Keywords that identify credit-card payment transactions. May include the card\u2019s last four digits to catch transfers to a specific card."
+    },
+    "internal_transfer_keywords": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "AmEx credits matching any of these strings (case-insensitive) are treated as internal transfers between the client's own entities and listed individually rather than aggregated. Keeps counterparty names out of code."
+    },
+    "bofa_credits_account": {
+      "type": "string",
+      "description": "Optional Bank of America account ending (e.g. \"1234\") that marks a separate 'Payments and Other Credits' section in the statement. Omit for statements without such a section."
+    },
+    "vendor_rules": {
+      "type": "array",
+      "description": "Ordered rules that normalize raw transaction descriptions to clean vendor names. First matching rule wins.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["normalize_to"],
+        "properties": {
+          "contains": { "type": "string", "description": "Substring that must appear in the description (case-insensitive)." },
+          "starts_with": { "type": "string", "description": "Description must start with this string (case-insensitive)." },
+          "also_contains": { "type": "string", "description": "Additional required substring." },
+          "also_contains2": { "type": "string", "description": "A second additional required substring." },
+          "also_contains_any": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "At least one of these substrings must appear."
+          },
+          "normalize_to": { "type": "string", "description": "Clean vendor name to display." },
+          "display_suffix": { "type": "string", "description": "Optional suffix appended in parentheses, e.g. result becomes \"Vendor (suffix)\"." }
+        }
+      }
+    },
+    "departments": {
+      "type": "object",
+      "description": "Optional payroll department map: department code → { name, mode }. Drives how employees in that department are journaled.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "mode": { "type": "string", "description": "How this department is journaled, e.g. \"admin_individual\" or \"coaches_rollup\"." }
+        }
+      }
+    },
+    "special_employees": {
+      "type": "object",
+      "description": "Optional per-employee payroll overrides keyed by an employee/payee identifier. Each entry either names a single GL account or splits the amount across accounts. Add a `match` rule and `display_name` so the engine can identify and label the payee from config instead of hardcoded names in code.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "match": {
+            "type": "object",
+            "description": "How to identify this payee among parsed employees. Name matching ignores spaces.",
+            "properties": {
+              "dept": { "type": "string", "description": "Department code the payee must be in, e.g. \"001\"." },
+              "name_contains": { "type": "string", "description": "Substring that must appear in the payee's name (spaces ignored)." }
+            }
+          },
+          "display_name": { "type": "string", "description": "Name to show on the journal rows for this payee." },
+          "placement": {
+            "type": "string",
+            "enum": ["before_admin", "after_admin"],
+            "description": "Whether this payee's rows are emitted before or after the regular per-individual admin block. Defaults to \"after_admin\"."
+          },
+          "account": { "type": "string", "description": "Single GL account for this payee." },
+          "splits": {
+            "type": "array",
+            "description": "Split the payee's amount across accounts. Use the literal string \"remainder\" for the last split's amount.",
+            "items": {
+              "type": "object",
+              "required": ["account", "amount"],
+              "properties": {
+                "account": { "type": "string" },
+                "amount": {
+                  "oneOf": [
+                    { "type": "number" },
+                    { "type": "string", "enum": ["remainder"] }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "contractors_1099": {
+      "type": "array",
+      "description": "ADP 1099 contractor definitions for payroll parsing. Each entry maps a contractor name pattern to a role used in journal routing.",
+      "items": {
+        "type": "object",
+        "required": ["name_contains", "role"],
+        "properties": {
+          "name_contains": { "type": "string", "description": "Substring of the contractor's name as it appears in the ADP PDF (spaces ignored)." },
+          "role": { "type": "string", "description": "Journal routing role, e.g. 'rent' or 'wc'." },
+          "skip_if_zero_net_pay": { "type": "boolean", "description": "If true, omit this contractor from the journal entry when ADP reports $0.00 net pay (paid outside ADP that period)." }
+        }
+      }
+    },
+    "contractor_display_name": {
+      "type": "string",
+      "description": "Display name used in journal rows for the 1099 contractor split (if applicable)."
+    },
+    "check_payee_overrides": {
+      "type": "object",
+      "description": "Manual check-number → payee name mappings used when OCR cannot extract a payee from a check image. Applies to all checking-account parsers (BofA, Citi, WF, BMO, USBank, etc.). Keys are check numbers as strings; values are the payee display name.",
+      "additionalProperties": { "type": "string" }
+    },
+    "description_strip_suffixes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Strings stripped from the trailing end of raw transaction descriptions before vendor normalization. Applied in order; useful for removing location or cardholder noise appended by some banks. Case-insensitive."
+    },
+    "statement_access_accounts": {
+      "type": "object",
+      "description": "Optional notes on how statement access is obtained per source.",
+      "additionalProperties": { "type": "string" }
+    },
+    "tracker_key": {
+      "type": "string",
+      "description": "Canonical ALL_CAPS_UNDERSCORE key used in sheets_config.json and reconciliation_log.csv. When present, _normalize_client_key() uses this instead of the hardcoded fallback table in log_utils.py."
+    },
+    "payroll_key": {
+      "type": "string",
+      "description": "Short convenience key for `python payroll.py <key> <pdf>` dispatch (e.g. \"acme\"). When set alongside payroll_format, payroll.py resolves the format and config file from this client without a hardcoded table."
+    },
+    "payroll_format": {
+      "type": "string",
+      "enum": [
+        "adp_payroll_professional",
+        "adp_payroll_1099",
+        "adp_payroll_details",
+        "adp_payroll_tipped",
+        "adp_payroll_departments",
+        "adp_labor_distribution"
+      ],
+      "description": "Which payroll journal format this client uses. When set, payroll.py can dispatch by client key without a hardcoded map entry."
+    },
+    "features": {
+      "type": "object",
+      "description": "Optional per-client feature flags. These drive client-specific parser/journal behavior from config instead of hardcoded client-name checks in the code. Unknown flags are permitted.",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "transaction_aggregations": {
+      "type": "array",
+      "description": "Roll up many transactions matching a keyword into a single line (e.g. a recurring platform's many transfers). Keeps specific vendor/brand names in client config, never hardcoded in parser code. Applied by the BofA checking and AmEx checking parsers to both deposits and withdrawals.",
+      "items": {
+        "type": "object",
+        "required": ["match", "label"],
+        "additionalProperties": false,
+        "properties": {
+          "match": {
+            "type": "string",
+            "description": "Case-insensitive substring matched against the transaction description; every matching transaction is collapsed into one line."
+          },
+          "label": {
+            "type": "string",
+            "description": "Display name for the single aggregated line (used on checking statements)."
+          },
+          "card_label": {
+            "type": "string",
+            "description": "Optional display name for the aggregated line on card statements (AmEx). Defaults to `label` when omitted."
+          }
+        }
+      }
+    }
+  }
+}

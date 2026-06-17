@@ -1,0 +1,56 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Run test suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pytest -r requirements.txt
+
+      - name: Write private config (if available)
+        env:
+          DIGEST_CONFIG: ${{ secrets.DIGEST_CONFIG }}
+        run: |
+          if [ -n "$DIGEST_CONFIG" ]; then
+            echo "$DIGEST_CONFIG" > digest_config.json
+          fi
+
+      - name: Run unit tests (no fixtures needed)
+        run: python -m pytest tests/test_log_pipeline.py tests/test_config_and_logs.py -v
+
+      - name: Run fixture/integration tests (skip without private fixtures)
+        env:
+          GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+        run: python -m pytest tests/test_parsers.py tests/test_payroll.py tests/test_end_to_end.py -v --tb=short
+        continue-on-error: true
+
+      - name: Validate workflow YAML
+        run: |
+          python3 -c "
+          import yaml, pathlib, sys
+          errors = []
+          for p in pathlib.Path('.github/workflows').glob('*.yml'):
+              try:
+                  yaml.safe_load(p.read_text())
+              except yaml.YAMLError as e:
+                  errors.append(f'{p}: {e}')
+          if errors:
+              print('YAML errors:')
+              for e in errors: print(' ', e)
+              sys.exit(1)
+          print(f'All workflow YAML files valid.')
+          "

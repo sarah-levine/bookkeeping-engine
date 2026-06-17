@@ -1,0 +1,83 @@
+{
+  "client_name": "Acme Inc",
+  "aliases": [
+    "Acme",
+    "ACME INC",
+    "ACME INCORPORATED"
+  ],
+  "canonical_name": "ACME INC",
+  "bank_account": "1010 · Checking #0000",
+  "statement_types": [
+    "bofa_checking",
+    "amex"
+  ],
+  "cardholders": [
+    "JANE DOE",
+    "JOHN ROE"
+  ],
+  "payroll_vendors": [
+    "ADP WAGE PAY",
+    "ADP TAX",
+    "ADP PAY-BY-PAY"
+  ],
+  "cc_keywords": [
+    "AMERICAN EXPRESS PAYMENT"
+  ],
+  "internal_transfer_keywords": [
+    "FC EXAMPLE ACADEMY"
+  ],
+  "bofa_credits_account": "0000",
+  "vendor_rules": [
+    { "contains": "COMCAST", "normalize_to": "Comcast/Xfinity" },
+    { "contains": "PGANDE", "normalize_to": "PG&E" },
+    { "contains": "AMAZON", "normalize_to": "Amazon" },
+    { "starts_with": "USPS", "normalize_to": "USPS" },
+    {
+      "contains": "STAPLES",
+      "also_contains_any": ["OFFICE", "PRINT"],
+      "normalize_to": "Staples - Office Supplies"
+    },
+    {
+      "contains": "INTEREST CHARGE",
+      "normalize_to": "Interest Charge",
+      "display_suffix": "Amex"
+    }
+  ],
+  "description_strip_suffixes": [
+    "EXAMPLE CITY"
+  ],
+  "departments": {
+    "001": { "name": "Administrative", "mode": "admin_individual" },
+    "002": { "name": "Field Staff", "mode": "coaches_rollup" }
+  },
+  "special_employees": {
+    "Doe,Jane": {
+      "match": { "dept": "001", "name_contains": "Doe" },
+      "display_name": "Jane Doe",
+      "placement": "before_admin",
+      "splits": [
+        { "account": "Contract Services:Outside Contract Services", "amount": 500.0 },
+        { "account": "Operations:Field Staff", "amount": "remainder" }
+      ]
+    },
+    "Acme Holdings LLC": {
+      "match": { "dept": "001", "name_contains": "AcmeHoldings" },
+      "display_name": "Acme Holdings LLC",
+      "placement": "after_admin",
+      "account": "Contract Services:Accounting And Tax"
+    }
+  },
+  "check_payee_overrides": {
+    "1042": "Landlord LLC",
+    "1043": "Pacific Gas & Electric"
+  },
+  "payroll_key": "acme",
+  "payroll_format": "adp_payroll_details",
+  "transaction_aggregations": [
+    {
+      "match": "ACME SPORTS",
+      "label": "Acme Sports",
+      "card_label": "Acme Sports (PROGRAM FEES)"
+    }
+  ]
+}

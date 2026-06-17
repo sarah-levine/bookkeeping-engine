@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1180" viewBox="0 0 900 1180" font-family="-apple-system, Segoe UI, Roboto, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#131f38"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="1180" fill="url(#bg)"/>
+
+  <!-- Header -->
+  <text x="450" y="52" fill="#e2e8f0" font-size="26" font-weight="800" text-anchor="middle">📒 Bookkeeping Reconciliation Pipeline</text>
+  <text x="450" y="78" fill="#94a3b8" font-size="13" text-anchor="middle">From raw bank PDFs to a morning digest email and a live Google Sheet tracker — end to end.</text>
+
+  <!-- helper styles via repeated attrs -->
+  <!-- STAGE 1 -->
+  <g>
+    <rect x="70" y="100" width="760" height="118" rx="14" fill="#1e293b" stroke="#334155"/>
+    <rect x="92" y="118" width="32" height="32" rx="9" fill="#3b82f6"/>
+    <text x="108" y="140" fill="#fff" font-size="15" font-weight="800" text-anchor="middle">1</text>
+    <text x="136" y="140" fill="#e2e8f0" font-size="16" font-weight="700">Inputs — Bank &amp; Payroll PDFs</text>
+    <text x="808" y="139" fill="#94a3b8" font-size="11" text-anchor="end">downloaded each month</text>
+    <!-- cards -->
+    <rect x="92" y="158" width="232" height="48" rx="9" fill="#273449" stroke="#334155"/>
+    <text x="104" y="178" fill="#60a5fa" font-size="12" font-weight="700">Bank statements</text>
+    <text x="104" y="195" fill="#94a3b8" font-size="10">BofA, Citi, Chase, BMO, Amex…</text>
+    <rect x="334" y="158" width="232" height="48" rx="9" fill="#273449" stroke="#334155"/>
+    <text x="346" y="178" fill="#60a5fa" font-size="12" font-weight="700">Payroll PDFs</text>
+    <text x="346" y="195" fill="#94a3b8" font-size="10">ADP layouts (1099, tipped, depts…)</text>
+    <rect x="576" y="158" width="232" height="48" rx="9" fill="#273449" stroke="#334155"/>
+    <text x="588" y="178" fill="#60a5fa" font-size="12" font-weight="700">Client config (JSON)</text>
+    <text x="588" y="195" fill="#94a3b8" font-size="10">drives detection &amp; rules</text>
+  </g>
+  <text x="450" y="236" fill="#334155" font-size="22" text-anchor="middle">▼</text>
+
+  <!-- STAGE 2 -->
+  <g>
+    <rect x="70" y="248" width="760" height="120" rx="14" fill="#1e293b" stroke="#334155"/>
+    <rect x="92" y="266" width="32" height="32" rx="9" fill="#06b6d4"/>
+    <text x="108" y="288" fill="#fff" font-size="15" font-weight="800" text-anchor="middle">2</text>
+    <text x="136" y="288" fill="#e2e8f0" font-size="16" font-weight="700">Parsing &amp; Reconciliation</text>
+    <text x="808" y="287" fill="#94a3b8" font-size="11" text-anchor="end">reconcile_comprehensive.py · payroll.py</text>
+    <rect x="92" y="306" width="352" height="50" rx="9" fill="#273449" stroke="#334155"/>
+    <text x="104" y="326" fill="#22d3ee" font-size="12" font-weight="700">Statement parsers</text>
+    <text x="104" y="344" fill="#94a3b8" font-size="10">per-bank, Decimal precision, vendor aggregation</text>
+    <rect x="456" y="306" width="352" height="50" rx="9" fill="#273449" stroke="#334155"/>
+    <text x="468" y="326" fill="#22d3ee" font-size="12" font-weight="700">Payroll runners</text>
+    <text x="468" y="344" fill="#94a3b8" font-size="10">format-based, wired via dispatch table</text>
+  </g>
+  <text x="450" y="386" fill="#334155" font-size="22" text-anchor="middle">▼</text>
+
+  <!-- STAGE 3 -->
+  <g>
+    <rect x="70" y="398" width="760" height="116" rx="14" fill="#1e293b" stroke="#334155"/>
+    <rect x="92" y="416" width="32" height="32" rx="9" fill="#f59e0b"/>
+    <text x="108" y="438" fill="#fff" font-size="15" font-weight="800" text-anchor="middle">3</text>
+    <text x="136" y="438" fill="#e2e8f0" font-size="16" font-weight="700">Logs — The Source of Truth</text>
+    <text x="808" y="437" fill="#94a3b8" font-size="11" text-anchor="end">written on every confirmed run</text>
+    <rect x="92" y="456" width="352" height="48" rx="9" fill="#273449" stroke="#334155"/>
+    <text x="104" y="476" fill="#fbbf24" font-size="12" font-weight="700">reconciliation_log.csv</text>
+    <text x="104" y="493" fill="#94a3b8" font-size="10">dated history per account — feeds the tracker</text>
+    <rect x="456" y="456" width="352" height="48" rx="9" fill="#273449" stroke="#334155"/>
+    <text x="468" y="476" fill="#fbbf24" font-size="12" font-weight="700">recon_log.json</text>
+    <text x="468" y="493" fill="#94a3b8" font-size="10">run status + manual notes — feeds email body</text>
+  </g>
+  <text x="450" y="532" fill="#334155" font-size="22" text-anchor="middle">▼</text>
+
+  <!-- STAGE 4 -->
+  <g>
+    <rect x="70" y="544" width="760" height="118" rx="14" fill="#1e293b" stroke="#475569"/>
+    <rect x="92" y="562" width="32" height="32" rx="9" fill="#a855f7"/>
+    <text x="108" y="584" fill="#fff" font-size="15" font-weight="800" text-anchor="middle">4</text>
+    <text x="136" y="584" fill="#e2e8f0" font-size="16" font-weight="700">Unified Date Logic</text>
+    <text x="808" y="583" fill="#94a3b8" font-size="11" text-anchor="end">get_tracker_date()</text>
+    <rect x="92" y="602" width="716" height="48" rx="9" fill="#1a1330" stroke="#4c1d95"/>
+    <text x="104" y="622" fill="#c084fc" font-size="12" font-weight="700">One function, two outputs</text>
+    <text x="104" y="639" fill="#94a3b8" font-size="10">Email AND Google Sheet call the same resolver → the sheet can never drift from the email.</text>
+  </g>
+  <text x="450" y="680" fill="#334155" font-size="22" text-anchor="middle">▼</text>
+
+  <!-- STAGE 5 -->
+  <g>
+    <rect x="70" y="692" width="760" height="150" rx="14" fill="#1e293b" stroke="#334155"/>
+    <rect x="92" y="710" width="32" height="32" rx="9" fill="#22c55e"/>
+    <text x="108" y="732" fill="#fff" font-size="15" font-weight="800" text-anchor="middle">5</text>
+    <text x="136" y="732" fill="#e2e8f0" font-size="16" font-weight="700">Outputs</text>
+    <text x="808" y="731" fill="#94a3b8" font-size="11" text-anchor="end">what you actually see</text>
+    <rect x="92" y="750" width="352" height="78" rx="9" fill="#273449" stroke="#334155"/>
+    <text x="104" y="772" fill="#4ade80" font-size="12" font-weight="700">📧 Morning digest email</text>
+    <text x="104" y="790" fill="#94a3b8" font-size="10">HTML email: runs, manual notes, and a</text>
+    <text x="104" y="804" fill="#94a3b8" font-size="10">color-coded tracker grid with blocking rules.</text>
+    <text x="104" y="818" fill="#94a3b8" font-size="10">Sent via Gmail SMTP.</text>
+    <rect x="456" y="750" width="352" height="78" rx="9" fill="#273449" stroke="#334155"/>
+    <text x="468" y="772" fill="#4ade80" font-size="12" font-weight="700">📊 Google Sheet</text>
+    <text x="468" y="790" fill="#94a3b8" font-size="10">Tracker grid — latest date per account.</text>
+    <text x="468" y="804" fill="#94a3b8" font-size="10">Recon Log tab — append-only audit trail;</text>
+    <text x="468" y="818" fill="#94a3b8" font-size="10">never silently skips.</text>
+  </g>
+
+  <!-- Design principles note -->
+  <rect x="70" y="876" width="760" height="160" rx="12" fill="#0b1424" stroke="#334155"/>
+  <text x="92" y="906" fill="#e2e8f0" font-size="14" font-weight="700">🔑 Design principles</text>
+  <text x="92" y="932" fill="#94a3b8" font-size="11">• Config over code — client behavior lives in JSON, not hardcoded names.</text>
+  <text x="92" y="956" fill="#94a3b8" font-size="11">• Key normalization — name/account variants collapse to canonical keys before the sheet lookup.</text>
+  <text x="92" y="980" fill="#94a3b8" font-size="11">• Single date authority — get_tracker_date() is the one place dates are resolved.</text>
+  <text x="92" y="1004" fill="#94a3b8" font-size="11">• Append-only safety net — Recon Log records every run even with no matching grid cell.</text>
+
+  <text x="450" y="1060" fill="#94a3b8" font-size="11" text-anchor="middle">Bookkeeping pipeline · sarah-levine/Bookkeeping · generated diagram</text>
+</svg>

@@ -1,0 +1,59 @@
+{
+  "email": {
+    "sender": "you@example.com",
+    "recipient": "you@example.com",
+    "cc_recipient": "accountant@example.com",
+    "sheet_url": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0"
+  },
+
+  "client_display_names": {
+    "acme inc": "Acme",
+    "acme inc — admin": "Acme",
+    "acme_inc": "Acme"
+  },
+
+  "account_display_names": {
+    "amex": "Amex CC",
+    "amex_checking": "Amex Checking",
+    "bofa_checking": "BofA Checking",
+    "bofa_savings": "BofA Savings",
+    "bofa_credit": "BofA Credit Card",
+    "chase_united": "Chase United",
+    "chase_sapphire": "Chase Sapphire",
+    "chase_ink": "Chase Ink",
+    "citi_checking": "Citi Checking",
+    "citi_savings": "Citi Savings",
+    "citi_costco": "Citi Costco Visa",
+    "bmo_checking": "BMO Checking",
+    "bmo_savings": "BMO Savings",
+    "usbank_checking": "US Bank Checking",
+    "wf_visa": "WF Visa",
+    "northern": "Northern Trust",
+    "checking": "Checking",
+    "payroll": "Payroll"
+  },
+
+  "tracker": [
+    {
+      "client": "Acme",
+      "client_keys": ["ACME_INC"],
+      "accounts": [
+        {"label": "BofA Checking",    "key": "bofa_checking",  "fallback_date": "01/31/26"},
+        {"label": "BofA Savings",     "key": "bofa_savings",   "fallback_date": "01/31/26"},
+        {"label": "BofA Credit Card", "key": "bofa_credit",    "fallback_date": "01/15/26"},
+        {"label": "Payroll",          "key": "payroll",        "fallback_date": "01/31/26"}
+      ]
+    }
+  ],
+
+  "cc_blocking_rules": {
+    "Acme": {
+      "blocked": ["bofa_checking", "bofa_savings"],
+      "payroll_blocked": ["payroll"],
+      "checking_key": "bofa_checking",
+      "cc_blockers": [
+        {"key": "bofa_credit", "closing_day": 15}
+      ]
+    }
+  }
+}

@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bookkeeping Pipeline — How It Works</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-2: #273449;
+    --ink: #e2e8f0;
+    --muted: #94a3b8;
+    --line: #334155;
+    --blue: #3b82f6;
+    --green: #22c55e;
+    --amber: #f59e0b;
+    --purple: #a855f7;
+    --pink: #ec4899;
+    --cyan: #06b6d4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: linear-gradient(160deg, #0f172a 0%, #131f38 100%);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.5;
+    padding: 40px 20px 80px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 48px; }
+  header h1 { font-size: 30px; margin: 0 0 8px; font-weight: 800; letter-spacing: -0.5px; }
+  header p { color: var(--muted); margin: 0; font-size: 15px; }
+
+  .stage {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 24px;
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .stage-head {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
+  }
+  .badge {
+    width: 34px; height: 34px; border-radius: 9px; flex: 0 0 34px;
+    display: grid; place-items: center; font-weight: 800; font-size: 16px; color: #fff;
+  }
+  .stage-head h2 { font-size: 18px; margin: 0; font-weight: 700; }
+  .stage-head .sub { color: var(--muted); font-size: 13px; margin-left: auto; }
+
+  .cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  .card {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .card h3 { margin: 0 0 6px; font-size: 14px; font-weight: 700; }
+  .card p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .card code {
+    background: #0b1424; color: #93c5fd; padding: 1px 6px; border-radius: 5px;
+    font-size: 11.5px; font-family: 'SF Mono', Menlo, monospace;
+  }
+  .pill {
+    display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px;
+    border-radius: 20px; margin: 6px 6px 0 0; border: 1px solid var(--line);
+    color: var(--muted);
+  }
+
+  .arrow {
+    text-align: center; color: var(--line); font-size: 26px; line-height: 1; margin: 2px 0;
+    user-select: none;
+  }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 720px) { .split { grid-template-columns: 1fr; } }
+
+  .note {
+    margin-top: 40px; background: #0b1424; border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px 24px;
+  }
+  .note h3 { margin: 0 0 10px; font-size: 15px; }
+  .note ul { margin: 0; padding-left: 18px; }
+  .note li { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .note code { background: #1e293b; color: #93c5fd; padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 40px; }
+
+  /* color accents */
+  .c-blue   { background: var(--blue);   }
+  .c-green  { background: var(--green);  }
+  .c-amber  { background: var(--amber);  }
+  .c-purple { background: var(--purple); }
+  .c-pink   { background: var(--pink);   }
+  .c-cyan   { background: var(--cyan);   }
+  .t-blue { color:#60a5fa } .t-green{color:#4ade80} .t-amber{color:#fbbf24}
+  .t-purple{color:#c084fc} .t-pink{color:#f472b6} .t-cyan{color:#22d3ee}
+</style>
+</head>
+<body>
+<div style="position:fixed;top:12px;right:16px;z-index:50;font-size:12px">
+  <a href="skill-flow.html" style="color:#94a3b8;text-decoration:none;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:6px 12px">Skill flow diagram →</a>
+</div>
+<div class="wrap">
+  <header>
+    <h1>📒 Bookkeeping Reconciliation Pipeline</h1>
+    <p>From raw bank PDFs to a morning digest email and a live Google Sheet tracker — end to end.</p>
+  </header>
+
+  <!-- STAGE 1 -->
+  <div class="stage">
+    <div class="stage-head">
+      <div class="badge c-blue">1</div>
+      <h2>Inputs — Bank & Payroll PDFs</h2>
+      <span class="sub">downloaded each month</span>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <h3 class="t-blue">Bank statements</h3>
+        <p>Checking, savings &amp; credit-card PDFs from BofA, Citi, Chase, BMO, Amex, US Bank, Wells Fargo, Northern Trust.</p>
+      </div>
+      <div class="card">
+        <h3 class="t-blue">Payroll PDFs</h3>
+        <p>ADP payroll reports in several layouts (1099, details, tipped, departments, labor distribution, professional).</p>
+      </div>
+      <div class="card">
+        <h3 class="t-blue">Client config</h3>
+        <p>Per-client JSON in <code>clients/</code> drives detection, vendor normalization &amp; aggregation rules — no hardcoded client names.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">▼</div>
+
+  <!-- STAGE 2 -->
+  <div class="stage">
+    <div class="stage-head">
+      <div class="badge c-cyan">2</div>
+      <h2>Parsing &amp; Reconciliation</h2>
+      <span class="sub">reconcile_comprehensive.py · payroll.py</span>
+    </div>
+    <div class="split">
+      <div class="card">
+        <h3 class="t-cyan">Statement parsers</h3>
+        <p>Each bank has a parser (<code>parsers/*.py</code>) extending a shared base. Auto-detects statement type, extracts transactions, aggregates by vendor with <code>Decimal</code> precision, and reads balances.</p>
+        <span class="pill">bofa</span><span class="pill">citi</span><span class="pill">chase</span>
+        <span class="pill">bmo</span><span class="pill">amex</span><span class="pill">usbank</span>
+        <span class="pill">wells_fargo</span><span class="pill">northern_trust</span>
+      </div>
+      <div class="card">
+        <h3 class="t-cyan">Payroll runners</h3>
+        <p>Format-based functions in <code>payroll_clients/</code> wired by a dispatch table using <code>functools.partial</code> to inject each client's config.</p>
+        <span class="pill">adp_payroll_1099</span><span class="pill">adp_payroll_details</span>
+        <span class="pill">adp_payroll_tipped</span><span class="pill">adp_payroll_departments</span>
+        <span class="pill">adp_labor_distribution</span><span class="pill">adp_payroll_professional</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">▼</div>
+
+  <!-- STAGE 3 -->
+  <div class="stage">
+    <div class="stage-head">
+      <div class="badge c-amber">3</div>
+      <h2>Logs — The Source of Truth</h2>
+      <span class="sub">written on every confirmed run</span>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <h3 class="t-amber">reconciliation_log.csv</h3>
+        <p>One row per reconciled account: client, account type, statement date, balances, source. The dated history the tracker reads from.</p>
+      </div>
+      <div class="card">
+        <h3 class="t-amber">recon_log.json</h3>
+        <p>Per-run status records (CLEAN / IN_PROGRESS / ISSUES FOUND) plus manual issue notes — feeds the email digest body.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">▼</div>
+
+  <!-- STAGE 4: unified date logic -->
+  <div class="stage" style="border-color:#475569;">
+    <div class="stage-head">
+      <div class="badge c-purple">4</div>
+      <h2>Unified Date Logic</h2>
+      <span class="sub">get_tracker_date()</span>
+    </div>
+    <div class="card" style="background:#1a1330;border-color:#4c1d95;">
+      <h3 class="t-purple">One function, two outputs</h3>
+      <p>Both the email <em>and</em> the Google Sheet call the same <code>get_tracker_date()</code> in <code>send_morning_digest.py</code>. It picks the most recent valid date between the log and the known-good fallback, normalizes the format, and hands the identical value to both destinations — so the sheet can never drift from the email.</p>
+    </div>
+  </div>
+
+  <div class="arrow">▼</div>
+
+  <!-- STAGE 5: outputs split -->
+  <div class="stage">
+    <div class="stage-head">
+      <div class="badge c-green">5</div>
+      <h2>Outputs</h2>
+      <span class="sub">what you actually see</span>
+    </div>
+    <div class="split">
+      <div class="card">
+        <h3 class="t-green">📧 Morning digest email</h3>
+        <p><code>send_morning_digest.py</code> builds an HTML email: reconciliation runs, manual notes, and a color-coded tracker grid with CC-blocking rules (what's ready, blocked, or overdue). Sent via Gmail SMTP.</p>
+      </div>
+      <div class="card">
+        <h3 class="t-green">📊 Google Sheet</h3>
+        <p><code>sheets_updater.py</code> writes to two tabs:</p>
+        <p style="margin-top:8px;"><strong style="color:#e2e8f0;">Tracker grid</strong> — fixed cells, latest date per account (<code>update_sheet</code> / <code>--backfill</code>).</p>
+        <p style="margin-top:6px;"><strong style="color:#e2e8f0;">Recon Log tab</strong> — append-only audit trail; never silently skips (<code>append_recon_row</code>).</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <h3>🔑 Design principles</h3>
+    <ul>
+      <li><strong>Config over code:</strong> client behavior lives in JSON, not hardcoded names — adding a client doesn't touch the parsers.</li>
+      <li><strong>Key normalization:</strong> client-name and account-type variants are collapsed to canonical keys before the sheet lookup, fixing silent update misses.</li>
+      <li><strong>Single date authority:</strong> <code>get_tracker_date()</code> is the one place dates are resolved, so email and sheet always agree.</li>
+      <li><strong>Append-only safety net:</strong> the Recon Log tab records every run even when the fixed-cell grid has no matching cell.</li>
+    </ul>
+  </div>
+
+  <footer>
+    Bookkeeping pipeline · sarah-levine/Bookkeeping · generated diagram
+  </footer>
+</div>
+</body>
+</html>

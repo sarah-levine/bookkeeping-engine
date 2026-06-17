@@ -1,0 +1,16 @@
+#!/bin/sh
+# pii_scan pre-commit hook: blocks commits that introduce un-allowlisted
+# proper names, account numbers, or non-approved emails.
+#
+# Install once:   git config core.hooksPath tools/hooks
+#
+# Bypass for a single commit (use sparingly):  git commit --no-verify
+python3 "$(git rev-parse --show-toplevel)/tools/pii_scan.py" --staged
+status=$?
+if [ "$status" -ne 0 ]; then
+    echo ""
+    echo "pre-commit: pii_scan found potential client data in staged changes."
+    echo "Scrub it, or if it is genuinely generic/fictional add it to"
+    echo "tools/pii_allowlist.txt, then re-stage and commit."
+fi
+exit "$status"
