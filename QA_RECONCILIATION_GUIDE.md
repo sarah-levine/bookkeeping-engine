@@ -41,7 +41,7 @@ as cleared). Unchecked items should not be in the JSON.
 ## Running the Script
 
 ```bash
-cd /home/claude/Bookkeeping
+cd /tmp/Bookkeeping
 python qa_reconciliation.py /mnt/user-data/uploads/2026-03-29.pdf qb_data.json
 ```
 

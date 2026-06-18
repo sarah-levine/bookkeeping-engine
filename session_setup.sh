@@ -94,7 +94,7 @@ if [ -f /tmp/Bookkeeping-clients/repair_logs.py ]; then
   BOOKKEEPING_DIR=/tmp/Bookkeeping python3 /tmp/Bookkeeping-clients/repair_logs.py && echo "   ✓ logs clean"
 fi
 
-# ── 9. Summary ───────────────────────────────────────────────────────────────
+# ── 10. Summary ──────────────────────────────────────────────────────────────
 echo ""
 echo "✅ Session ready"
 echo "   Bookkeeping:         /tmp/Bookkeeping"
