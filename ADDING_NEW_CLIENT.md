@@ -8,7 +8,7 @@ verification so you know it worked before moving on.
 ## 1. Create the client JSON in `Bookkeeping-clients`
 
 ```bash
-cd ~/.bookkeeping/clients
+cd /tmp/Bookkeeping-clients
 cp example_client.json your_client.json   # rename to e.g. delta_dental.json
 ```
 
@@ -31,7 +31,7 @@ git add your_client.json && git commit -m "Add <client> config" && git push
 
 ## 2. Add cell map entries to `sheets_config.json`
 
-Open `~/.bookkeeping/clients/sheets_config.json`. Add one entry to `cell_map`
+Open `/tmp/Bookkeeping-clients/sheets_config.json`. Add one entry to `cell_map`
 for each account type the client has, plus payroll:
 
 ```json
@@ -90,7 +90,7 @@ normalization in `sheets_config.json`:
 
 ## 5. Add the client to `digest_config.json`
 
-Open `~/.bookkeeping/clients/digest_config.json`.
+Open `/tmp/Bookkeeping-clients/digest_config.json`.
 
 **a. `client_display_names`** — add all raw name variants (lowercased) that
 appear in the logs:
@@ -141,7 +141,7 @@ Commit and push `sheets_config.json` and `digest_config.json` to
 ## 6. Run a test reconciliation with `--no-prompt`
 
 ```bash
-cd ~/Documents/Bookkeeping
+cd /tmp/Bookkeeping
 python3 reconcile_comprehensive.py <statement.pdf> --no-prompt
 ```
 
