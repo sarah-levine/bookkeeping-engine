@@ -399,13 +399,11 @@ def split_combined_pdf(pdf_path):
 
     Caller is responsible for deleting any temp files created here.
     """
-    # First check if the full PDF is unambiguously a single statement type.
-    # This prevents false splits when transaction descriptions mention other banks
-    # (e.g. "AMERICAN EXPRESS" settlements inside a BofA checking statement).
-    full_type = detect_statement_type(pdf_path)
-    if full_type != 'unknown':
-        # A bundled CitiBusiness statement carries both a checking and a
-        # savings/IMMA account in one PDF; reconcile it as each present account.
+    try:
+        import pypdf
+    except ImportError:
+        # pypdf not available — fall back to full-PDF detection
+        full_type = detect_statement_type(pdf_path)
         if full_type in ('citi_checking', 'citi_savings'):
             citi_types = _citi_account_types(pdf_path)
             if len(citi_types) > 1:
@@ -413,20 +411,21 @@ def split_combined_pdf(pdf_path):
         return [(full_type, str(pdf_path))]
 
     try:
-        import pypdf
-    except ImportError:
-        # pypdf not available — fall back to treating as single statement
-        return [(detect_statement_type(pdf_path), str(pdf_path))]
-
-    try:
         reader = pypdf.PdfReader(pdf_path)
     except Exception:
-        return [(detect_statement_type(pdf_path), str(pdf_path))]
+        full_type = detect_statement_type(pdf_path)
+        return [(full_type, str(pdf_path))]
 
     if len(reader.pages) <= 1:
-        return [(detect_statement_type(pdf_path), str(pdf_path))]
+        full_type = detect_statement_type(pdf_path)
+        return [(full_type, str(pdf_path))]
 
-    # Classify each page
+    # Classify pages FIRST — before calling detect_statement_type on the full
+    # PDF — so that Meevo/inventory pages cannot pollute detection.
+    # Bug fixed: a Meevo Register Summary lists "AMERICAN EXPRESS" as a payment
+    # type; running detect_statement_type on the full PDF would return 'amex'
+    # and the early-exit below would bypass the Meevo-strip logic entirely.
+    # We now only early-exit when there are NO skip-type pages at all.
     page_types = []
     for page in reader.pages:
         try:
@@ -438,10 +437,18 @@ def split_combined_pdf(pdf_path):
     # Check if there's more than one distinct non-skip type
     unique_types = set(t for t in page_types if t not in _SKIP_TYPES and t != 'unknown')
     all_types = set(page_types)
+    has_skip = bool(_SKIP_TYPES & all_types)
 
-    # If only one financial type (plus possibly meevo/unknown), treat as single
-    if len(unique_types) <= 1 and not (_SKIP_TYPES & all_types):
-        return [(detect_statement_type(pdf_path), str(pdf_path))]
+    # Only use full-PDF detect_statement_type for the early-exit when there are
+    # NO skip-type (Meevo/inventory) pages — those pages contain false signals
+    # (e.g. "AMERICAN EXPRESS" in the payment breakdown) that corrupt detection.
+    if not has_skip and len(unique_types) <= 1:
+        full_type = detect_statement_type(pdf_path)
+        if full_type in ('citi_checking', 'citi_savings'):
+            citi_types = _citi_account_types(pdf_path)
+            if len(citi_types) > 1:
+                return [(t, str(pdf_path)) for t in citi_types]
+        return [(full_type, str(pdf_path))]
 
     # Group pages by type, merging all pages of the same financial type together
     # (even if non-consecutive, e.g. Citi pages scattered across the PDF)
@@ -452,22 +459,20 @@ def split_combined_pdf(pdf_path):
 
     financial_types = [t for t in type_to_pages if t != 'unknown']
 
-    # If only one financial type, treat as single statement
-    if len(financial_types) <= 1 and not (_SKIP_TYPES & set(page_types)):
-        return [(detect_statement_type(pdf_path), str(pdf_path))]
-
     if not financial_types:
-        return [(detect_statement_type(pdf_path), str(pdf_path))]
+        # No recognisable financial pages at all
+        full_type = detect_statement_type(pdf_path)
+        return [(full_type, str(pdf_path))]
 
-    # If only one financial type but Meevo pages exist, write a cleaned PDF without Meevo
-    has_meevo = bool(_SKIP_TYPES & set(page_types))
+    # If only one financial type but skip pages exist, strip them and return a
+    # cleaned PDF — do NOT call detect_statement_type on the full PDF here,
+    # as skip pages may contain false signals.
     if len(financial_types) == 1:
         stmt_type = financial_types[0]
-        if stmt_type == 'unknown':
-            stmt_type = detect_statement_type(pdf_path)
-        if not has_meevo:
+        if not has_skip:
+            # No skip pages — safe to return original path
             return [(stmt_type, str(pdf_path))]
-        # Strip Meevo pages and return cleaned PDF
+        # Strip Meevo/inventory pages and return cleaned PDF
         page_indices = sorted(type_to_pages[stmt_type])
         writer = pypdf.PdfWriter()
         for pi in page_indices:
