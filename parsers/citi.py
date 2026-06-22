@@ -517,6 +517,37 @@ class CitiVisaCostcoParser(StatementParser):
                 'amount': str(abs(amount)),
             })
 
+
+    def load_from_dict(self, data):
+        """
+        Populate parser state from a pre-extracted data dict.
+        Used when OCR output is too noisy (e.g. photographed/scanned statements).
+        payments: [{'date': 'MM/DD/YY', 'description': str, 'amount': Decimal}]
+        credits:  [{'date': 'MM/DD/YY', 'description': str, 'amount': Decimal}]
+        charges:  [{'date': 'MM/DD/YY', 'vendor': str, 'amount': str}]
+        """
+        self.previous_balance       = Decimal(str(data.get('beginning_balance', 0)))
+        self.new_balance            = Decimal(str(data.get('ending_balance', 0)))
+        self.statement_new_charges  = Decimal(str(data.get('statement_new_charges', 0)))
+        self.finance_charge         = Decimal(str(data.get('finance_charge', 0)))
+        self.closing_date           = data.get('closing_date', None)
+        self.payments = [
+            {'date': p['date'], 'description': p.get('description', 'PAYMENT - THANK YOU'),
+             'amount': Decimal(str(p['amount']))}
+            for p in data.get('payments', [])
+        ]
+        self.total_payments = sum(p['amount'] for p in self.payments)
+        self.credits = [
+            {'date': c['date'], 'description': c.get('description', ''),
+             'amount': Decimal(str(c['amount']))}
+            for c in data.get('credits', [])
+        ]
+        self.charges = [
+            {'date': c['date'], 'vendor': c['vendor'], 'amount': str(c['amount'])}
+            for c in data.get('charges', [])
+        ]
+        self.client_name = data.get('client_name', self.client_name)
+
     def generate_report(self):
         aggregated = self._aggregate_by_vendor(self.charges, date_fmt='%m/%d/%y')
         total_charges = sum(r['amount'] for r in aggregated)

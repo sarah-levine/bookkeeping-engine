@@ -42,10 +42,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from log_utils import load_private_json  # noqa: E402
 from reconcile_comprehensive import BMOCheckingParser  # noqa: E402
+from parsers.citi import CitiVisaCostcoParser  # noqa: E402
 
 # statement_type -> parser class. Add more as manual-entry support is needed.
 PARSER_BY_TYPE = {
     "bmo_checking": BMOCheckingParser,
+    "citi_visa_costco": CitiVisaCostcoParser,
 }
 
 
@@ -59,7 +61,7 @@ def _decimalize(data: dict) -> dict:
     for key in ("beginning_balance", "ending_balance", "service_fees"):
         if key in out and out[key] is not None:
             out[key] = _to_decimal(out[key])
-    for section in ("credits", "checks", "debits"):
+    for section in ("credits", "checks", "debits", "payments", "charges"):
         rows = []
         for row in out.get(section, []):
             row = dict(row)
@@ -89,16 +91,24 @@ def run(month_key=None, output_path=None):
         return 1
 
     parser = parser_cls.__new__(parser_cls)
-    parser.pdf_path          = None
-    parser.text              = ''
-    parser._ocr_text         = None
-    parser.credits           = []
-    parser.debits            = []
-    parser.checks            = []
-    parser.service_fees      = Decimal('0')
-    parser.beginning_balance = None
-    parser.ending_balance    = None
-    parser.client_name       = data.get('client_name', '')
+    parser.pdf_path            = None
+    parser.text                = ''
+    parser._ocr_text           = None
+    parser.credits             = []
+    parser.debits              = []
+    parser.checks              = []
+    parser.charges             = []
+    parser.payments            = []
+    parser.service_fees        = Decimal('0')
+    parser.beginning_balance   = None
+    parser.ending_balance      = None
+    parser.previous_balance    = Decimal('0')
+    parser.new_balance         = Decimal('0')
+    parser.total_payments      = Decimal('0')
+    parser.finance_charge      = Decimal('0')
+    parser.statement_new_charges = Decimal('0')
+    parser.closing_date        = None
+    parser.client_name         = data.get('client_name', '')
     parser.load_from_dict(data)
 
     report = parser.generate_report()
