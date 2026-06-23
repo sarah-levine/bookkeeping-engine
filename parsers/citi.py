@@ -531,6 +531,10 @@ class CitiVisaCostcoParser(StatementParser):
         self.statement_new_charges  = Decimal(str(data.get('statement_new_charges', 0)))
         self.finance_charge         = Decimal(str(data.get('finance_charge', 0)))
         self.closing_date           = data.get('closing_date', None)
+        self.statement_date         = (data.get('statement_period')
+                                       or data.get('statement_date')
+                                       or self.closing_date
+                                       or '')
         self.payments = [
             {'date': p['date'], 'description': p.get('description', 'PAYMENT - THANK YOU'),
              'amount': Decimal(str(p['amount']))}
@@ -562,7 +566,8 @@ class CitiVisaCostcoParser(StatementParser):
                                  + self.total_payments + total_credits)
         aggregated, total_charges = _add_missing_row(aggregated, total_charges, statement_charges)
 
-        report = _report_header(self.statement_type, self.client_name)
+        report = _report_header(self.statement_type, self.client_name,
+                                statement_date=getattr(self, 'statement_date', None) or self.closing_date or '')
         report += _summary_block([
             ('Previous Balance',  self.previous_balance),
             ('Payments',          self.total_payments),
