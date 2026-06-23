@@ -24,6 +24,8 @@ except ImportError:
 
 from parsers.base import StatementParser, _registry, KNOWN_CLIENTS
 from parsers.report import *
+from parsers.report import _safe_date_key, _report_header, _summary_block, _balance_check, \
+    _payments_section, _credits_section, _charges_section
 
 class BMOCheckingParser(StatementParser):
     """
@@ -399,6 +401,166 @@ class BMOCheckingParser(StatementParser):
             report += _adp_section(all_pay, total_pay)
         if fee_rows:
             report += _individual_section(fee_rows, total_fees, 'BANK FEES')
+
+        return report
+
+
+class BMOCreditCardParser(StatementParser):
+    """
+    BMO Business Platinum Rewards Credit Card parser.
+
+    Supports pdftotext-based extraction (when poppler-utils is available)
+    and manual load_from_dict() for pre-extracted data (scanned PDFs).
+    """
+    statement_type = "BMO Business Platinum Rewards Credit Card"
+
+    def __init__(self, pdf_path=None, client_name=None):
+        self.pdf_path = pdf_path
+        self.client_name = client_name
+        self.previous_balance = None
+        self.new_balance = None
+        self.total_payments = Decimal('0')
+        self.payments = []
+        self.credits = []
+        self.charges = []
+        self.statement_period = ''
+
+        if pdf_path:
+            self.text = self._extract_text()
+            if not self.client_name:
+                self.client_name = self._detect_client()
+        else:
+            self.text = ''
+
+    def _extract_text(self):
+        try:
+            result = subprocess.run(
+                ['pdftotext', '-layout', str(self.pdf_path), '-'],
+                capture_output=True, text=True, check=True
+            )
+            return result.stdout
+        except Exception:
+            return ''
+
+    def _detect_client(self):
+        return super()._detect_client()
+
+    def load_from_dict(self, data):
+        """
+        Populate parser state from a pre-extracted data dict.
+
+        charges:  [{'date': 'MM/DD/YY', 'vendor': str, 'amount': Decimal}, ...]
+        payments: [{'date': 'MM/DD/YY', 'description': str, 'amount': Decimal}, ...]
+        credits:  [{'date': 'MM/DD/YY', 'description': str, 'amount': Decimal}, ...]
+        """
+        self.previous_balance = Decimal(str(data.get('previous_balance', 0)))
+        self.new_balance      = Decimal(str(data.get('new_balance', 0)))
+        self.total_payments   = Decimal(str(data.get('total_payments', 0)))
+        self.payments         = data.get('payments', [])
+        self.credits          = data.get('credits', [])
+        self.charges          = data.get('charges', [])
+        self.statement_period = data.get('statement_period', '')
+        self.client_name      = data.get('client_name', self.client_name)
+
+    def normalize_vendor(self, description):
+        result = _registry.normalize_vendor(self.client_name or '', description)
+        return result if result != description else description.strip()
+
+    def parse(self):
+        """Parse from pdftotext output. BMO credit card layout."""
+        if not self.text.strip():
+            return
+
+        lines = self.text.split('\n')
+
+        for line in lines:
+            upper = line.upper()
+            if 'PREVIOUS BALANCE' in upper and self.previous_balance is None:
+                amounts = re.findall(r'\$?([\d,]+\.\d{2})', line)
+                if amounts:
+                    self.previous_balance = Decimal(amounts[-1].replace(',', ''))
+            if 'NEW BALANCE' in upper and self.new_balance is None:
+                amounts = re.findall(r'\$?([\d,]+\.\d{2})', line)
+                if amounts:
+                    self.new_balance = Decimal(amounts[-1].replace(',', ''))
+            if 'STATEMENT CLOSE DATE' in upper or 'STATEMENT PERIOD' in upper:
+                m = re.search(r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2},?\s+\d{4})',
+                              line, re.IGNORECASE)
+                if m and not self.statement_period:
+                    self.statement_period = m.group(1)
+
+        # Transaction rows: MM/DD  MM/DD  description  [ref]  amount [CR]
+        txn_re = re.compile(
+            r'^(\d{2}/\d{2})\s+(\d{2}/\d{2})\s+(.+?)\s{2,}([\d,]+\.\d{2})\s*(CR)?\s*$'
+        )
+        for line in lines:
+            m = txn_re.match(line.strip())
+            if not m:
+                continue
+            post_date = m.group(2)
+            desc      = m.group(3).strip()
+            amount    = Decimal(m.group(4).replace(',', ''))
+            is_cr     = bool(m.group(5))
+
+            if 'PAYMENT' in desc.upper():
+                self.payments.append({'date': post_date, 'description': desc, 'amount': amount})
+                self.total_payments += amount
+            elif is_cr:
+                self.credits.append({'date': post_date, 'description': desc, 'amount': amount})
+            else:
+                self.charges.append({'date': post_date, 'vendor': desc, 'amount': amount})
+
+    def generate_report(self, check_payee_map=None, check_date_map=None):
+        def norm(v):
+            return _registry.normalize_vendor(self.client_name or '', v)
+
+        def agg(txns, key='vendor'):
+            totals = defaultdict(lambda: {'amount': Decimal('0'), 'count': 0, 'date': ''})
+            for t in txns:
+                v = norm(t.get(key) or t.get('description', ''))
+                totals[v]['amount'] += Decimal(str(t['amount']))
+                totals[v]['count']  += 1
+                totals[v]['date']    = t['date']
+            return sorted(
+                [{'date': d['date'], 'vendor': v, 'amount': d['amount'], 'count': d['count']}
+                 for v, d in totals.items()],
+                key=lambda x: _safe_date_key(x['date'])
+            )
+
+        agg_charges    = agg(self.charges, 'vendor')
+        total_charges  = sum(r['amount'] for r in agg_charges)
+        total_payments = sum(Decimal(str(p['amount'])) for p in self.payments)
+        total_credits  = sum(Decimal(str(c['amount'])) for c in self.credits)
+
+        report  = _report_header(self.statement_type, self.client_name,
+                                  statement_date=self.statement_period)
+        report += _summary_block([
+            ('Previous Balance', self.previous_balance),
+            ('Payments',         total_payments),
+            ('Credits / Returns', total_credits if total_credits else None),
+            ('Charges',          total_charges),
+            ('New Balance',      self.new_balance),
+        ])
+
+        if self.previous_balance is not None and self.new_balance is not None:
+            calc = self.previous_balance - total_payments - total_credits + total_charges
+            ok   = abs(calc - self.new_balance) < Decimal('0.05')
+            report += _balance_check(ok, calc)
+
+        if self.payments:
+            pmts = [{'date': p['date'],
+                     'description': p.get('description', 'PAYMENT - THANK YOU'),
+                     'amount': Decimal(str(p['amount']))} for p in self.payments]
+            report += _payments_section(pmts, total_payments)
+
+        if self.credits:
+            crds = [{'date': c['date'],
+                     'description': norm(c.get('description', '')),
+                     'amount': Decimal(str(c['amount']))} for c in self.credits]
+            report += _credits_section(crds, total_credits)
+
+        if agg_charges:
+            report += _charges_section(agg_charges, total_charges)
 
         return report
 
