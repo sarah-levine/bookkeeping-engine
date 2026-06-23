@@ -64,13 +64,15 @@ def load_reconciliation_log():
     log_file = LOG_DIR / "reconciliation_log.csv"
     if not log_file.exists():
         return {}
-    # Normalize account types so variants map to the TRACKER key
-    _at_aliases = {
-        "chase_sapphire_preferred": "chase_sapphire",
-        "chase_sapphire_reserve":   "chase_sapphire",
-        "citi_savings":             "citi_savings",
-        "citi_visa_costco":         "citi_costco",
-    }
+    # Normalize account types so variants map to the TRACKER key.
+    # Single source of truth: acct_type_map in sheets_config.json.
+    # Do NOT hardcode aliases here — add them to sheets_config.json instead.
+    try:
+        from log_utils import load_private_json
+        _sheets_cfg = load_private_json("sheets_config.json") or {}
+        _at_aliases = _sheets_cfg.get("acct_type_map", {})
+    except Exception:
+        _at_aliases = {}
     latest = {}
     with open(log_file, newline="") as f:
         for row in csv.DictReader(f):
