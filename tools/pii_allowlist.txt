@@ -66,7 +66,7 @@ san jose california ca
 # ── Statement/report vocabulary, status strings, code & test tokens ──
 activity americanexpress ask auto balanced beginning bill brand businesschecking cable city ckg
 coffee com company continued corp crd cred dd deducted doctype downtown due
-earned fail failed fin home inc incorporated insur lanczos llc local lot
+earned fail failed fin first home inc incorporated insur lanczos llc local lot
 mazon missing mktp mm must next nj of office on out overwrite
 page parking pass passed pgande plain positive print program readme received sports
 ref requires restaurant same shop signify single sjc skip some sq staples

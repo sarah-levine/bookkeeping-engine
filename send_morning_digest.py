@@ -69,6 +69,7 @@ def load_reconciliation_log():
         "chase_sapphire_preferred": "chase_sapphire",
         "chase_sapphire_reserve":   "chase_sapphire",
         "citi_savings":             "citi_savings",
+        "citi_visa_costco":         "citi_costco",
     }
     latest = {}
     with open(log_file, newline="") as f:
