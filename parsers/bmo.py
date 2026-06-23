@@ -445,22 +445,47 @@ class BMOCreditCardParser(StatementParser):
     def _detect_client(self):
         return super()._detect_client()
 
+    def _expand_date(self, date_str):
+        """Normalize MM/DD, MM/DD/YY, or MM/DD/YYYY to MM/DD/YYYY."""
+        from datetime import datetime as _dt
+        if re.match(r'^\d{2}/\d{2}/\d{4}$', date_str):
+            return date_str
+        year = _dt.now().year
+        if self.statement_period:
+            m = re.search(r'\d{4}', self.statement_period)
+            if m:
+                year = int(m.group())
+        if re.match(r'^\d{2}/\d{2}/\d{2}$', date_str):
+            yy = int(date_str[-2:])
+            yyyy = 2000 + yy if yy < 70 else 1900 + yy
+            return date_str[:5] + '/' + str(yyyy)
+        if re.match(r'^\d{2}/\d{2}$', date_str):
+            return date_str + '/' + str(year)
+        return date_str
+
+    def _normalize_dates(self):
+        for lst in (self.charges, self.payments, self.credits):
+            for t in lst:
+                if 'date' in t:
+                    t['date'] = self._expand_date(t['date'])
+
     def load_from_dict(self, data):
         """
         Populate parser state from a pre-extracted data dict.
 
-        charges:  [{'date': 'MM/DD/YY', 'vendor': str, 'amount': Decimal}, ...]
-        payments: [{'date': 'MM/DD/YY', 'description': str, 'amount': Decimal}, ...]
-        credits:  [{'date': 'MM/DD/YY', 'description': str, 'amount': Decimal}, ...]
+        charges:  [{'date': 'MM/DD/YYYY', 'vendor': str, 'amount': Decimal}, ...]
+        payments: [{'date': 'MM/DD/YYYY', 'description': str, 'amount': Decimal}, ...]
+        credits:  [{'date': 'MM/DD/YYYY', 'description': str, 'amount': Decimal}, ...]
         """
         self.previous_balance = Decimal(str(data.get('previous_balance', 0)))
         self.new_balance      = Decimal(str(data.get('new_balance', 0)))
         self.total_payments   = Decimal(str(data.get('total_payments', 0)))
+        self.statement_period = data.get('statement_period', '')
+        self.client_name      = data.get('client_name', self.client_name)
         self.payments         = data.get('payments', [])
         self.credits          = data.get('credits', [])
         self.charges          = data.get('charges', [])
-        self.statement_period = data.get('statement_period', '')
-        self.client_name      = data.get('client_name', self.client_name)
+        self._normalize_dates()
 
     def normalize_vendor(self, description):
         result = _registry.normalize_vendor(self.client_name or '', description)
@@ -509,6 +534,7 @@ class BMOCreditCardParser(StatementParser):
                 self.credits.append({'date': post_date, 'description': desc, 'amount': amount})
             else:
                 self.charges.append({'date': post_date, 'vendor': desc, 'amount': amount})
+        self._normalize_dates()
 
     def generate_report(self, check_payee_map=None, check_date_map=None):
         def norm(v):

@@ -25,7 +25,7 @@ eftpmt eftpay tax taxes wage pay payr payroll
 wire transfer domestic incoming outgoing online banking ach debit credit deposit
 withdrawal withdrawals deposits debits credits payment payments autopay
 electronic interest finance charge charges annual fee fees balance previous new
-total totals account ending closing date statement cardmember service cardholder
+total totals account ending closing close date statement cardmember service cardholder
 summary description vendor payee amount check checks paid presented conventionally
 purchase purchases refund refunds return returns wireless automatic charged
 advances advance standard undeposited sales receipts transaction transactions
