@@ -117,6 +117,31 @@ def run(month_key=None, output_path=None):
         print(f'Report saved to: {output_path}')
     else:
         print(report)
+
+    # ── Auto-trigger Google Sheet update ────────────────────────────────────
+    try:
+        import urllib.request, json as _json, os as _os
+        pat = _os.environ.get("GITHUB_PAT_BOOKKEEPING", "").strip()
+        if pat:
+            _headers = {
+                "Authorization": f"token {pat}",
+                "Accept": "application/vnd.github.v3+json",
+                "Content-Type": "application/json",
+            }
+            _dispatch_req = urllib.request.Request(
+                "https://api.github.com/repos/sarah-levine/Bookkeeping-clients/dispatches",
+                data=_json.dumps({"event_type": "logs-updated"}).encode(),
+                headers=_headers,
+                method="POST",
+            )
+            with urllib.request.urlopen(_dispatch_req, timeout=10) as _r:
+                pass
+            print("  📊 Sheet update triggered — Reconciliation Tracker will update shortly")
+        else:
+            print("  ⚠ GITHUB_PAT_BOOKKEEPING not set — sheet not auto-updated")
+    except Exception as _e:
+        print(f"  ⚠ Sheet update trigger failed: {_e}")
+
     return 0
 
 

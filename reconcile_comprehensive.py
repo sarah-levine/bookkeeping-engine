@@ -1343,30 +1343,18 @@ def main():
                     "Accept": "application/vnd.github.v3+json",
                     "Content-Type": "application/json",
                 }
-                # Get workflow ID for update_sheet.yml
-                _list_req = urllib.request.Request(
-                    "https://api.github.com/repos/sarah-levine/Bookkeeping/actions/workflows",
-                    headers=_headers
+                # Fire repository_dispatch to trigger sync_tracker.yml
+                # in the private Bookkeeping-clients repo
+                _dispatch_req = urllib.request.Request(
+                    "https://api.github.com/repos/sarah-levine/Bookkeeping-clients"
+                    "/dispatches",
+                    data=_json.dumps({"event_type": "logs-updated"}).encode(),
+                    headers=_headers,
+                    method="POST",
                 )
-                with urllib.request.urlopen(_list_req, timeout=10) as _r:
-                    _wfs = _json.loads(_r.read())["workflows"]
-                # Use morning_digest.yml (already registered) with sync_tracker=true
-                _wf_id = next(
-                    (w["id"] for w in _wfs if "morning_digest" in w["path"]), None
-                )
-                if _wf_id:
-                    _dispatch_req = urllib.request.Request(
-                        f"https://api.github.com/repos/sarah-levine/Bookkeeping"
-                        f"/actions/workflows/{_wf_id}/dispatches",
-                        data=_json.dumps({"ref": "main", "inputs": {"sync_tracker": "true"}}).encode(),
-                        headers=_headers,
-                        method="POST",
-                    )
-                    with urllib.request.urlopen(_dispatch_req, timeout=10) as _r:
-                        pass
-                    print("  📊 Sheet update triggered — Reconciliation Tracker will update shortly")
-                else:
-                    print("  ⚠ Workflow not found — update sheet manually")
+                with urllib.request.urlopen(_dispatch_req, timeout=10) as _r:
+                    pass
+                print("  📊 Sheet update triggered — Reconciliation Tracker will update shortly")
             else:
                 print("  ⚠ GITHUB_PAT_BOOKKEEPING not set — sheet not auto-updated")
         except Exception as _e:
