@@ -21,6 +21,7 @@
     { "name": "amex_sample",            "file_id": "REPLACE_ME", "format": "amex",                    "expect_client": null },
     { "name": "amex_checking_sample",   "file_id": "REPLACE_ME", "format": "amex_checking",           "expect_client": null },
     { "name": "bmo_checking_sample",    "file_id": "REPLACE_ME", "format": "bmo_checking",            "expect_client": null },
+    { "name": "bmo_credit_sample",      "file_id": "REPLACE_ME", "format": "bmo_credit",              "expect_client": null },
     { "name": "usbank_checking_sample", "file_id": "REPLACE_ME", "format": "usbank_checking",         "expect_client": null },
     { "name": "wells_fargo_credit",     "file_id": "REPLACE_ME", "format": "wells_fargo_credit",      "expect_client": null },
     { "name": "wells_fargo_checking",   "file_id": "REPLACE_ME", "format": "wells_fargo_checking",    "expect_client": null },
