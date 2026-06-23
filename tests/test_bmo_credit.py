@@ -44,14 +44,14 @@ def _base_data():
         ],
         'credits': [],
         'charges': [
-            {'date': '04/27/26', 'vendor': 'GENUINEINK LLC',            'amount': Decimal('229.32')},
-            {'date': '04/27/26', 'vendor': 'CORECENTRIC SOLUTIONS 1',   'amount': Decimal('173.54')},
-            {'date': '04/27/26', 'vendor': 'CORECENTRIC SOLUTIONS 2',   'amount': Decimal('245.82')},
-            {'date': '04/27/26', 'vendor': 'CORECENTRIC SOLUTIONS 3',   'amount': Decimal('103.09')},
-            {'date': '04/29/26', 'vendor': 'CA DMV FEE 1',              'amount': Decimal('28.00')},
-            {'date': '04/29/26', 'vendor': 'CA DMV FEE 2',              'amount': Decimal('0.55')},
-            {'date': '05/19/26', 'vendor': 'APPLE.COM/BILL',            'amount': Decimal('0.99')},
-            {'date': '05/20/26', 'vendor': 'AMAZON MKTPL',              'amount': Decimal('40.14')},
+            {'date': '04/27/26', 'vendor': 'ACME SUPPLIES INC',     'amount': Decimal('229.32')},
+            {'date': '04/27/26', 'vendor': 'BRAVO PARTS LLC 1',      'amount': Decimal('173.54')},
+            {'date': '04/27/26', 'vendor': 'BRAVO PARTS LLC 2',      'amount': Decimal('245.82')},
+            {'date': '04/27/26', 'vendor': 'BRAVO PARTS LLC 3',      'amount': Decimal('103.09')},
+            {'date': '04/29/26', 'vendor': 'CHARLIE GOV FEE 1',     'amount': Decimal('28.00')},
+            {'date': '04/29/26', 'vendor': 'CHARLIE GOV FEE 2',     'amount': Decimal('0.55')},
+            {'date': '05/19/26', 'vendor': 'APPLE.COM/BILL',        'amount': Decimal('0.99')},
+            {'date': '05/20/26', 'vendor': 'AMAZON MKTPL',          'amount': Decimal('40.14')},
         ],
     }
 
@@ -199,8 +199,8 @@ def test_generate_report_credits_section():
 def test_normalize_vendor_no_config():
     """Without a client config, normalize_vendor returns the vendor as-is."""
     p = BMOCreditCardParser(client_name='Unknown Client XYZ')
-    result = p.normalize_vendor('SOME RANDOM VENDOR')
-    assert result == 'SOME RANDOM VENDOR'
+    result = p.normalize_vendor('DELTA STORE INC')
+    assert result == 'DELTA STORE INC'
     print("PASS  test_normalize_vendor_no_config")
 
 
@@ -213,7 +213,7 @@ def test_normalize_vendor_with_config():
             "canonical_name": "FABRIKAM LLC",
             "statement_types": ["bmo_credit"],
             "vendor_rules": [
-                {"contains": "GENUINEINK", "normalize_to": "GenuineInk.com"},
+                {"contains": "ACME SUPPLY", "normalize_to": "Acme Supply Co"},
                 {"contains": "AMAZON MKTPL", "normalize_to": "Amazon"},
             ]
         }
@@ -224,9 +224,9 @@ def test_normalize_vendor_with_config():
         _bmo_mod._registry = ClientRegistry(clients_dir=str(d))
         try:
             p = BMOCreditCardParser(client_name='FABRIKAM LLC')
-            assert p.normalize_vendor('GENUINEINK LLC 12345') == 'GenuineInk.com'
+            assert p.normalize_vendor('ACME SUPPLY 12345') == 'Acme Supply Co'
             assert p.normalize_vendor('AMAZON MKTPL ORDER') == 'Amazon'
-            assert p.normalize_vendor('UNRELATED VENDOR') == 'UNRELATED VENDOR'
+            assert p.normalize_vendor('DELTA STORE INC') == 'DELTA STORE INC'
         finally:
             _bmo_mod._registry = old_registry
         print("PASS  test_normalize_vendor_with_config")
@@ -247,8 +247,8 @@ NEW BALANCE        $821.45
 
 TRANSACTION DETAILS
 Date        Date       Description                          Amount
-04/24       04/27      GENUINEINK LLC SOME-REF             229.32
-04/24       04/27      CORECENTRIC SOLUTNS REF001          100.00 CR
+04/24       04/27      ACME SUPPLIES REF001                229.32
+04/24       04/27      BRAVO PARTS LLC REF002               100.00 CR
 05/18       05/19      PAYMENT - THANK YOU                 109.99
 """
 

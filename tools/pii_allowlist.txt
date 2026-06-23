@@ -41,6 +41,10 @@ appliance dental capital partners hcp west contractors jane doe john roe example
 client customer contoso fabrikam landlord contract services outside beta gamma
 t&t fc club surf
 
+# ── Generic business / vendor vocabulary ───────────────────────────
+supply supplies parts hardware wholesale distributor warehouse logistics freight
+gov govt government mfg manufacturing
+
 # ── Project's own generic labels ───────────────────────────────────
 client cardholder owner recipient counterparty bookkeeping sarah operator
 
