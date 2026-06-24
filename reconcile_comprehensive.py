@@ -321,6 +321,35 @@ def detect_statement_type(pdf_path):
     except Exception:
         pass
 
+    # Subprocess fallback: pdftoppm + tesseract (no Python packages needed)
+    # Works wherever 'brew install poppler tesseract' has been run.
+    try:
+        import tempfile, os as _os
+        with tempfile.TemporaryDirectory() as _tmpdir:
+            _prefix = _os.path.join(_tmpdir, 'p')
+            subprocess.run(
+                ['pdftoppm', '-png', '-r', '120', '-l', '1', str(pdf_path), _prefix],
+                check=True, capture_output=True, timeout=30,
+            )
+            _pages = sorted(Path(_tmpdir).glob('p-*.png')) or sorted(Path(_tmpdir).glob('p*.png'))
+            if _pages:
+                _r = subprocess.run(
+                    ['tesseract', str(_pages[0]), 'stdout'],
+                    capture_output=True, text=True, check=True, timeout=30,
+                )
+                ocr = _r.stdout.upper()
+                if (('BMO' in ocr or 'PMO' in ocr) and
+                        ('BUSINESS PLATINUM' in ocr or 'PLATINUM REWARDS' in ocr
+                         or 'REWARDS CREDIT CARD' in ocr or 'INDIVIDUAL BILL ACCOUNT' in ocr)
+                        and 'MONTHLY ACTIVITY DETAILS' not in ocr
+                        and 'BEGINNING BALANCE' not in ocr):
+                    return 'bmo_credit'
+                if (('BMO' in ocr or 'PMO' in ocr) and
+                        ('MONTHLY ACTIVITY DETAILS' in ocr or 'BEGINNING BALANCE' in ocr)):
+                    return 'bmo_checking'
+    except Exception:
+        pass
+
     return 'unknown'
 
 
