@@ -316,8 +316,9 @@ def _normalize_client_key(raw: str) -> str:
 
     1. sheets_config.json client_key_map exact match
     2. sheets_config.json uppercased match
-    3. Registry lookup: find client whose payroll_format matches and return tracker_key
-    4. Uppercase + underscores fallback
+    3. Registry lookup by canonical_name / client_name / aliases → tracker_key
+    4. Registry lookup by payroll_format → tracker_key
+    5. Uppercase + underscores fallback
     """
     cfg = load_private_json("sheets_config.json", default={})
     key_map = cfg.get("client_key_map", {})
@@ -327,14 +328,59 @@ def _normalize_client_key(raw: str) -> str:
         return key_map[raw.upper()]
     try:
         from parsers.base import _registry
-        for client_cfg in _registry._configs.values():
-            if client_cfg.get("payroll_format", "").lower() == raw.lower():
-                tk = client_cfg.get("tracker_key")
+        # Direct config lookup — handles canonical_name and aliases
+        client_cfg = _registry.get_config(raw)
+        if client_cfg is None:
+            # Also try each config's canonical_name / client_name
+            for cc in _registry._configs.values():
+                names = [cc.get("canonical_name", ""), cc.get("client_name", "")]
+                names += cc.get("aliases", [])
+                if raw in names or raw.upper() in [n.upper() for n in names]:
+                    client_cfg = cc
+                    break
+        if client_cfg is not None:
+            tk = client_cfg.get("tracker_key")
+            if tk:
+                return tk
+        # Fallback: match by payroll_format
+        for cc in _registry._configs.values():
+            if cc.get("payroll_format", "").lower() == raw.lower():
+                tk = cc.get("tracker_key")
                 if tk:
                     return tk
     except Exception:
         pass
     return raw.upper().replace(" ", "_")
+
+
+def _ensure_acct_type_mapped(account_type: str) -> None:
+    """Add account_type to sheets_config.json acct_type_map if not already present.
+
+    Derives the tracker key by stripping common prefixes (bmo_credit_ → bmo_,
+    bofa_credit_ → bofa_credit, etc.) using the same pattern as the existing
+    manual entries.  If a mapping already exists or sheets_config.json is not
+    found, does nothing silently.
+    """
+    import re
+    sheets_path = get_clients_dir() / "sheets_config.json"
+    if not sheets_path.exists():
+        return
+    try:
+        import json as _json
+        with open(sheets_path) as f:
+            cfg = _json.load(f)
+        acct_map = cfg.setdefault("acct_type_map", {})
+        if account_type in acct_map:
+            return
+        # Derive tracker key: bmo_credit_roger → bmo_roger, etc.
+        tracker_key = re.sub(r'^(bmo)_credit_', r'\1_', account_type)
+        tracker_key = re.sub(r'^(bofa|chase|citi|wells_fargo|amex|usbank)_credit_', r'\1_', tracker_key)
+        acct_map[account_type] = tracker_key
+        with open(sheets_path, "w") as f:
+            _json.dump(cfg, f, indent=2)
+        print(f"  🗂  acct_type_map: added {account_type} → {tracker_key}")
+    except Exception:
+        pass
 
 
 def write_both_logs(
@@ -419,3 +465,6 @@ def write_both_logs(
         status             = status,
     )
     print(f"  📝 Digest log → recon_log.json ({status})")
+
+    # ── 3. Auto-register new account type in acct_type_map ───────────────
+    _ensure_acct_type_mapped(account_type)
