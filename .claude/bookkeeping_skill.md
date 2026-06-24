@@ -34,8 +34,14 @@ If it's ambiguous, ask Sarah before proceeding.
 
 When the statement is a **checking account** (amex_checking, bofa_checking,
 bmo_checking, citi_checking, wells_fargo_checking, usbank_checking,
-northern_trust_checking), always run all three steps automatically after Mode A
-completes — no extra prompt needed:
+northern_trust_checking), run all three steps as one continuous block for that
+statement — no pause between them. Only stop for QB confirmation after the full
+block is complete.
+
+**Do not run a subsequent statement to get data for the tie-out checks.** Both
+tie-outs read from already-logged data (`payroll_log.csv` and
+`reconciliation_log.csv`). If a CC statement hasn't been reconciled yet, mark
+it PENDING and move on — don't pre-run it.
 
 **Step 1 — Mode A:** Reconcile as normal. Note the client key detected by the
 script (printed in the first few lines of output).
@@ -56,7 +62,8 @@ Sarah to re-upload payroll PDFs unless she asks.
 debits on the checking statement (keywords: AMEX EPAYMENT, CHASE CREDIT CRD,
 AUTOPAY, AUTOPAYBUS, BOFA CREDIT). For each one found, grep
 `reconciliation_log.csv` for a matching CC statement for the same client and
-adjacent period, then run the tie-out.
+adjacent period. This check uses already-logged data only — do not run the CC
+statement now.
 
 ```bash
 grep "<client>" ~/.bookkeeping/clients/reconciliation_log.csv
@@ -65,7 +72,8 @@ grep "<client>" ~/.bookkeeping/clients/reconciliation_log.csv
 If the CC statement hasn't been reconciled yet, note it as **PENDING** — don't
 block or delay the payroll tie-out result.
 
-**Format the combined output as three clearly labelled sections:**
+**Format the combined output as three clearly labelled sections, then STOP and
+wait for QB confirmation before touching the next statement:**
 
 ```
 ════════════════════════════════════════════════════════
