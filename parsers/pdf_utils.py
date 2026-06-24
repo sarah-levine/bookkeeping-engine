@@ -1,6 +1,10 @@
 import re
 import zlib
 import struct
+import subprocess
+import tempfile
+import os
+from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
@@ -603,11 +607,11 @@ def _extract_text_from_stream(stream: bytes) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Pure-Python extraction (digital PDFs only)
 # ---------------------------------------------------------------------------
 
-def pdf_to_text(pdf_path: str) -> str:
-    """Extract text from a PDF. Returns '' for image-only PDFs."""
+def _pdf_to_text_pure(pdf_path: str) -> str:
+    """Extract text from a digital PDF using pure Python. Returns '' for image-only PDFs."""
     with open(pdf_path, 'rb') as f:
         data = f.read()
 
@@ -657,6 +661,66 @@ def pdf_to_text(pdf_path: str) -> str:
     # Collapse excessive blank lines
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text
+
+
+# ---------------------------------------------------------------------------
+# OCR fallback — requires pdftoppm (poppler) + tesseract installed as binaries
+# ---------------------------------------------------------------------------
+
+def _ocr_pdf(pdf_path: str) -> str:
+    """Convert PDF pages to images via pdftoppm, then OCR with tesseract.
+
+    Returns empty string if either binary is not installed.
+    Install on Mac: brew install poppler tesseract
+    Install on Ubuntu: sudo apt-get install poppler-utils tesseract-ocr
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        prefix = os.path.join(tmpdir, 'page')
+        try:
+            subprocess.run(
+                ['pdftoppm', '-png', '-r', '300', pdf_path, prefix],
+                check=True, capture_output=True,
+            )
+        except FileNotFoundError:
+            return ''
+        except subprocess.CalledProcessError:
+            return ''
+
+        pages = sorted(Path(tmpdir).glob('page-*.png'))
+        if not pages:
+            pages = sorted(Path(tmpdir).glob('page*.png'))
+
+        texts = []
+        for page_img in pages:
+            try:
+                result = subprocess.run(
+                    ['tesseract', str(page_img), 'stdout', '--psm', '6'],
+                    capture_output=True, text=True, check=True,
+                )
+                texts.append(result.stdout)
+            except FileNotFoundError:
+                return ''
+            except subprocess.CalledProcessError:
+                continue
+
+        return '\n'.join(texts)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def pdf_to_text(pdf_path: str) -> str:
+    """Extract text from a PDF.
+
+    Tries pure-Python extraction first (works for digital PDFs with a text
+    layer). If that yields nothing, falls back to OCR via pdftoppm + tesseract
+    for scanned image PDFs (requires those binaries to be installed).
+    """
+    text = _pdf_to_text_pure(pdf_path)
+    if text.strip():
+        return text
+    return _ocr_pdf(pdf_path)
 
 
 # ---------------------------------------------------------------------------

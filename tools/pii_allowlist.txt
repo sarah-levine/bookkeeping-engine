@@ -74,7 +74,7 @@ earned fail failed fin first home inc incorporated insur lanczos llc local lot
 mazon missing mktp mm must next nj of office on out overwrite
 page parking pass passed pgande plain positive print program readme received sports
 ref requires restaurant same shop signify single sjc skip some sq staples
-svc tests thank to totally unmatched uppercase usps web www xxxx xxxxxxxxxxxxxxx
+svc tests thank to totally unmatched uppercase usps web warn www xxxx xxxxxxxxxxxxxxx
 year you yyyy
 
 # ── Fictional/example & infra emails and masked example accounts ──
