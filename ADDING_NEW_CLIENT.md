@@ -141,8 +141,7 @@ Commit and push `sheets_config.json` and `digest_config.json` to
 ## 6. Run a test reconciliation with `--no-prompt`
 
 ```bash
-cd /tmp/Bookkeeping
-python3 reconcile_comprehensive.py <statement.pdf> --no-prompt
+python /tmp/engine/reconcile_comprehensive.py <statement.pdf>
 ```
 
 Check that:
