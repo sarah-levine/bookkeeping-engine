@@ -18,6 +18,58 @@ the June date) but will cause confusion on future audits.
 **Fix:** Delete the ghost row in `Bookkeeping-clients` — keep only the row with
 `account_ending = 3003` and correct `total_payments`.
 
+### 6. Pay-by-Pay (Workers Comp) silently dropped from payroll JE in 3 formats
+**Root cause:** Three payroll formats never read or write Pay-by-Pay from the
+Liability PDF, so workers comp is silently omitted from the journal entry with
+no warning. The JE still balances internally because Pay-by-Pay is an extra ADP
+debit that doesn't touch the detail PDF totals — making it easy to miss in review.
+
+**Affected formats:**
+- `adp_payroll_departments` (`payroll_clients/adp_payroll_departments.py`) —
+  `parse_cash_splits()` only extracts `DebitforTaxes` via regex; it never reads
+  `DebitforPay-by-Pay`. No debit row for workers comp is built in
+  `run_adp_payroll_departments()`. **Confirmed missing** for De Anza 5/15/2026
+  ($776.56 dropped).
+- `adp_payroll_professional` (`payroll_clients/adp_payroll_professional.py`) —
+  no Pay-by-Pay parsing or row at all.
+- `adp_payroll_1099` (`payroll_clients/adp_payroll_1099.py`) —
+  no Pay-by-Pay parsing or row at all.
+
+**Working formats (for reference):**
+- `adp_payroll_details` — reads Pay-by-Pay via `parse_liability()` and writes
+  a debit row using `cfg["workers_comp_account"]`.
+- `adp_payroll_tipped` — reads Pay-by-Pay via `--pay-by-pay` override flag and
+  `cfg["workers_comp_account"]`.
+
+**Secondary issue — inconsistent config key name:**
+`adp_payroll_details` and `adp_payroll_tipped` read `cfg["workers_comp_account"]`.
+De Anza's config was added today as `pay_by_pay_account`. These should be the
+same key. Pick one (`workers_comp_account` is already used by 2 clients and 2
+formats) and standardize across all configs and formats.
+
+**Fix (apply to all 3 broken formats):**
+
+1. In `parse_cash_splits()` (or equivalent), add extraction of Pay-by-Pay:
+```python
+m = re.search(r'DebitforPay-by-Pay[^$]*\$([\\d,]+\\.\\d{2})', norm)
+if m: result['pay_by_pay'] = amt(m.group(1))
+```
+2. In the JE build section, after the other debit rows, add:
+```python
+wc = cash.get('pay_by_pay', 0)
+wc_account = cfg.get('workers_comp_account') or cfg.get('pay_by_pay_account')
+if wc > 0 and wc_account:
+    rows.append(make_row(check_date, wc_account, debit=wc, memo='ADP Pay-by-Pay (Workers Comp)'))
+    rows.append(make_row(check_date, cfg['bank_account'], credit=wc, memo='ADP Pay-by-Pay (Workers Comp)'))
+elif wc > 0:
+    print(f'⚠️  Pay-by-Pay ${wc:,.2f} found in Liability PDF but no workers_comp_account in config — not included in JE')
+```
+3. Add a cross-check at the end that compares total JE credits against total ADP
+   debited from the Liability PDF, and prints a warning if they don't reconcile.
+4. Rename `pay_by_pay_account` in `de_anza.json` to `workers_comp_account` to
+   match the standard key used everywhere else.
+**Fix in Claude Code.**
+
 ---
 
 ## Closed: Fixed
