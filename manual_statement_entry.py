@@ -40,13 +40,15 @@ from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from log_utils import load_private_json  # noqa: E402
+from log_utils import load_private_json, write_both_logs  # noqa: E402
 from reconcile_comprehensive import BMOCheckingParser  # noqa: E402
 from parsers.citi import CitiVisaCostcoParser  # noqa: E402
+from parsers.bmo import BMOCreditCardParser  # noqa: E402
 
 # statement_type -> parser class. Add more as manual-entry support is needed.
 PARSER_BY_TYPE = {
-    "bmo_checking": BMOCheckingParser,
+    "bmo_checking":    BMOCheckingParser,
+    "bmo_credit":      BMOCreditCardParser,
     "citi_visa_costco": CitiVisaCostcoParser,
 }
 
@@ -117,6 +119,29 @@ def run(month_key=None, output_path=None):
         print(f'Report saved to: {output_path}')
     else:
         print(report)
+
+    # ── Write reconciliation logs ────────────────────────────────────────────
+    try:
+        _beg = getattr(parser, 'beginning_balance', None) or getattr(parser, 'previous_balance', None)
+        _end = getattr(parser, 'ending_balance', None) or getattr(parser, 'new_balance', None)
+        _pay = getattr(parser, 'total_payments', None)
+        _date = (data.get('statement_end_date')
+                 or getattr(parser, 'closing_date', None)
+                 or getattr(parser, 'statement_period', '')
+                 or data.get('statement_period', ''))
+        write_both_logs(
+            client             = parser.client_name,
+            client_name        = parser.client_name,
+            account_type       = stmt_type,
+            statement_end_date = str(_date),
+            statement          = key,
+            beginning_balance  = f"{float(_beg):,.2f}" if _beg is not None else '—',
+            ending_balance     = f"{float(_end):,.2f}" if _end is not None else '—',
+            total_payments     = f"{float(_pay):.2f}" if _pay is not None else '',
+            status             = "CLEAN",
+        )
+    except Exception as _e:
+        print(f"  ⚠ Log write failed: {_e}")
 
     # ── Auto-trigger Google Sheet update ────────────────────────────────────
     try:
