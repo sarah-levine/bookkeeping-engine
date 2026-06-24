@@ -1435,6 +1435,41 @@ def main():
                     print(f"  ⚠ Sheet update skipped: {_e}")
             # ───────────────────────────────────────────────────────────────
 
+            # ── Fixture upload prompt (Mode H) ──────────────────────────────
+            # After a successful reconciliation, offer to upload this PDF to
+            # Drive as a test fixture if none exists for this statement type.
+            if has_data and answer == "done":
+                try:
+                    import json as _json
+                    _manifest_path = Path(__file__).parent / "tests" / "fixtures_manifest.json"
+                    _has_fixture = False
+                    if _manifest_path.exists():
+                        _manifest = _json.loads(_manifest_path.read_text())
+                        _has_fixture = any(
+                            e.get("format") == stmt_type and e.get("file_id", "REPLACE_ME") != "REPLACE_ME"
+                            for e in _manifest.get("statements", [])
+                        )
+                    if not _has_fixture:
+                        print(f"\n  No test fixture found for '{stmt_type}'.")
+                        _upload_ans = input("  Upload this PDF as a test fixture? [y/N] ").strip().lower()
+                        if _upload_ans == "y":
+                            _client_slug = re.sub(r'[^a-z0-9]+', '_',
+                                (parser.client_name or 'unknown').lower()).strip('_')
+                            _entry_name = f"{_client_slug}_{stmt_type}"
+                            import subprocess as _sp2
+                            _up = _sp2.run(
+                                [sys.executable,
+                                 str(Path(__file__).parent / "upload_fixtures_to_drive.py"),
+                                 _entry_name, stmt_type, seg_path],
+                                capture_output=False,
+                            )
+                            if _up.returncode != 0:
+                                print("  ⚠ Fixture upload failed — you can retry manually:")
+                                print(f"    python3 upload_fixtures_to_drive.py {_entry_name} {stmt_type} <pdf_path>")
+                except Exception as _fe:
+                    print(f"  ⚠ Fixture upload prompt failed: {_fe}")
+            # ───────────────────────────────────────────────────────────────
+
     finally:
         # Clean up any temp segment files
         for tmp in tmp_files:
