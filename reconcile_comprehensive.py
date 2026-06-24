@@ -305,6 +305,12 @@ def detect_statement_type(pdf_path):
         ocr = pytesseract.image_to_string(img).upper()
         doc.close()
         if (('BMO' in ocr or 'PMO' in ocr) and
+                ('BUSINESS PLATINUM' in ocr or 'PLATINUM REWARDS' in ocr
+                 or 'REWARDS CREDIT CARD' in ocr or 'INDIVIDUAL BILL ACCOUNT' in ocr)
+                and 'MONTHLY ACTIVITY DETAILS' not in ocr
+                and 'BEGINNING BALANCE' not in ocr):
+            return 'bmo_credit'
+        if (('BMO' in ocr or 'PMO' in ocr) and
                 ('MONTHLY ACTIVITY DETAILS' in ocr or
                  'BEGINNING BALANCE' in ocr)):
             return 'bmo_checking'

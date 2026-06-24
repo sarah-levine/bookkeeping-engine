@@ -18,69 +18,6 @@ the June date) but will cause confusion on future audits.
 **Fix:** Delete the ghost row in `Bookkeeping-clients` — keep only the row with
 `account_ending = 3003` and correct `total_payments`.
 
-### 4. `detect_statement_type()` OCR fallback missing `bmo_credit` branch
-**File:** `reconcile_comprehensive.py` — `detect_statement_type()`, ~line 295
-**Root cause:** The OCR fallback block (for image-only PDFs that return empty
-from `pdftotext`) only checks for `bmo_checking` keywords (`MONTHLY ACTIVITY
-DETAILS`, `BEGINNING BALANCE`). It never checks for BMO credit card keywords, so
-scanned BMO CC statements always return `unknown` and are skipped — even though
-`BMOCreditCardParser` now exists and the text-based detection block (~line 251)
-is correct.
-**Fix:** Add a `bmo_credit` branch to the OCR fallback block, before the
-`bmo_checking` branch, keying on `BUSINESS PLATINUM`, `PLATINUM REWARDS`,
-`REWARDS CREDIT CARD`, or `INDIVIDUAL BILL ACCOUNT SUMMARY`. Guard with
-`MONTHLY ACTIVITY DETAILS not in ocr` to avoid misclassifying checking statements:
-
-```python
-if (('BMO' in ocr or 'PMO' in ocr) and
-        ('BUSINESS PLATINUM' in ocr or 'PLATINUM REWARDS' in ocr
-         or 'REWARDS CREDIT CARD' in ocr or 'INDIVIDUAL BILL ACCOUNT' in ocr)):
-    if 'MONTHLY ACTIVITY DETAILS' not in ocr and 'BEGINNING BALANCE' not in ocr:
-        return 'bmo_credit'
-```
-**Fix in Claude Code.**
-
-### 5. `BMOCreditCardParser._extract_text()` uses `pdf_utils.pdf_to_text` (pdftoppm) — times out on scanned PDFs
-**File:** `parsers/bmo.py` — `BMOCreditCardParser._extract_text()`
-**Root cause:** `_extract_text()` calls `pdf_utils.pdf_to_text()`, which runs
-`pdftoppm -r 300` on every page then pipes to tesseract. On a 2-page scanned
-PDF this takes 60–120+ seconds and times out. `BMOCheckingParser` (same file)
-already solves this with PyMuPDF + pytesseract directly — faster and already
-installed. `BMOCreditCardParser` should use the same approach.
-**Fix:** Replace the `_extract_text()` body with the PyMuPDF+pytesseract pattern
-already used by `BMOCheckingParser`:
-
-```python
-def _extract_text(self):
-    # Try pdftotext first (fast, works for digital PDFs)
-    try:
-        result = subprocess.run(
-            ['pdftotext', '-layout', str(self.pdf_path), '-'],
-            capture_output=True, text=True, check=True
-        )
-        if result.stdout.strip():
-            return result.stdout
-    except Exception:
-        pass
-    # OCR fallback via PyMuPDF + pytesseract (scanned PDFs)
-    try:
-        import fitz
-        import pytesseract
-        from PIL import Image
-        doc = fitz.open(str(self.pdf_path))
-        texts = []
-        for page in doc:
-            mat = fitz.Matrix(2.0, 2.0)
-            pix = page.get_pixmap(matrix=mat)
-            img = Image.frombytes('RGB', [pix.width, pix.height], pix.samples)
-            texts.append(pytesseract.image_to_string(img))
-        doc.close()
-        return '\n'.join(texts)
-    except Exception:
-        return ''
-```
-**Fix in Claude Code.**
-
 ---
 
 ## Closed: Fixed
@@ -108,3 +45,10 @@ def _extract_text(self):
   `detect_statement_type()`, `STATEMENT_TYPE_LABELS`, and the parser dispatch in
   `reconcile_comprehensive.py`. Pure-Python PDF text extraction and OCR fallback
   (pdftoppm + tesseract) added in `parsers/pdf_utils.py`.
+- `detect_statement_type()` OCR fallback missing `bmo_credit` branch — fixed
+  2026-06-24 by adding a `bmo_credit` check before `bmo_checking` in the OCR
+  fallback block, keying on `BUSINESS PLATINUM`/`PLATINUM REWARDS`/`REWARDS
+  CREDIT CARD`/`INDIVIDUAL BILL ACCOUNT` with guards against checking keywords.
+- `BMOCreditCardParser._extract_text()` timed out on scanned PDFs — fixed
+  2026-06-24 by replacing the bare pdftotext-only fallback with the same
+  PyMuPDF + pytesseract pattern used by `BMOCheckingParser`.

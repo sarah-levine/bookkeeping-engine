@@ -433,12 +433,35 @@ class BMOCreditCardParser(StatementParser):
             self.text = ''
 
     def _extract_text(self):
+        """Try pdftotext first; fall back to PyMuPDF + pytesseract for scanned PDFs."""
         try:
             result = subprocess.run(
                 ['pdftotext', '-layout', str(self.pdf_path), '-'],
                 capture_output=True, text=True, check=True
             )
-            return result.stdout
+            if result.stdout.strip():
+                self._ocr_text = result.stdout
+                return self._ocr_text
+        except Exception:
+            pass
+
+        try:
+            import fitz
+            from PIL import Image
+            import pytesseract
+            doc = fitz.open(self.pdf_path)
+            pages = []
+            for page in doc:
+                mat = fitz.Matrix(1.0, 1.0)
+                pix = page.get_pixmap(matrix=mat)
+                img = Image.frombytes('RGB', [pix.width, pix.height], pix.samples)
+                if img.width > 2000:
+                    ratio = 2000 / img.width
+                    img = img.resize((2000, int(img.height * ratio)), Image.LANCZOS)
+                pages.append(pytesseract.image_to_string(img))
+            doc.close()
+            self._ocr_text = '\n'.join(pages)
+            return self._ocr_text
         except Exception:
             return ''
 
