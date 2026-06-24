@@ -27,6 +27,7 @@ Read the attached files and the user's message, then pick a mode:
 | QuickBooks Reconcile screenshots | **D — QA Verification** |
 | Scanned PDF / "enter manually" | **G — Manual Statement Entry** |
 | "Add new client" / new client onboarding | **F — Add New Client** |
+| "Upload fixture" / new client or account type with no test file | **H — Upload Test Fixture** |
 
 If it's ambiguous, ask Sarah before proceeding.
 
@@ -246,6 +247,13 @@ python3 /tmp/engine/mark_clean.py <client_key> <account_type> [<statement_date>]
 ```
 
 Then call `sync_up()` again to push the updated status.
+
+**New client or account type — fixture prompt:**
+After syncing, check `fixtures_manifest.json` for an entry matching this
+client + account_type. If none exists, ask Sarah:
+> "This looks like a new account type with no test fixture. Want me to upload
+> this PDF to Google Drive? (Mode H)"
+Only proceed with the upload if she says yes.
 
 **Multiple statements — strict one-at-a-time rule:**
 - If Sarah uploads multiple PDFs, sort them by statement date (earliest first) before starting.
@@ -642,6 +650,61 @@ After confirmation:
 ```python
 from tools.github_clients import sync_up
 sync_up("Manual reconciliation: <Client> <account_type> <statement_date>")
+```
+
+---
+
+## Mode H — Upload Test Fixture to Google Drive
+
+Triggered when Sarah asks to upload a fixture, or automatically prompted at the
+end of Mode A when the reconciled client+account_type has no existing entry in
+`fixtures_manifest.json`.
+
+### Step 1: Check if a fixture already exists
+
+```python
+import sys, os, json
+from pathlib import Path
+sys.path.insert(0, '/tmp/engine')
+os.environ['BOOKKEEPING_CLIENTS_DIR'] = os.path.expanduser('~/.bookkeeping/clients')
+from tools.github_clients import pull_file
+pull_file('fixtures_manifest.json')
+manifest = json.loads((Path.home() / '.bookkeeping/clients/fixtures_manifest.json').read_text())
+# Check for existing entry matching this client + account_type
+existing = [k for k, v in manifest.items() if v.get('format') == '<account_type>' and '<client>' in k.lower()]
+print(existing)
+```
+
+If an entry already exists, tell Sarah and skip the upload unless she explicitly
+wants to replace it.
+
+### Step 2: Run upload_fixtures_to_drive.py
+
+```bash
+python /tmp/engine/upload_fixtures_to_drive.py \
+    <entry_name> <account_type> "$UPLOADS/<statement>.pdf"
+```
+
+- `entry_name` — a unique slug, e.g. `acme_bmo_credit_jun2026`
+- `account_type` — the parser format key, e.g. `bmo_credit`
+- PDF path — the statement that was just reconciled
+
+**Auth note:** The first run requires a browser OAuth consent flow. If
+`~/.bookkeeping/drive_token.json` doesn't exist yet, the script will try to
+open a browser — this will fail in a headless session. Tell Sarah she needs to
+run this once from her Mac to cache the token:
+```bash
+cd ~/bookkeeping-engine
+python3 upload_fixtures_to_drive.py <entry_name> <format> <pdf_path>
+```
+After that, the cached token at `~/.bookkeeping/drive_token.json` makes all
+future runs non-interactive.
+
+### Step 3: Sync the updated manifest back
+
+```python
+from tools.github_clients import push_file
+push_file('fixtures_manifest.json', message='Add fixture: <entry_name> (<account_type>)')
 ```
 
 ---
