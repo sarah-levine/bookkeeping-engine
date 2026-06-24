@@ -1,5 +1,12 @@
 # Bookkeeping Skill — Full Instructions
 
+> **Code changes are out of scope for this skill.** If a workflow surfaces a
+> bug, a missing parser, a config field that needs updating, or any change to
+> `.py`, `.json`, or `.md` files in the engine repo — stop, describe the issue
+> clearly, and tell Sarah to take it to Claude Code. Do not edit files inline.
+> The only writes this skill performs are to log files in Bookkeeping-clients
+> via `sync_up()`.
+
 > **Repo layout (read once):** code lives in the **public** `bookkeeping-engine`
 > repo; client configs + logs live in the **private** `Bookkeeping-clients`
 > repo. Scripts run from `/tmp/engine`; data, logs, and configs are pulled to
