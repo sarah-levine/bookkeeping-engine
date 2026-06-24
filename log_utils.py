@@ -387,10 +387,12 @@ def write_both_logs(
         with open(csv_path, newline="") as f:
             existing_rows = list(csv.DictReader(f))
 
-    # Upsert: replace matching (client, account_type) row
+    # Upsert: replace matching (client, account_type, statement_date) row
     replaced = False
     for i, r in enumerate(existing_rows):
-        if r.get("client") == client_key and r.get("account_type") == account_type:
+        if (r.get("client") == client_key
+                and r.get("account_type") == account_type
+                and r.get("statement_date") == statement_end_date):
             existing_rows[i] = row
             replaced = True
             break
