@@ -93,6 +93,11 @@ block or delay the payroll tie-out result.
 ```bash
 rm -rf /tmp/engine
 git clone --depth 1 https://github.com/sarah-levine/bookkeeping-engine.git /tmp/engine
+
+if [ ! -f /tmp/engine/.claude/bookkeeping_skill.md ]; then
+  echo "ERROR: engine clone failed or skill instructions missing — do not proceed."
+  exit 1
+fi
 ```
 
 ### Step 2 — Pull client configs + logs via REST API
