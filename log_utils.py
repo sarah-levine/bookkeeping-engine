@@ -311,6 +311,59 @@ def load_private_json(filename: str, default=None):
     return default
 
 
+def get_client_notes(client: str, account_type: str) -> list[str]:
+    """Return reconciliation reminder notes for a client + account type.
+
+    Reads the ``reconciliation_notes`` dict from the client's JSON config.
+    Lookup order:
+      1. Exact ``account_type`` key  (e.g. ``"bmo_credit_roger"``)
+      2. Category key derived from account_type:
+           ``credit_cards``  — any type containing "credit" or "visa"
+           ``checking``      — any type containing "checking"
+           ``savings``       — any type containing "savings"
+           ``payroll``       — account_type == "payroll"
+      3. ``"general"``       — catch-all shown for every reconciliation
+
+    Returns a list of non-empty note strings (may be empty).
+    """
+    try:
+        from parsers.base import _registry
+        cfg = _registry.get_config(client)
+        if cfg is None:
+            return []
+        notes = cfg.get("reconciliation_notes", {})
+        if not notes:
+            return []
+
+        def _category(at: str) -> str:
+            at = at.lower()
+            if "credit" in at or "visa" in at or "citi" in at or "amex" in at or "ink" in at or "sapphire" in at:
+                return "credit_cards"
+            if "checking" in at:
+                return "checking"
+            if "savings" in at:
+                return "savings"
+            if at == "payroll":
+                return "payroll"
+            return ""
+
+        results = []
+        # 1. exact match
+        if account_type in notes:
+            results.append(notes[account_type])
+        else:
+            # 2. category match
+            cat = _category(account_type)
+            if cat and cat in notes and notes[cat] not in results:
+                results.append(notes[cat])
+        # 3. general catch-all
+        if "general" in notes and notes["general"] not in results:
+            results.append(notes["general"])
+        return [n for n in results if n]
+    except Exception:
+        return []
+
+
 def _normalize_client_key(raw: str) -> str:
     """Resolve a raw client name or key to the canonical tracker key.
 

@@ -1315,6 +1315,20 @@ def main():
                     print(f"  ⚠ Digest log not updated: {_e}")
             # ────────────────────────────────────────────────────────────────
 
+            # ── Client reconciliation notes ────────────────────────────────
+            if has_data and parser.client_name:
+                try:
+                    from log_utils import get_client_notes
+                    _notes = get_client_notes(parser.client_name, stmt_type)
+                    if _notes:
+                        print('─' * 80)
+                        print('  📋 Client notes:')
+                        for _note in _notes:
+                            print(f'     • {_note}')
+                except Exception:
+                    pass
+            # ───────────────────────────────────────────────────────────────
+
             # ── QB confirmation prompt ──────────────────────────────────────
             print(report)
             print()
