@@ -1438,7 +1438,7 @@ def main():
             # ── Fixture upload prompt (Mode H) ──────────────────────────────
             # After a successful reconciliation, offer to upload this PDF to
             # Drive as a test fixture if none exists for this statement type.
-            if has_data and answer == "done":
+            if has_data and answer in ("done", "in_progress"):
                 try:
                     import json as _json
                     _manifest_path = Path(__file__).parent / "tests" / "fixtures_manifest.json"
