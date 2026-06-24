@@ -239,8 +239,11 @@ python3 /tmp/engine/mark_clean.py <client_key> <account_type> [<statement_date>]
 
 Then call `sync_up()` again to push the updated status.
 
-Only then present the next statement (if multiple were queued). Process one at a
-time: present → notes → QB confirm → sync → next.
+**Multiple statements — strict one-at-a-time rule:**
+- If Sarah uploads multiple PDFs, sort them by statement date (earliest first) before starting.
+- After presenting each report and syncing, STOP COMPLETELY and wait for Sarah to type "done", "next", "yes", or another affirmative. Do not proceed on your own.
+- Never loop over statements automatically. Never batch them. Never pipe input to the script to bypass the QB confirmation prompt.
+- Each statement is its own full cycle: present → client notes → QB confirm → sync → STOP → wait.
 
 ---
 
