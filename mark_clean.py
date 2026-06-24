@@ -199,22 +199,14 @@ def trigger_sheet_update(entry: dict):
 
 
 def git_push():
-    import subprocess
-    # Logs live in the private logs dir (its own git repo) — commit there.
-    cwd = str(LOGS_DIR)
-    subprocess.run(
-        ["git", "add", "recon_log.json", "reconciliation_log.csv"],
-        cwd=cwd, capture_output=True
-    )
-    result = subprocess.run(
-        ["git", "commit", "-m", f"mark_clean: upgrade IN_PROGRESS → CLEAN"],
-        cwd=cwd, capture_output=True
-    )
-    if result.returncode == 0:
-        subprocess.run(["git", "push"], cwd=cwd, capture_output=True)
-        print("  🚀 Committed and pushed to git")
-    else:
-        print("  ℹ️  Nothing new to commit to git")
+    try:
+        import sys as _sys, os as _os
+        _sys.path.insert(0, str(Path(__file__).parent))
+        _os.environ.setdefault("BOOKKEEPING_CLIENTS_DIR", str(LOGS_DIR))
+        from tools.github_clients import sync_up
+        sync_up("mark_clean: upgrade IN_PROGRESS → CLEAN")
+    except Exception as e:
+        print(f"  ⚠ Could not push logs via REST API ({e}). Push manually.")
 
 
 def main():

@@ -289,33 +289,17 @@ def append_payroll_log(client: str, client_name: str, check_date: str, rows: lis
 
 
 def _git_push_logs(label: str):
-    """Best-effort: commit the log files and push so the cloud morning digest
-    sees this run. Reconciliation already does this; payroll did not, which is
-    why payroll runs kept missing the digest. Never raises."""
-    import subprocess
-    logs_dir = LOGS_DIR
-    log_files = ["recon_log.json", "payroll_log.csv", "reconciliation_log.csv"]
-    existing  = [f for f in log_files if (logs_dir / f).exists()]
-    if not existing:
-        return
-
-    def _git(*args):
-        return subprocess.run(["git", "-C", str(logs_dir), *args],
-                              capture_output=True, text=True)
-
+    """Best-effort: push log files via REST API so the morning digest sees this
+    run. Never raises."""
     try:
-        # Commit only the log files (pathspec) — never sweep up other staged work.
-        commit = _git("commit", "-m", f"digest: {label}", "--", *existing)
-        if commit.returncode != 0:
-            return  # nothing changed in the log files, or commit unavailable
-        push = _git("push")
-        if push.returncode == 0:
-            print(f"  ☁️  Pushed logs to GitHub — morning digest will include this run")
-        else:
-            print(f"  ⚠ Git push failed: {push.stderr.strip()}")
-            print(f"     Run: git pull --rebase && git push")
+        import sys as _sys, os as _os
+        _sys.path.insert(0, str(Path(__file__).parent.parent))
+        _os.environ.setdefault("BOOKKEEPING_CLIENTS_DIR", str(LOGS_DIR))
+        from tools.github_clients import sync_up
+        sync_up(f"digest: {label}")
+        print(f"  ☁️  Pushed logs to GitHub — morning digest will include this run")
     except Exception as _e:
-        print(f"  ⚠ Could not auto-push logs ({_e}). Commit/push manually.")
+        print(f"  ⚠ Could not push logs ({_e}). Push manually.")
 
 
 def append_digest_log(client_name: str, check_date: str):
