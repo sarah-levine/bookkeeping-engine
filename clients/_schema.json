@@ -60,7 +60,12 @@
           "usbank_checking",
           "northern_trust_checking",
           "bmo_checking",
-          "bmo_credit"
+          "bmo_credit",
+          "bmo_savings",
+          "bmo_credit_roger",
+          "bmo_credit_nicholas",
+          "bmo_credit_peter",
+          "bmo_credit_christopher"
         ]
       },
       "description": "Which parsers apply to this client's statements."
