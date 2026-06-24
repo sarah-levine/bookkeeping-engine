@@ -40,7 +40,10 @@ ACCOUNT_DISPLAY_NAMES = _DIGEST_CFG.get("account_display_names", {})
 
 def display_account(raw: str) -> str:
     """Normalize a raw account_type to its preferred display name."""
-    return ACCOUNT_DISPLAY_NAMES.get(raw.strip().lower(), raw.strip())
+    key = raw.strip().lower()
+    if key in ACCOUNT_DISPLAY_NAMES:
+        return ACCOUNT_DISPLAY_NAMES[key]
+    return raw.strip().replace("_", " ").title()
 
 TRACKER = _DIGEST_CFG.get("tracker", [])
 
