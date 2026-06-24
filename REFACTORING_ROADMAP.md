@@ -8,25 +8,53 @@ Fix in Claude Code where noted — these require proper branching and testing.
 
 ## Open: Needs Root Cause Fix
 
-### Schema `statement_types` enum drifts from actual parsers
-The `clients/_schema.json` enum for `statement_types` is a manually maintained
-list. Any new parser or cardholder-specific subtype (e.g. `bmo_credit_roger`)
-requires a manual schema update or jsonschema validation silently skips the
-entire client config, blocking all clients on startup.
 
-**Patched:** added `bmo_savings`, `bmo_credit_roger/nicholas/peter/christopher`
-to the enum on 2026-06-24.
+### Amex parser: `_in_ch_section` credit-scan flag never resets
+In `AmexStatementParser.parse()`, `_in_ch_section` is set to `True` when a
+standalone cardholder header line is seen in the credits scan but never resets
+to `False`. For the current statement format this is fine (additional-cardholder
+sections come last), but if a future statement format interleaves sections or
+has trailing non-cardholder content with `-$` amounts, credits could be
+over-captured.
 
-**Root cause to investigate:** Consider removing the `enum` constraint from
-`statement_types` items entirely and letting runtime parser matching handle
-unknown types — the schema doesn't need to gatekeep what the parsers already
-validate. Alternatively, auto-derive the enum from registered parser
-`statement_type` keys at schema generation time.
+**Root cause to investigate:** Reset `_in_ch_section` when a known section
+boundary keyword (e.g. `Total Fees`, `New Balance`, `Summary`) is detected, or
+track end-of-section markers from the statement structure.
+
+---
+
+### Amex parser: `_AMEX_FEE_KEYWORDS` is a hardcoded list
+Fee-type detection in `AmexStatementParser.parse()` uses a hardcoded list
+(`_AMEX_FEE_KEYWORDS`). New AmEx fee names (e.g. "Cash Advance Fee",
+"Foreign Transaction Fee") require a code change before they are captured
+rather than showing as MISSING rows.
+
+**Root cause to investigate:** Detect fee lines structurally — any transaction
+in a "FEES" section of the statement, or any charge where the description
+matches a broad `FEE` suffix pattern — instead of an exact-match list.
+
+---
+
+### No unit tests for Amex parser fee/credit parsing
+Bugs in `AmexStatementParser` (fee lines skipped, cardholder-section credits
+dropped) went undetected until they surfaced as MISSING rows in production
+statements. There is no fixture-based test coverage for these paths.
+
+**Root cause to investigate:** Add a synthetic AmEx statement fixture (fictional
+data, no PII) and pytest cases covering: (1) fee lines with `Card Ending` in
+description, (2) credits under additional-cardholder section headers, (3)
+balance equation tie-out. Pairs with Mode H (upload real fixture to Google Drive
+for manual regression testing).
 
 ---
 
 ## Closed: Fixed
 
+- Schema `statement_types` enum removed from `clients/_schema.json` — fixed
+  2026-06-24 by replacing the enum constraint with a plain `"type": "string"`.
+  New parsers and cardholder subtypes no longer require a schema patch; runtime
+  parser matching handles validation. Prior patch (adding 5 missing types) is
+  superseded.
 - Pay-by-Pay (workers comp) silently dropped from payroll JE — fixed 2026-06-24:
   `adp_payroll_departments` now extracts `DebitforPay-by-Pay` from Liability PDF in
   `parse_cash_splits()`; all three formats (`departments`, `professional`, `1099`) emit
