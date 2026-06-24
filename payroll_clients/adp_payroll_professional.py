@@ -168,9 +168,11 @@ def parse_company_totals(lines: list) -> dict:
 
 
 def _build_journal(cfg: dict, officers: list, admin: dict,
-                   total_1099: float, totals: dict, check_date: str) -> list:
-    rows     = []
-    dept_cfg = cfg["departments"]
+                   total_1099: float, totals: dict, check_date: str,
+                   pay_by_pay: float = 0.0) -> list:
+    rows       = []
+    dept_cfg   = cfg["departments"]
+    wc_account = cfg.get('workers_comp_account') or cfg.get('pay_by_pay_account')
 
     # DEBITS
     officers_cfg = dept_cfg.get("001", {})
@@ -201,6 +203,10 @@ def _build_journal(cfg: dict, officers: list, admin: dict,
 
     if totals["employer_taxes"]      > 0: rows.append(make_row(check_date, cfg["employer_tax_account"],  debit=totals["employer_taxes"]))
     if totals["employer_401k_match"] > 0: rows.append(make_row(check_date, cfg["employer_401k_account"], debit=totals["employer_401k_match"]))
+    if pay_by_pay > 0 and wc_account:
+        rows.append(make_row(check_date, wc_account, debit=pay_by_pay, memo="ADP Pay-by-Pay (Workers Comp)"))
+    elif pay_by_pay > 0:
+        print(f"⚠️  Pay-by-Pay ${pay_by_pay:,.2f} provided but no workers_comp_account in config — not included in JE")
 
     # CREDITS
     total_401k = round(totals["deductions_401k"] + totals["employer_401k_match"], 2)
@@ -214,13 +220,25 @@ def _build_journal(cfg: dict, officers: list, admin: dict,
     net_taxes = round(totals["total_taxes"] + totals["employer_taxes"], 2)
     if net_taxes > 0:
         rows.append(make_row(check_date, cfg["bank_account"], credit=net_taxes, memo="NET TAXES"))
+    if pay_by_pay > 0 and wc_account:
+        rows.append(make_row(check_date, cfg["bank_account"], credit=pay_by_pay, memo="ADP Pay-by-Pay (Workers Comp)"))
 
     return rows
 
 
 def run_adp_payroll_professional(args, config_name):
+    pay_by_pay, filtered = 0.0, []
+    it = iter(args)
+    for a in it:
+        if a == '--pay-by-pay':
+            try: pay_by_pay = float(next(it, '0').replace(',', ''))
+            except ValueError: pass
+        else:
+            filtered.append(a)
+    args = filtered
+
     if len(args) < 1:
-        print("Usage: python payroll.py adp_payroll_professional <payroll.pdf> --config <client.json>")
+        print("Usage: python payroll.py adp_payroll_professional <payroll.pdf> --config <client.json> [--pay-by-pay AMOUNT]")
         sys.exit(1)
 
     pdf_path   = args[0]
@@ -259,7 +277,12 @@ def run_adp_payroll_professional(args, config_name):
     print(f"  ER taxes:       ${totals['employer_taxes']:,.2f}")
     print(f"  ER 401k match:  ${totals['employer_401k_match']:,.2f}")
 
-    rows = _build_journal(cfg, officers, admin, total_1099, totals, check_date)
+    rows = _build_journal(cfg, officers, admin, total_1099, totals, check_date, pay_by_pay=pay_by_pay)
+    if pay_by_pay > 0:
+        print(f"  Pay-by-Pay:     ${pay_by_pay:,.2f}")
+    total_d, total_c = check_balance(rows)
+    if abs(total_d - total_c) > 0.01:
+        print(f"⚠️  JE out of balance: debits ${total_d:,.2f} vs credits ${total_c:,.2f}")
     print_journal_table(rows, cfg["client_name"], check_date)
     iif = write_iif(rows, cfg["client_name"], check_date)
     print(f"  📄 IIF ready for QB import: {iif}")

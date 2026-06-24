@@ -114,13 +114,20 @@ def _emit_special(emp: dict, entry: dict, check_date: str, admin_acct: str) -> l
     return [make_row(check_date, admin_acct, debit=emp["amount"], name=name)]
 
 
-def _build_journal(cfg: dict, employees: list, check_date: str, warnings: list) -> list:
-    rows         = []
-    specials     = cfg.get("special_employees", {})
+def _build_journal(cfg: dict, employees: list, check_date: str, warnings: list,
+                   pay_by_pay: float = 0.0) -> list:
+    rows       = []
+    specials   = cfg.get("special_employees", {})
     coaches_acct = cfg["coaches_account"]
-    admin_acct   = cfg["admin_default_account"]
-    bank_acct    = cfg["bank_account"]
-    total_net    = sum(e["amount"] for e in employees)
+    admin_acct = cfg["admin_default_account"]
+    bank_acct  = cfg["bank_account"]
+    wc_account = cfg.get('workers_comp_account') or cfg.get('pay_by_pay_account')
+    total_net  = sum(e["amount"] for e in employees)
+
+    if pay_by_pay > 0 and wc_account:
+        rows.append(make_row(check_date, wc_account, debit=pay_by_pay, memo="ADP Pay-by-Pay (Workers Comp)"))
+    elif pay_by_pay > 0:
+        warnings.append(f"⚠️  Pay-by-Pay ${pay_by_pay:,.2f} provided but no workers_comp_account in config — not included in JE")
 
     # 1. Check-paid Dept-001 lines first (map to the admin account)
     for emp in employees:
@@ -174,13 +181,25 @@ def _build_journal(cfg: dict, employees: list, check_date: str, warnings: list) 
                              memo="FSDD direct deposit"))
     else:
         rows.append(make_row(check_date, bank_acct, credit=total_net))
+    if pay_by_pay > 0 and wc_account:
+        rows.append(make_row(check_date, bank_acct, credit=pay_by_pay, memo="ADP Pay-by-Pay (Workers Comp)"))
 
     return rows
 
 
 def run_adp_payroll_1099(args, config_name):
+    pay_by_pay, filtered = 0.0, []
+    it = iter(args)
+    for a in it:
+        if a == '--pay-by-pay':
+            try: pay_by_pay = float(next(it, '0').replace(',', ''))
+            except ValueError: pass
+        else:
+            filtered.append(a)
+    args = filtered
+
     if len(args) < 1:
-        print("Usage: python payroll.py adp_payroll_1099 <payroll.pdf> --config <client.json>")
+        print("Usage: python payroll.py adp_payroll_1099 <payroll.pdf> --config <client.json> [--pay-by-pay AMOUNT]")
         sys.exit(1)
 
     pdf_path   = args[0]
@@ -205,11 +224,17 @@ def run_adp_payroll_1099(args, config_name):
     print(f"  TOTAL: ${sum(dept_totals.values()):,.2f}")
 
     warnings = []
-    rows = _build_journal(cfg, employees, check_date, warnings)
+    rows = _build_journal(cfg, employees, check_date, warnings, pay_by_pay=pay_by_pay)
 
     if warnings:
         print()
         for w in warnings: print(w)
+
+    if pay_by_pay > 0:
+        print(f"  Pay-by-Pay:     ${pay_by_pay:,.2f}")
+    total_d, total_c = check_balance(rows)
+    if abs(total_d - total_c) > 0.01:
+        print(f"⚠️  JE out of balance: debits ${total_d:,.2f} vs credits ${total_c:,.2f}")
 
     print_journal_table(rows, cfg["client_name"], check_date)
     iif = write_iif(rows, cfg["client_name"], check_date)

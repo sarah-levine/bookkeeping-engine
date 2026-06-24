@@ -108,6 +108,8 @@ def parse_cash_splits(liability_text: str) -> dict:
     result = {}
     m = re.search(r'DebitforTaxes[^$]*\$([\d,]+\.\d{2})', norm)
     if m: result['nettax'] = amt(m.group(1))
+    m = re.search(r'DebitforPay-by-Pay[^$]*\$([\d,]+\.\d{2})', norm)
+    if m: result['pay_by_pay'] = amt(m.group(1))
     return result
 
 
@@ -140,6 +142,8 @@ def run_adp_payroll_departments(args, config_name):
     medical_pretax = co.get('medical_pretax', 0)
     calsavers      = co.get('calsavers', 0)
     nettax         = cash.get('nettax', 0)
+    wc             = cash.get('pay_by_pay', 0)
+    wc_account     = cfg.get('workers_comp_account') or cfg.get('pay_by_pay_account')
 
     depts = cfg["departments"]
     rows  = []
@@ -150,6 +154,10 @@ def run_adp_payroll_departments(args, config_name):
     rows.append(make_row(check_date, depts["600"]["gross_account"],   debit=officers))
     rows.append(make_row(check_date, cfg["employer_tax_account"],     debit=er_taxes))
     rows.append(make_row(check_date, depts["700"]["gross_account"],   debit=svw, memo=depts["700"].get("contractor_name", "")))
+    if wc > 0 and wc_account:
+        rows.append(make_row(check_date, wc_account, debit=wc, memo="ADP Pay-by-Pay (Workers Comp)"))
+    elif wc > 0:
+        print(f"⚠️  Pay-by-Pay ${wc:,.2f} found in Liability PDF but no workers_comp_account in config — not included in JE")
 
     # CREDITS
     rows.append(make_row(check_date, cfg["health_insurance_account"], credit=medical_pretax, memo="Medical pre-tax 1"))
@@ -160,6 +168,12 @@ def run_adp_payroll_departments(args, config_name):
     rows.append(make_row(check_date, cfg["bank_account"], credit=nettax, memo="NETTAX"))
     if calsavers > 0:
         rows.append(make_row(check_date, cfg["bank_account"], credit=calsavers, memo="CalSavers Roth"))
+    if wc > 0 and wc_account:
+        rows.append(make_row(check_date, cfg["bank_account"], credit=wc, memo="ADP Pay-by-Pay (Workers Comp)"))
+
+    total_d, total_c = check_balance(rows)
+    if abs(total_d - total_c) > 0.01:
+        print(f"⚠️  JE out of balance: debits ${total_d:,.2f} vs credits ${total_c:,.2f}")
 
     print_journal_table(rows, cfg["client_name"], check_date)
     iif = write_iif(rows, cfg["client_name"], check_date)
