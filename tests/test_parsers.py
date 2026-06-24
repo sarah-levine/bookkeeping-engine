@@ -27,7 +27,7 @@ from parsers import (  # noqa: E402
     AmexStatementParser, AmexCheckingParser,
     BankOfAmericaCreditCardParser, BankOfAmericaCheckingParser, BankOfAmericaSavingsParser,
     CitiCheckingParser, CitiVisaCostcoParser, CitiSavingsParser,
-    BMOCheckingParser, NorthernTrustCheckingParser, USBankCheckingParser,
+    BMOCheckingParser, BMOCreditCardParser, NorthernTrustCheckingParser, USBankCheckingParser,
     WellsFargoCreditCardParser, WellsFargoCheckingParser,
 )
 from tests.drive_fixtures import fetch_pdf_entry, drive_available, DriveUnavailable  # noqa: E402
@@ -45,6 +45,7 @@ PARSER_MAP = {
     "citi_savings":            CitiSavingsParser,
     "citi_visa_costco":        CitiVisaCostcoParser,
     "bmo_checking":            BMOCheckingParser,
+    "bmo_credit":              BMOCreditCardParser,
     "northern_trust_checking": NorthernTrustCheckingParser,
     "usbank_checking":         USBankCheckingParser,
     "wells_fargo_credit":      WellsFargoCreditCardParser,

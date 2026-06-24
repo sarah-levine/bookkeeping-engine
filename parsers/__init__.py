@@ -14,6 +14,6 @@ from parsers.amex import AmexStatementParser, AmexCheckingParser
 from parsers.wells_fargo import WellsFargoCreditCardParser, WellsFargoCheckingParser
 from parsers.bofa import BankOfAmericaCreditCardParser, BankOfAmericaCheckingParser, BankOfAmericaSavingsParser
 from parsers.citi import CitiCheckingParser, CitiVisaCostcoParser, CitiSavingsParser
-from parsers.bmo import BMOCheckingParser
+from parsers.bmo import BMOCheckingParser, BMOCreditCardParser
 from parsers.usbank import USBankCheckingParser
 from parsers.northern_trust import NorthernTrustCheckingParser

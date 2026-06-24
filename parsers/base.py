@@ -442,10 +442,8 @@ class StatementParser:
             print(f"Error extracting PDF text: {e}")
             sys.exit(1)
         except FileNotFoundError:
-            print("Error: pdftotext not found.")
-            print("  Ubuntu/Debian: sudo apt-get install poppler-utils")
-            print("  macOS: brew install poppler")
-            sys.exit(1)
+            from parsers.pdf_utils import pdf_to_text
+            return pdf_to_text(self.pdf_path)
 
     def _detect_client(self):
         text_upper = self.text.upper()

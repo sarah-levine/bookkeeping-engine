@@ -56,7 +56,7 @@ from parsers import (
     WellsFargoCreditCardParser, WellsFargoCheckingParser,
     BankOfAmericaCreditCardParser, BankOfAmericaCheckingParser, BankOfAmericaSavingsParser,
     CitiCheckingParser, CitiVisaCostcoParser, CitiSavingsParser,
-    BMOCheckingParser, USBankCheckingParser, NorthernTrustCheckingParser,
+    BMOCheckingParser, BMOCreditCardParser, USBankCheckingParser, NorthernTrustCheckingParser,
     _safe_date_key, _report_header, _summary_block, _balance_check,
     _payments_section, _credits_section, _individual_section,
     _deposits_section, _checks_section, _adp_section,
@@ -247,6 +247,11 @@ def detect_statement_type(pdf_path):
     if 'WELLS FARGO' in text and ('SIGNIFY' in text or 'BUSINESS ESSENTIAL' in text or 'BUSINESS CARD' in text):
         return 'wells_fargo_credit'
 
+    # BMO — credit card before checking (credit card has no checking-account keywords)
+    if 'BMO' in text and ('BUSINESS PLATINUM' in text or 'PLATINUM REWARDS' in text
+                          or 'REWARDS CREDIT CARD' in text):
+        if 'MONTHLY ACTIVITY DETAILS' not in text and 'BEGINNING BALANCE' not in text:
+            return 'bmo_credit'
     # BMO — detect by BMO logo text or account header
     # Note: OCR sometimes reads 'BMO' as 'pmo' or 'BmoO', so check multiple signals
     if (('BMO' in text or 'PMO' in text) and
@@ -323,6 +328,7 @@ _PAGE_TYPE_SIGNATURES = {
     'meevo_inventory':  [['MI210'], ['INVENTORY VALUE']],
     'citi_visa_costco': [['COSTCO ANYWHERE VISA', 'CITICARDS', 'CITI.COM/COSTCO',
                           'COSTCO CASH BACK REWARDS', 'CITIBANK']],
+    'bmo_credit':       [['BMO', 'BUSINESS PLATINUM'], ['REWARDS CREDIT CARD']],
     'bmo_checking':     [['BMO', 'MONTHLY ACTIVITY DETAILS', 'BEGINNING BALANCE'],
                          ['BMO', 'PREMIUM BUSINESS CKG']],
     'bofa_checking':    [['BUSINESS ADVANTAGE FUNDAMENTALS'], ['YOUR CHECKING ACCOUNT'], ['BUSINESS ADVANTAGE RELATIONSHIP BANKING']],
@@ -519,6 +525,7 @@ STATEMENT_TYPE_LABELS = {
     'citi_checking':           'Citi Business Checking',
     'citi_savings':            'Citi Business Savings',
     'citi_visa_costco':        'Citi Costco Anywhere Visa',
+    'bmo_credit':               'BMO Business Platinum Rewards Credit Card',
     'bmo_checking':             'BMO Premium Business Checking',
     'northern_trust_checking': 'Northern Trust Business Checking',
     'wells_fargo_checking':    'Wells Fargo Business Checking',
@@ -1053,6 +1060,7 @@ def main():
         'citi_checking':            CitiCheckingParser,
         'citi_savings':             CitiSavingsParser,
         'citi_visa_costco':         CitiVisaCostcoParser,
+        'bmo_credit':                BMOCreditCardParser,
         'bmo_checking':              BMOCheckingParser,
         'northern_trust_checking':  NorthernTrustCheckingParser,
         'usbank_checking':          USBankCheckingParser,
@@ -1099,7 +1107,7 @@ def main():
             # involving deposits and would need their own fallback shape.
             _CC_STATEMENT_TYPES = {
                 'citi_visa_costco', 'chase_ink', 'chase_united',
-                'amex', 'bofa_credit', 'wells_fargo_credit',
+                'amex', 'bofa_credit', 'wells_fargo_credit', 'bmo_credit',
             }
             if stmt_type in _CC_STATEMENT_TYPES:
                 parser._try_vision_fallback()
@@ -1137,8 +1145,7 @@ def main():
                         s for s in [t[0] for t in _session_stmt_types]
                         if s in ('amex', 'bofa_credit', 'chase_ink',
                                  'chase_united', 'chase_sapphire', 'citi_costco',
-                                 'bmo_credit_roger', 'bmo_credit_nicholas',
-                                 'bmo_credit_peter', 'bmo_credit_christopher')
+                                 'bmo_credit')
                     }
                     cc_payments = getattr(parser, 'credit_card_payments', [])
                     for pmt in cc_payments:
