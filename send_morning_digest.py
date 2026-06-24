@@ -667,7 +667,7 @@ def build_cc_due_email(due_items, today=None):
         rows = ""
         for item in items:
             ready_list = "".join(
-                f'<li style="padding:2px 0;font-size:13px;color:#374151">✅ {acct}</li>'
+                f'<li style="padding:2px 0;font-size:13px;color:#374151">🔓 {acct}</li>'
                 for acct in item["ready_accounts"]
             )
             rows += f"""
