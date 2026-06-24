@@ -115,24 +115,42 @@ def test_registry_accepts_valid_config():
         shutil.rmtree(d)
 
 
-def test_registry_rejects_invalid_config():
-    """An unknown statement_types value must fail schema validation."""
+def test_registry_accepts_unknown_statement_type():
+    """Unknown statement_types values must be accepted — enum constraint was removed.
+    Runtime parser matching handles validation; the schema no longer gatekeeps it."""
     try:
         import jsonschema  # noqa: F401
     except ImportError:
         raise unittest.SkipTest("jsonschema not installed — validation is skipped")
     d = Path(tempfile.mkdtemp())
     try:
-        bad = _valid_cfg()
-        bad["statement_types"] = ["not_a_real_format"]
+        cfg = _valid_cfg()
+        cfg["statement_types"] = ["not_a_real_format"]
+        _write(d, "cfg.json", cfg)
+        reg = ClientRegistry(clients_dir=str(d))
+        assert "ACME INC" in reg._configs, "unknown statement_type should not block the config"
+        print("PASS  test_registry_accepts_unknown_statement_type")
+    finally:
+        shutil.rmtree(d)
+
+
+def test_registry_rejects_missing_required_fields():
+    """Configs missing client_name or canonical_name must fail schema validation."""
+    try:
+        import jsonschema  # noqa: F401
+    except ImportError:
+        raise unittest.SkipTest("jsonschema not installed — validation is skipped")
+    d = Path(tempfile.mkdtemp())
+    try:
+        bad = {"canonical_name": "ACME INC"}  # missing client_name
         _write(d, "bad.json", bad)
         try:
             ClientRegistry(clients_dir=str(d))
         except ValueError as e:
-            assert "not_a_real_format" in str(e) or "schema validation" in str(e)
-            print("PASS  test_registry_rejects_invalid_config")
+            assert "client_name" in str(e) or "schema validation" in str(e)
+            print("PASS  test_registry_rejects_missing_required_fields")
             return
-        assert False, "expected ValueError for invalid config"
+        assert False, "expected ValueError for config missing required field"
     finally:
         shutil.rmtree(d)
 
