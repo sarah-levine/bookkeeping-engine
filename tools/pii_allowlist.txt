@@ -27,7 +27,7 @@ withdrawal withdrawals deposits debits credits payment payments autopay
 electronic interest finance charge charges annual fee fees balance previous new
 total totals account ending closing close date statement cardmember service cardholder
 summary description vendor payee amount check checks paid presented conventionally
-purchase purchases refund refunds return returns wireless automatic charged
+purchase purchases refund refunds return returns wireless automatic charged membership
 advances advance standard undeposited sales receipts transaction transactions
 history overdraft periodic teller atm pos eft micr instant late returned monthly
 days billing period inquiries percentage subject minimum limit available indn

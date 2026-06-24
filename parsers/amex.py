@@ -24,6 +24,14 @@ except ImportError:
     OCR_AVAILABLE = False
 
 from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CARDHOLDERS, _classify_cc_transaction
+
+# Fee line keywords — detected before the skip_keywords check so that fee lines
+# containing "Card Ending" (e.g. "Mui Choo Ng Card Ending 1234 Annual Fee") are
+# captured rather than dropped. Order matters: longer/more-specific first.
+_AMEX_FEE_KEYWORDS = [
+    'ANNUAL MEMBERSHIP FEE', 'LATE PAYMENT FEE', 'RETURNED PAYMENT FEE',
+    'CASH ADVANCE FEE', 'BALANCE TRANSFER FEE', 'ANNUAL FEE', 'MEMBERSHIP FEE',
+]
 from parsers.report import *
 from parsers.report import (
     _report_header, _summary_block, _balance_check,
@@ -129,8 +137,26 @@ class AmexStatementParser(StatementParser):
             re.IGNORECASE
         )
 
+        # Cardholder section header pattern — used in both the credits scan and
+        # the charges scan to track which additional cardholder's sub-section we
+        # are currently reading.
+        _ch_header_re = re.compile(
+            r'^(' + '|'.join(re.escape(c) for c in _client_cardholders) + r')\s*$',
+            re.IGNORECASE
+        ) if _client_cardholders else None
+        _in_ch_section = False
+
         # Payments and Credits
         for line in lines:
+            stripped_line = line.strip()
+
+            # Track cardholder section headers so that credits appearing under a
+            # cardholder's section (without the cardholder name inline) are still
+            # captured.  A standalone cardholder name line starts the section;
+            # the flag stays set until the next cardholder header resets it.
+            if _ch_header_re and _ch_header_re.match(stripped_line):
+                _in_ch_section = True
+
             # Actual payments
             m = re.match(
                 r'(\d{2}/\d{2}/\d{2})\*?\s+.+?(?:AUTOPAY PAYMENT RECEIVED|ELECTRONIC PAYMENT RECEIVED|ONLINE PAYMENT|PAYMENT RECEIVED|PAYMENT - THANK YOU).+?-\$([0-9,]+\.\d{2})',
@@ -152,13 +178,15 @@ class AmexStatementParser(StatementParser):
             # Credits (e.g. AMEX Wireless Credit, refunds, returns)
             # Handle multiple formats:
             # 1. Simple: DATE DESCRIPTION -$AMOUNT
-            # 2. With cardholder: DATE CARDHOLDER DESCRIPTION -$AMOUNT
-            # Match if it has CREDIT/REFUND/RETURN/WIRELESS keyword OR is preceded by cardholder
+            # 2. With cardholder inline: DATE CARDHOLDER DESCRIPTION -$AMOUNT
+            # 3. Section format: standalone "Cardholder Name" header line, then DATE DESCRIPTION -$AMOUNT
             mc = _credit_re.match(line)
             if mc and not m:
                 desc = mc.group(3).strip()
-                # Only add if it looks like a credit
-                if any(keyword in desc.upper() for keyword in ['CREDIT', 'REFUND', 'RETURN', 'WIRELESS']) or mc.group(2):
+                # Accept if keyword match, cardholder captured inline (group 2), or
+                # we are inside a named cardholder's section of the statement.
+                if (any(keyword in desc.upper() for keyword in ['CREDIT', 'REFUND', 'RETURN', 'WIRELESS'])
+                        or mc.group(2) or _in_ch_section):
                     self.credits.append({
                         'date': mc.group(1),
                         'description': desc,
@@ -202,13 +230,18 @@ class AmexStatementParser(StatementParser):
                 date_str = inline_m.group(1)
                 vendor_raw = inline_m.group(2).strip()
                 txn_amount_str = inline_m.group(3)
-                if any(kw in vendor_raw for kw in skip_keywords):
+                # Fee lines (Annual Fee, Late Payment Fee, etc.) may contain skip
+                # keywords such as "Card Ending" when formatted as
+                # "Mui Choo Ng Card Ending 1234 Annual Fee". Detect fee type first
+                # so these lines are captured rather than dropped.
+                vendor_upper = vendor_raw.upper()
+                _fee_kw = next((kw for kw in _AMEX_FEE_KEYWORDS if kw in vendor_upper), None)
+                if _fee_kw:
+                    vendor_raw = _fee_kw.title()
+                elif any(kw in vendor_raw for kw in skip_keywords):
                     pending_date = None
                     pending_vendor = None
                     continue
-                # Check if this is an ANNUAL FEE line — if so, use "ANNUAL FEE" as vendor instead of cardholder
-                if 'ANNUAL FEE' in vendor_raw:
-                    vendor_raw = 'ANNUAL FEE'
                 else:
                     # Remove trailing ref numbers / extra merchant detail
                     vendor_raw = re.sub(r'\s{2,}.*$', '', vendor_raw)
@@ -257,20 +290,24 @@ class AmexStatementParser(StatementParser):
 
             txn_m = txn_line.match(stripped)
             if txn_m:
-                if any(kw in txn_m.group(2) for kw in skip_keywords):
+                raw2 = txn_m.group(2)
+                raw2_upper = raw2.upper()
+                # Fee detection before skip check — same rationale as inline path.
+                _fee_kw2 = next((kw for kw in _AMEX_FEE_KEYWORDS if kw in raw2_upper), None)
+                if _fee_kw2:
+                    pending_date = txn_m.group(1)
+                    pending_vendor = _fee_kw2.title()
+                elif any(kw in raw2 for kw in skip_keywords):
                     pending_date = None
                     pending_vendor = None
                     continue
-                pending_date = txn_m.group(1)
-                vendor_raw = txn_m.group(2)
-                # Check if this is an ANNUAL FEE line — if so, use "ANNUAL FEE" as vendor instead of cardholder
-                if 'ANNUAL FEE' in vendor_raw:
-                    vendor_raw = 'ANNUAL FEE'
                 else:
+                    pending_date = txn_m.group(1)
+                    vendor_raw = raw2
                     # Normal extraction: remove amount and trailing state codes
                     vendor_raw = re.sub(r'\s{2,}.*$', '', vendor_raw)
                     vendor_raw = re.sub(r'\s+[A-Z][A-Z\s]+[A-Z]{2}\s*$', '', vendor_raw).strip()
-                pending_vendor = vendor_raw
+                    pending_vendor = vendor_raw
 
         # Fees / Interest
         m = re.search(r'Total Fees for this Period\s+\$([0-9,]+\.\d{2})', self.text)
