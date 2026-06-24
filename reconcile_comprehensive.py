@@ -76,6 +76,54 @@ from parsers.base import (
 )
 
 
+def _check_statement_date(date_str: str, client_name: str, account_type: str) -> str | None:
+    """Return a warning string if date_str doesn't match the expected closing day, else None.
+
+    Looks up cc_blocking_rules in digest_config.json. Only fires for CC accounts
+    that have a configured closing_day. Allows ±2 days for month-end edge cases.
+    """
+    try:
+        from datetime import datetime
+        from log_utils import load_private_json
+        cfg = load_private_json("digest_config.json") or {}
+        display_names = cfg.get("client_display_names", {})
+        rules_map = cfg.get("cc_blocking_rules", {})
+
+        # Resolve display name for this client
+        display = display_names.get(client_name.strip().lower(), client_name.strip())
+        client_rules = rules_map.get(display)
+        if not client_rules:
+            return None
+
+        blocker = next(
+            (b for b in client_rules.get("cc_blockers", []) if b["key"] == account_type),
+            None,
+        )
+        if not blocker:
+            return None
+
+        closing_day = int(blocker["closing_day"])
+        parsed = None
+        for fmt in ("%m/%d/%y", "%m/%d/%Y", "%Y-%m-%d"):
+            try:
+                parsed = datetime.strptime(date_str.strip(), fmt).date()
+                break
+            except ValueError:
+                pass
+        if parsed is None:
+            return None
+
+        if abs(parsed.day - closing_day) > 2:
+            return (
+                f"⚠️  Statement date {date_str} (day {parsed.day}) doesn't match "
+                f"expected closing day {closing_day} for {account_type}. "
+                f"Expected a date around the {closing_day}th."
+            )
+    except Exception:
+        pass
+    return None
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
 # CLIENT DETECTION
@@ -1284,6 +1332,23 @@ def main():
                     print('  📋 Logging now — sheet will update next time you run with "done".')
             print('─' * 80)
             print()
+            # ───────────────────────────────────────────────────────────────
+
+            # ── Closing-day validation ──────────────────────────────────────
+            if has_data and parser.client_name:
+                _raw_date = getattr(parser, 'closing_date',
+                            getattr(parser, 'statement_date', ''))
+                _date_warn = _check_statement_date(
+                    str(_raw_date), parser.client_name, stmt_type)
+                if _date_warn:
+                    print(f"\n  {_date_warn}")
+                    if no_prompt:
+                        print("  Writing anyway (--no-prompt mode).")
+                    else:
+                        _cont = input("  Continue writing to logs? [y/N] ").strip().lower()
+                        if _cont != 'y':
+                            print("  Skipped. Fix the statement date and re-run.")
+                            continue
             # ───────────────────────────────────────────────────────────────
 
             # ── Reconciliation log ──────────────────────────────────────────

@@ -383,6 +383,17 @@ def _ensure_acct_type_mapped(account_type: str) -> None:
         pass
 
 
+def _normalize_date_iso(date_str: str) -> str:
+    """Normalize any common date string to YYYY-MM-DD. Returns original if unparseable."""
+    from datetime import datetime
+    for fmt in ("%m/%d/%y", "%m/%d/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(date_str.strip(), fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return date_str
+
+
 def write_both_logs(
     *,
     client: str,
@@ -409,6 +420,9 @@ def write_both_logs(
     ts = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %H:%M:%S")
     client_key = _normalize_client_key(client)
 
+    # Normalize date to YYYY-MM-DD for consistent ISO-sortable storage
+    statement_end_date = _normalize_date_iso(statement_end_date)
+
     # ── 1. reconciliation_log.csv ─────────────────────────────────────────
     csv_path = get_logs_dir() / "reconciliation_log.csv"
     fields = ["client", "client_name", "account_type", "account_ending",
@@ -433,12 +447,13 @@ def write_both_logs(
         with open(csv_path, newline="") as f:
             existing_rows = list(csv.DictReader(f))
 
-    # Upsert: replace matching (client, account_type, statement_date) row
+    # Upsert: replace matching (client, account_type, statement_date) row.
+    # Normalize existing dates for comparison to handle legacy MM/DD/YY entries.
     replaced = False
     for i, r in enumerate(existing_rows):
         if (r.get("client") == client_key
                 and r.get("account_type") == account_type
-                and r.get("statement_date") == statement_end_date):
+                and _normalize_date_iso(r.get("statement_date", "")) == statement_end_date):
             existing_rows[i] = row
             replaced = True
             break
