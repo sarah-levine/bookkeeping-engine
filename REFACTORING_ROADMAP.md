@@ -8,15 +8,7 @@ Fix in Claude Code where noted — these require proper branching and testing.
 
 ## Open: Needs Root Cause Fix
 
-### 3. Stale ghost row in `reconciliation_log.csv` for JoJo Citi Costco May 2026
-**File:** `Bookkeeping-clients/reconciliation_log.csv`
-**Root cause:** The timed-out `reconcile_comprehensive.py` run early in the session
-wrote a row for `citi_visa_costco / 05/20/26` with `total_payments = 0.00` and
-no `account_ending`. The correct row (written later) has `total_payments = 5316.23`
-and `account_ending = 3003`. The ghost row is harmless now (string sort picks
-the June date) but will cause confusion on future audits.
-**Fix:** Delete the ghost row in `Bookkeeping-clients` — keep only the row with
-`account_ending = 3003` and correct `total_payments`.
+*(none)*
 
 ### 6. Pay-by-Pay (Workers Comp) silently dropped from payroll JE in 3 formats
 **Root cause:** Three payroll formats never read or write Pay-by-Pay from the
@@ -74,6 +66,9 @@ elif wc > 0:
 
 ## Closed: Fixed
 
+- Ghost row in `reconciliation_log.csv` for JoJo Citi Costco May 2026 (`total_payments = 0.00`,
+  no `account_ending`) — confirmed absent from Bookkeeping-clients on 2026-06-24; row was
+  never written to the canonical copy, so no deletion needed.
 - `citi_visa_costco → citi_costco` alias missing from `load_reconciliation_log`
   in `send_morning_digest.py` — fixed 2026-06-22 by reading `acct_type_map`
   from `sheets_config.json` instead of a hardcoded dict.
