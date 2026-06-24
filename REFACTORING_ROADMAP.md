@@ -8,7 +8,20 @@ Fix in Claude Code where noted — these require proper branching and testing.
 
 ## Open: Needs Root Cause Fix
 
-*(none)*
+### Schema `statement_types` enum drifts from actual parsers
+The `clients/_schema.json` enum for `statement_types` is a manually maintained
+list. Any new parser or cardholder-specific subtype (e.g. `bmo_credit_roger`)
+requires a manual schema update or jsonschema validation silently skips the
+entire client config, blocking all clients on startup.
+
+**Patched:** added `bmo_savings`, `bmo_credit_roger/nicholas/peter/christopher`
+to the enum on 2026-06-24.
+
+**Root cause to investigate:** Consider removing the `enum` constraint from
+`statement_types` items entirely and letting runtime parser matching handle
+unknown types — the schema doesn't need to gatekeep what the parsers already
+validate. Alternatively, auto-derive the enum from registered parser
+`statement_type` keys at schema generation time.
 
 ---
 
