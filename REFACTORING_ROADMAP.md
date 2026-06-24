@@ -9,20 +9,6 @@ Fix in Claude Code where noted — these require proper branching and testing.
 ## Open: Needs Root Cause Fix
 
 
-### Amex parser: `_in_ch_section` credit-scan flag never resets
-In `AmexStatementParser.parse()`, `_in_ch_section` is set to `True` when a
-standalone cardholder header line is seen in the credits scan but never resets
-to `False`. For the current statement format this is fine (additional-cardholder
-sections come last), but if a future statement format interleaves sections or
-has trailing non-cardholder content with `-$` amounts, credits could be
-over-captured.
-
-**Root cause to investigate:** Reset `_in_ch_section` when a known section
-boundary keyword (e.g. `Total Fees`, `New Balance`, `Summary`) is detected, or
-track end-of-section markers from the statement structure.
-
----
-
 ### Amex parser: `_AMEX_FEE_KEYWORDS` is a hardcoded list
 Fee-type detection in `AmexStatementParser.parse()` uses a hardcoded list
 (`_AMEX_FEE_KEYWORDS`). New AmEx fee names (e.g. "Cash Advance Fee",
@@ -50,6 +36,10 @@ for manual regression testing).
 
 ## Closed: Fixed
 
+- Amex parser `_in_ch_section` credit-scan flag never reset — fixed 2026-06-24
+  by clearing the flag when a section-boundary keyword (`Total Fees`, `New Balance`,
+  `Account Summary`, etc.) is seen; prevents over-capture of post-cardholder `-$`
+  lines as credits.
 - Schema `statement_types` enum removed from `clients/_schema.json` — fixed
   2026-06-24 by replacing the enum constraint with a plain `"type": "string"`.
   New parsers and cardholder subtypes no longer require a schema patch; runtime

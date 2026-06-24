@@ -146,6 +146,15 @@ class AmexStatementParser(StatementParser):
         ) if _client_cardholders else None
         _in_ch_section = False
 
+        # Section boundary keywords that signal we have left the additional-
+        # cardholder area and entered the Fees/Interest/Summary sections.
+        # When any of these appear the cardholder-section flag is cleared so
+        # we stop accepting bare -$ lines as cardholder credits.
+        _ch_section_end_kw = (
+            'Total Fees', 'Total Interest', 'New Balance', 'Account Summary',
+            'FEES', 'INTEREST CHARGES',
+        )
+
         # Payments and Credits
         for line in lines:
             stripped_line = line.strip()
@@ -153,9 +162,11 @@ class AmexStatementParser(StatementParser):
             # Track cardholder section headers so that credits appearing under a
             # cardholder's section (without the cardholder name inline) are still
             # captured.  A standalone cardholder name line starts the section;
-            # the flag stays set until the next cardholder header resets it.
+            # a known section-boundary keyword closes it.
             if _ch_header_re and _ch_header_re.match(stripped_line):
                 _in_ch_section = True
+            elif _in_ch_section and any(kw in stripped_line for kw in _ch_section_end_kw):
+                _in_ch_section = False
 
             # Actual payments
             m = re.match(
