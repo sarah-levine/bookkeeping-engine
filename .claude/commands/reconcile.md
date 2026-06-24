@@ -44,12 +44,9 @@ Run this skill when the user drops a bank or credit card statement PDF (or any f
 
 ## Client Notes
 
-Client-specific reminders are stored in `reconciliation_notes` inside each client's JSON config in Bookkeeping-clients. They print automatically during step 2. Common examples:
-- De Anza checking: SBA EIDL loan entries, Marcone/Kaiser manual invoices
-- De Anza credit cards: confirm payment check is in QuickBooks first
-- De Anza payroll: run the payroll journal entry before reconciling
+Client-specific reminders are stored in `reconciliation_notes` inside each client's JSON config in Bookkeeping-clients. They print automatically during step 2 — read them before asking the user to confirm QuickBooks.
 
-To add notes for a new client, add `"reconciliation_notes"` to their JSON config in Bookkeeping-clients. Keys can be an exact account_type, a category (`credit_cards`, `checking`, `savings`, `payroll`), or `"general"`.
+To add notes for a client, add `"reconciliation_notes"` to their JSON config in Bookkeeping-clients. Keys can be an exact account_type, a category (`credit_cards`, `checking`, `savings`, `payroll`), or `"general"` as a catch-all.
 
 ## Error Handling
 
