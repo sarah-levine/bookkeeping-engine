@@ -8,28 +8,6 @@ Fix in Claude Code where noted — these require proper branching and testing.
 
 ## Open: Needs Root Cause Fix
 
-### 4. No BMO credit card parser — falls through to `unknown`
-**File:** `parsers/bmo.py`, `reconcile_comprehensive.py`
-**Root cause:** `bmo.py` only contains `BMOCheckingParser`. There is no
-`BMOCreditParser` (or equivalent) for the BMO Business Platinum Rewards Credit
-Card. `detect_statement_type()` has no detection logic for BMO credit statements,
-so they return `'unknown'` and are skipped. References to `bmo_credit_roger`,
-`bmo_credit_nicholas`, `bmo_credit_peter`, and `bmo_credit_christopher` exist in
-the CC payment tie-out allowlist (line ~1140) but no parser or label backs them.
-**Affected client:** De Anza Appliance Parts & Service (Roger Boucher, acct ending 0977).
-**Fix:**
-1. Add `BMOCreditParser` to `parsers/bmo.py` — parses the "Individual Bill Account
-   Summary" format (Previous Balance, Payments, Credits, Purchases and Other Debits,
-   New Balance) and the "Individual Account Activity" transaction table.
-2. Add detection logic in `detect_statement_type()` keying on
-   `'INDIVIDUAL BILL ACCOUNT SUMMARY'` or `'BMO BUSINESS PLATINUM REWARDS'`.
-3. Add `bmo_credit` (and per-cardholder variants as needed) to
-   `STATEMENT_TYPE_LABELS` in `reconcile_comprehensive.py`.
-4. Wire `BMOCreditParser` into the parser dispatch block alongside other CC parsers.
-**Fix in Claude Code.**
-
----
-
 ### 1. `write_both_logs` upsert key is wrong
 **File:** `log_utils.py` — `write_both_logs()`
 **Root cause:** Upserts on `(client, account_type)` only, so running two statements
@@ -78,3 +56,9 @@ key fix prevents this class of issue going forward.
 - `citi_visa_costco` not supported in `manual_statement_entry.py` — fixed
   2026-06-22 by adding `load_from_dict` to `CitiVisaCostcoParser` and wiring
   the type into `PARSER_BY_TYPE`.
+- No BMO credit card parser — fixed 2026-06-24 by adding `BMOCreditCardParser`
+  to `parsers/bmo.py` with `load_from_dict()`, `parse()`, `generate_report()`,
+  and `_expand_date()` (MM/DD/YYYY normalization); wired `bmo_credit` into
+  `detect_statement_type()`, `STATEMENT_TYPE_LABELS`, and the parser dispatch in
+  `reconcile_comprehensive.py`. Pure-Python PDF text extraction and OCR fallback
+  (pdftoppm + tesseract) added in `parsers/pdf_utils.py`.
