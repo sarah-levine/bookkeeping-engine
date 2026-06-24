@@ -131,3 +131,78 @@ def list_files(subdir: str = "") -> list[str]:
     if isinstance(data, list):
         return [f["name"] for f in data if f["type"] == "file"]
     return []
+
+
+# ── high-level helpers ──────────────────────────────────────────────────────
+
+_LOG_FILES = ["reconciliation_log.csv", "recon_log.json"]
+_CLIENT_CONFIGS = [f for f in [
+    "de_anza.json", "duran_hcp.json", "estudillo_realty.json",
+    "fcba_academy.json", "jojo_hair_studio.json", "mp_cheng.json",
+    "needles_studio.json", "paintbox_hair_studio.json",
+    "silicon_valley_west.json", "sheets_config.json", "digest_config.json",
+]]
+
+
+def sync_down(include_configs: bool = True) -> None:
+    """Pull log files (and optionally client configs) from Bookkeeping-clients."""
+    targets = list(_LOG_FILES)
+    if include_configs:
+        targets += _CLIENT_CONFIGS
+    for name in targets:
+        try:
+            pull_file(name)
+            print(f"  ⬇  pulled {name}")
+        except Exception as e:
+            print(f"  ⚠  skipped {name}: {e}")
+
+
+def sync_up(message: str, dispatch: bool = True) -> None:
+    """Push log files back to Bookkeeping-clients and optionally trigger Sheet sync."""
+    push_files(_LOG_FILES, message=message)
+    if dispatch:
+        trigger_dispatch()
+
+
+def log_recon(
+    *,
+    client: str,
+    client_name: str,
+    account_type: str,
+    statement_end_date: str,
+    statement: str = "",
+    beginning_balance: str,
+    ending_balance: str,
+    total_payments: str = "0.00",
+    status: str = "CLEAN",
+    commit_message: str = None,
+    dispatch: bool = True,
+) -> None:
+    """Full cycle: pull logs → write_both_logs → push → dispatch.
+
+    Pulls fresh copies of the log files and client configs first so the
+    local state is always current before writing.
+    """
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    os.environ.setdefault("BOOKKEEPING_CLIENTS_DIR", str(LOCAL_DIR))
+    os.environ.setdefault("BOOKKEEPING_LOGS_DIR", str(LOCAL_DIR))
+    os.environ["BOOKKEEPING_NO_PROMPT"] = "1"
+
+    sync_down(include_configs=True)
+
+    from log_utils import write_both_logs
+    write_both_logs(
+        client=client,
+        client_name=client_name,
+        account_type=account_type,
+        statement_end_date=statement_end_date,
+        statement=statement,
+        beginning_balance=beginning_balance,
+        ending_balance=ending_balance,
+        total_payments=total_payments,
+        status=status,
+    )
+
+    msg = commit_message or f"Log {client_name} {account_type} {statement_end_date} ({status})"
+    sync_up(msg, dispatch=dispatch)
