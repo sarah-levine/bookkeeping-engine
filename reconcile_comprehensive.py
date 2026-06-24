@@ -1192,8 +1192,15 @@ def main():
                 'citi_visa_costco', 'chase_ink', 'chase_united',
                 'amex', 'bofa_credit', 'wells_fargo_credit', 'bmo_credit',
             }
+            _vision_failed = False
             if stmt_type in _CC_STATEMENT_TYPES:
-                parser._try_vision_fallback()
+                try:
+                    parser._try_vision_fallback()
+                except Exception as _ve:
+                    print()
+                    print(f"⚠ {_ve}")
+                    print(f"  Switching to manual entry mode...")
+                    _vision_failed = True
 
             # Check if parser extracted usable balance data
             has_data = any([
@@ -1203,9 +1210,10 @@ def main():
                 getattr(parser, 'ending_balance', None),
             ])
 
-            if not has_data:
-                print()
-                print(f"⚠ Could not extract balance data from this PDF (likely a scanned image).")
+            if not has_data or _vision_failed:
+                if not has_data:
+                    print()
+                    print(f"⚠ Could not extract balance data from this PDF (likely a scanned image).")
                 print(f"  Switching to manual entry mode...")
                 report = manual_entry_for_parser(stmt_type, parser.client_name or '')
             elif stmt_type in ('bofa_checking', 'amex_checking', 'northern_trust_checking', 'wells_fargo_checking', 'bmo_checking', 'usbank_checking', 'citi_checking', 'citi_savings'):

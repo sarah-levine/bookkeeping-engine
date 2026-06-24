@@ -22,6 +22,11 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
 
+class ParseDidNotTieError(RuntimeError):
+    """Raised by _try_vision_fallback when the parse did not tie to the penny
+    and vision fallback is unavailable. Callers should redirect to manual entry."""
+
+
 class ClientRegistry:
     """
     Loads all client configs from clients/*.json and provides:
@@ -575,26 +580,19 @@ class StatementParser:
         try:
             from extractors import vision_helper
         except ImportError:
-            print(
-                "  ⚠ Parse self-check failed (balance equation does not tie). "
-                "Vision fallback module not found.",
-                file=sys.stderr,
+            raise ParseDidNotTieError(
+                "Parse self-check failed (balance equation does not tie) and "
+                "the vision fallback module is not installed. "
+                "Switch to manual entry (Mode G)."
             )
-            return
 
         ok, reason = vision_helper.is_available()
         if not ok:
-            print(
-                f"  ⚠ Parse self-check failed (balance equation does not tie). "
-                f"Vision fallback unavailable: {reason}",
-                file=sys.stderr,
+            raise ParseDidNotTieError(
+                f"Parse self-check failed (balance equation does not tie) and "
+                f"vision fallback is unavailable ({reason}). "
+                f"Set ANTHROPIC_API_KEY or switch to manual entry (Mode G)."
             )
-            print(
-                f"    Set ANTHROPIC_API_KEY and install: "
-                f"pip install anthropic pymupdf",
-                file=sys.stderr,
-            )
-            return
 
         print(
             "  ⚠ pdftotext parse did not tie out — invoking Claude Vision "
