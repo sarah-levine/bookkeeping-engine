@@ -7,6 +7,11 @@ Whenever applying a data patch or workaround (e.g. manually correcting a CSV ent
 3. Never ship a patch-only fix without one of the above
 4. When fixing a parser or classification bug, always scan existing log files (`recon_log.json`, `reconciliation_log.csv`) for historical entries affected by the same bug and correct them in the same commit
 
+## Status value renames
+Whenever a status string value is renamed (e.g. `CLEAN` → `DONE`), always backfill existing log entries in the same session:
+1. Run `python3 tools/backfill_status.py <old> <new>` against the private logs dir
+2. Commit the updated `recon_log.json` to `Bookkeeping-clients` in the same commit as the code change
+
 ## Client name governance
 Never write a new client key, name variant, or account_type to any log file (`recon_log.json`, `reconciliation_log.csv`, `payroll_log.csv`) without explicit user confirmation. If a reconciliation or payroll run surfaces an unrecognized client name or account type, stop and ask before committing. The runtime guards `log_utils._assert_known_client` and `log_utils._assert_known_account_type` enforce this technically — do not bypass them.
 
