@@ -33,12 +33,18 @@ def _load_credentials_info():
     creds_json = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
     if creds_json:
         return json.loads(creds_json)
+    # Check GOOGLE_SERVICE_ACCOUNT_FILE (file path) — same env var used by
+    # reconcile_comprehensive.py --from-drive
+    sa_file = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "")
+    if sa_file and Path(sa_file).exists():
+        with open(sa_file) as f:
+            return json.load(f)
     creds_file = Path(__file__).parent.parent / "credentials.json"
     if creds_file.exists():
         with open(creds_file) as f:
             return json.load(f)
     raise DriveUnavailable(
-        "No Drive credentials: set GOOGLE_SHEETS_CREDENTIALS or add credentials.json"
+        "No Drive credentials: set GOOGLE_SHEETS_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT_FILE or add credentials.json"
     )
 
 

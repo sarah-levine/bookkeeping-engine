@@ -24,6 +24,12 @@ except ImportError:
 from parsers.base import StatementParser, _registry, KNOWN_CLIENTS
 from parsers.vendor_normalize import strip_client_suffixes
 from parsers.report import *
+from parsers.report import (
+    _report_header, _summary_block, _balance_check,
+    _payments_section, _credits_section, _deposits_section,
+    _checks_section, _cc_payments_section, _add_missing_row,
+    _charges_section, _safe_date_key, _now_pst
+)
 
 class WellsFargoCreditCardParser(StatementParser):
     """

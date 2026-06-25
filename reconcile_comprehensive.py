@@ -1118,6 +1118,7 @@ def main():
         print("Usage: python reconcile_comprehensive.py <statement.pdf> [output.txt]")
         print("       python reconcile_comprehensive.py --manual")
         print("       python reconcile_comprehensive.py --from-drive <drive_file_id_or_url>")
+        print("       python reconcile_comprehensive.py <statement.pdf> --dry-run")
         print("       python reconcile_comprehensive.py <statement.pdf> --check-payee 1235='Jane Doe'")
         print()
         print("Supported statement types:")
@@ -1138,6 +1139,13 @@ def main():
     # Parse --no-prompt flag — auto-answers 'later' at the QB confirmation prompt
     # so the script can run non-interactively (e.g. from Claude's environment).
     no_prompt = '--no-prompt' in sys.argv
+
+    # Parse --dry-run flag — runs full parse + balance check but skips all
+    # log writes, git pushes, sheet updates, and QB prompts.  Used for testing
+    # parser changes against real fixtures without polluting production logs.
+    dry_run = '--dry-run' in sys.argv
+    if dry_run:
+        no_prompt = True  # suppress interactive prompts
 
     # Parse --check-payee and --check-date flags
     # Usage: --check-payee 1239='Jane Doe'  --check-date 1239=02/28/26
@@ -1226,10 +1234,13 @@ def main():
                 print(f"[Step 6] Client: {parser.client_name}")
             else:
                 print(f"[Step 6] ⚠ Client not recognized in this statement.")
-                new_name = build_new_client_config(stmt_type, detected_text=parser.text)
-                if new_name:
-                    parser.client_name = new_name
-                    print(f"Client:     {parser.client_name}")
+                if no_prompt:
+                    print(f"  --no-prompt: skipping interactive client setup")
+                else:
+                    new_name = build_new_client_config(stmt_type, detected_text=parser.text)
+                    if new_name:
+                        parser.client_name = new_name
+                        print(f"Client:     {parser.client_name}")
             print(f"[Step 7] Parsing transactions...")
             parser.parse()
 
@@ -1242,9 +1253,11 @@ def main():
                 'citi_visa_costco', 'chase_ink', 'chase_united',
                 'amex', 'bofa_credit', 'wells_fargo_credit', 'bmo_credit',
             }
-            if stmt_type in _CC_STATEMENT_TYPES:
+            if stmt_type in _CC_STATEMENT_TYPES and not dry_run:
                 print(f"[Step 7b] Verifying balance (Vision fallback if needed)...")
                 parser._try_vision_fallback()
+            elif stmt_type in _CC_STATEMENT_TYPES and dry_run:
+                print(f"[Step 7b] --dry-run: skipping Vision fallback")
 
             # Check if parser extracted usable balance data
             has_data = any([
@@ -1257,6 +1270,9 @@ def main():
             if not has_data:
                 print()
                 print(f"⚠ Could not extract balance data from this PDF (likely a scanned image).")
+                if no_prompt:
+                    print(f"  --no-prompt: skipping manual entry mode")
+                    continue
                 print(f"  Switching to manual entry mode...")
                 report = manual_entry_for_parser(stmt_type, parser.client_name or '')
             elif stmt_type in ('bofa_checking', 'amex_checking', 'northern_trust_checking', 'wells_fargo_checking', 'bmo_checking', 'usbank_checking', 'citi_checking', 'citi_savings'):
@@ -1330,7 +1346,7 @@ def main():
                 raise SystemExit(1)
 
             # ── Digest log: IN_PROGRESS (written immediately after parse) ───
-            if has_data and parser.client_name:
+            if has_data and parser.client_name and not dry_run:
                 try:
                     from log_utils import upsert_recon_log as _upsert_log
                     _beg = getattr(parser, 'beginning_balance',
@@ -1427,11 +1443,14 @@ def main():
             # ───────────────────────────────────────────────────────────────
 
             # ── Reconciliation log ──────────────────────────────────────────
-            print(f"[Step 12] Writing logs...")
+            if dry_run:
+                print(f"[Step 12] --dry-run: skipping log writes and sheet updates")
+            else:
+                print(f"[Step 12] Writing logs...")
             # Always write to BOTH reconciliation_log.csv AND recon_log.json.
             # "later" logs with IN_PROGRESS status; "done" logs with DONE status.
             # Sheet update only fires on "done".
-            if has_data and parser.client_name:
+            if has_data and parser.client_name and not dry_run:
                 try:
                     from log_utils import write_both_logs as _write_logs
                     _beg = getattr(parser, 'beginning_balance',
@@ -1476,7 +1495,7 @@ def main():
                     print(f"  ✗ Do not proceed until this is resolved.")
 
             # ── Google Sheet update ─────────────────────────────────────────
-            if has_data and parser.client_name and answer == "done":
+            if has_data and parser.client_name and answer == "done" and not dry_run:
                 print(f"[Step 14] Updating Google Sheet...")
                 try:
                     import sys as _sys, importlib as _il
@@ -1516,7 +1535,7 @@ def main():
     # ── Auto-trigger Google Sheet update ────────────────────────────────────
     # Trigger the update_sheet GitHub Actions workflow so the Reconciliation
     # Tracker always reflects the latest dates without manual intervention.
-    if any(s for s, _ in _session_stmt_types):
+    if any(s for s, _ in _session_stmt_types) and not dry_run:
         try:
             import urllib.request, json as _json, os as _os, time as _time
             pat = _os.environ.get("GITHUB_PAT_BOOKKEEPING", "").strip()

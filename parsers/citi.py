@@ -552,7 +552,7 @@ class CitiVisaCostcoParser(StatementParser):
         ]
         self.client_name = data.get('client_name', self.client_name)
 
-    def generate_report(self):
+    def generate_report(self, check_payee_map=None, check_date_map=None):
         aggregated = self._aggregate_by_vendor(self.charges, date_fmt='%m/%d/%y')
         total_charges = sum(r['amount'] for r in aggregated)
         total_credits = sum(c['amount'] for c in self.credits)
@@ -654,16 +654,28 @@ class CitiSavingsParser(StatementParser):
         i = 0
         while i < len(lines):
             line = lines[i]
+            # Stop at SAVINGS ACTIVITY boundary — savings interest belongs to a
+            # different account and must not mix into the checking reconciliation.
+            if re.match(r'\s*SAVINGS ACTIVITY\s*$', line):
+                break
+            # Skip summary/total lines that aren't real transactions
+            if re.search(r'Total Debits/Credits', line, re.IGNORECASE):
+                i += 1
+                continue
             dm = re.match(r'^(\d{2}/\d{2})\s+(.+)', line)
             if dm:
                 date = self._add_year_to_date(dm.group(1), self.closing_date) if self.closing_date else dm.group(1)
                 rest = dm.group(2)
 
                 trans_type = None
-                for ttype in list(_CREDIT_TYPES) + list(_DEBIT_TYPES):
-                    if ttype in rest:
-                        trans_type = ttype
-                        break
+                # Check for CHECK NO: lines (same pattern as CitiCheckingParser)
+                if 'CHECK NO:' in rest:
+                    trans_type = 'CHECK'
+                else:
+                    for ttype in list(_CREDIT_TYPES) + list(_DEBIT_TYPES):
+                        if ttype in rest:
+                            trans_type = ttype
+                            break
 
                 if trans_type:
                     amounts = re.findall(r'([\d,]+\.\d{2})', line)
@@ -676,12 +688,17 @@ class CitiSavingsParser(StatementParser):
                         if trans_type in _CREDIT_TYPES:
                             self.deposits.append({'date': date, 'vendor': vendor, 'amount': amount})
                             self.total_deposits += amount
+                        elif trans_type == 'CHECK':
+                            check_num_m = re.search(r'CHECK NO:\s*(\d+)', rest)
+                            check_num = check_num_m.group(1) if check_num_m else '?'
+                            self.withdrawals.append({'date': date, 'vendor': f'Check #{check_num}', 'amount': amount})
+                            self.total_withdrawals += amount
                         else:
                             self.withdrawals.append({'date': date, 'vendor': vendor, 'amount': amount})
                             self.total_withdrawals += amount
             i += 1
 
-    def generate_report(self, **kwargs):
+    def generate_report(self, check_payee_map=None, check_date_map=None):
         calc = self.beginning_balance + self.total_deposits - self.total_withdrawals
         ok   = self.ending_balance != Decimal('0') and abs(calc - self.ending_balance) < Decimal('0.01')
 
