@@ -1152,6 +1152,7 @@ def main():
     }
 
     # Split combined PDFs (e.g. files that bundle Meevo + Citi Costco)
+    print(f"→ Splitting PDF into segments...")
     segments = split_combined_pdf(pdf_path)
     tmp_files = [p for (_, p) in segments if p != str(pdf_path)]
 
@@ -1181,6 +1182,7 @@ def main():
                 if new_name:
                     parser.client_name = new_name
                     print(f"Client:     {parser.client_name}")
+            print(f"→ Parsing transactions...")
             parser.parse()
 
             # Vision fallback: if the pdftotext parse didn't tie to the penny
@@ -1193,6 +1195,7 @@ def main():
                 'amex', 'bofa_credit', 'wells_fargo_credit', 'bmo_credit',
             }
             if stmt_type in _CC_STATEMENT_TYPES:
+                print(f"→ Verifying balance (Vision fallback if needed)...")
                 parser._try_vision_fallback()
 
             # Check if parser extracted usable balance data
@@ -1260,6 +1263,7 @@ def main():
             _session_stmt_types.append((stmt_type, getattr(parser, 'client_name', '')))
 
             # ── Balance verification gate — NO SILENT FAILURES ────────────
+            print(f"→ Checking balance verification...")
             # Every report must pass balance check. If it contains a FAILED
             # line, halt immediately with a clear error rather than continuing.
             # Pass --force to bypass this gate (e.g. when called from qa_reconciliation.py)
@@ -1366,6 +1370,7 @@ def main():
             # ───────────────────────────────────────────────────────────────
 
             # ── Reconciliation log ──────────────────────────────────────────
+            print(f"→ Writing logs...")
             # Always write to BOTH reconciliation_log.csv AND recon_log.json.
             # "later" logs with IN_PROGRESS status; "done" logs with DONE status.
             # Sheet update only fires on "done".
@@ -1410,6 +1415,7 @@ def main():
 
             # ── Google Sheet update ─────────────────────────────────────────
             if has_data and parser.client_name and answer == "done":
+                print(f"→ Updating Google Sheet...")
                 try:
                     import sys as _sys, importlib as _il
                     _su = _il.import_module("sheets_updater") if "sheets_updater" in _sys.modules \
