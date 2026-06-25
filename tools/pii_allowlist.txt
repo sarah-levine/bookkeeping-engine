@@ -50,7 +50,7 @@ client cardholder owner recipient counterparty bookkeeping sarah operator
 
 # ── Code / structural / tooling words ──────────────────────────────
 base parser parsers registry detection report helpers utilities log
-reconciliation comparison quickbooks qb pending clean issues found error
+reconciliation comparison quickbooks qb pending clean done issues found error
 handling critical rules verify output mode columns final shared setup interactive
 approval entry point silent failures write post main manual sender tracker scopes
 native directly exactly multiline dotall ignorecase true false match initiate
