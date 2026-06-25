@@ -133,6 +133,7 @@ def upsert_recon_log(
     """Upsert a reconciliation or payroll entry into recon_log.json."""
     _assert_known_client(client)
     _assert_known_account_type(client, account_type)
+    statement_end_date = _normalize_date_iso(statement_end_date)
     entry = {
         "run_time":           _now_pst().isoformat(),
         "type":               "recon",
@@ -147,13 +148,13 @@ def upsert_recon_log(
         "issues":             issues if issues is not None else [],
         "issue":              "",
     }
-    statement_end_date = _normalize_date_iso(statement_end_date)
     key = (client, account_type, statement_end_date)
     existing = _load_log()
     replaced = False
     for i, e in enumerate(existing):
         if e.get("type") == "recon" and (
-            e.get("client"), e.get("account_type"), e.get("statement_end_date")
+            e.get("client"), e.get("account_type"),
+            _normalize_date_iso(e.get("statement_end_date", ""))
         ) == key:
             existing[i] = entry
             replaced = True
