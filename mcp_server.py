@@ -56,7 +56,7 @@ def _load_recon_log() -> list[dict]:
 
 @mcp.tool()
 def reconcile(pdf_path: str) -> str:
-    """Run reconciliation on a bank statement PDF.
+    """Run reconciliation on a bank statement PDF from a local file path.
 
     Args:
         pdf_path: Absolute path to the statement PDF file.
@@ -67,6 +67,23 @@ def reconcile(pdf_path: str) -> str:
     return _run_script([
         "python3", str(ENGINE_DIR / "reconcile_comprehensive.py"),
         str(pdf), "--no-prompt",
+    ])
+
+
+@mcp.tool()
+def reconcile_from_drive(drive_file_id: str) -> str:
+    """Run reconciliation on a bank statement PDF stored in Google Drive.
+
+    Use this when a user uploads/drags a PDF into chat. First upload the file
+    to Google Drive, then pass the Drive file ID here.
+
+    Args:
+        drive_file_id: Google Drive file ID (the long alphanumeric string).
+                       Also accepts full Drive URLs.
+    """
+    return _run_script([
+        "python3", str(ENGINE_DIR / "reconcile_comprehensive.py"),
+        "--from-drive", drive_file_id, "--no-prompt",
     ])
 
 
