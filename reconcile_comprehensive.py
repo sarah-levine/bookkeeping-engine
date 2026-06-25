@@ -1064,12 +1064,60 @@ def main():
         return
         return
 
+    # --from-drive <file_id_or_url>: download PDF from Google Drive then process it
+    if '--from-drive' in sys.argv:
+        idx = sys.argv.index('--from-drive')
+        if idx + 1 >= len(sys.argv):
+            print("Error: --from-drive requires a file ID or Drive URL", file=sys.stderr)
+            sys.exit(1)
+        drive_ref = sys.argv[idx + 1]
+        # Accept full Drive URLs or bare file IDs
+        import re as _re
+        _m = _re.search(r'/d/([A-Za-z0-9_-]{25,})', drive_ref)
+        drive_id = _m.group(1) if _m else drive_ref
+        print(f"[Drive] Downloading file ID {drive_id} ...")
+        try:
+            from googleapiclient.discovery import build
+            from google.oauth2 import service_account
+            import io as _io
+            _sa_file = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE', '')
+            _creds = service_account.Credentials.from_service_account_file(
+                _sa_file, scopes=['https://www.googleapis.com/auth/drive.readonly']
+            ) if _sa_file else None
+            if _creds is None:
+                import google.auth
+                _creds, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/drive.readonly'])
+            _drive = build('drive', 'v3', credentials=_creds)
+            _meta = _drive.files().get(fileId=drive_id, fields='name').execute()
+            _buf = _io.BytesIO()
+            _req = _drive.files().get_media(fileId=drive_id)
+            from googleapiclient.http import MediaIoBaseDownload
+            _dl = MediaIoBaseDownload(_buf, _req)
+            _done = False
+            while not _done:
+                _, _done = _dl.next_chunk()
+            _tmp = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False,
+                                               prefix=f'drive_{drive_id[:8]}_')
+            _tmp.write(_buf.getvalue())
+            _tmp.close()
+            print(f"[Drive] Downloaded '{_meta['name']}' → {_tmp.name}")
+            # Splice the temp path into argv so the rest of main() works unchanged
+            sys.argv = [sys.argv[0], _tmp.name] + [
+                a for i, a in enumerate(sys.argv[1:], 1)
+                if a != '--from-drive' and sys.argv[i - 1] != '--from-drive' and a != drive_ref
+            ]
+        except Exception as _e:
+            print(f"[Drive] Download failed: {_e}", file=sys.stderr)
+            print("  Install: pip3 install google-api-python-client google-auth", file=sys.stderr)
+            sys.exit(1)
+
     if len(sys.argv) < 2 or sys.argv[1] in ('--manual', '-m'):
         if len(sys.argv) >= 2 and sys.argv[1] in ('--manual', '-m'):
             manual_entry()
             return
         print("Usage: python reconcile_comprehensive.py <statement.pdf> [output.txt]")
         print("       python reconcile_comprehensive.py --manual")
+        print("       python reconcile_comprehensive.py --from-drive <drive_file_id_or_url>")
         print("       python reconcile_comprehensive.py <statement.pdf> --check-payee 1235='Jane Doe'")
         print()
         print("Supported statement types:")
