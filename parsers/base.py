@@ -584,6 +584,93 @@ class StatementParser:
         print(f"    Statement says   : {new:>10}  (diff={abs(computed-new):.2f})", file=sys.stderr)
         print("  ───────────────────────────────────────────────────────────────", file=sys.stderr)
 
+    # Labels that indicate the discrepancy is an unextracted finance charge.
+    # Checked in order; first match wins.
+    _FINANCE_CHARGE_LABELS = [
+        r'Finance Charges?',
+        r'Total Fees? for this Period',
+        r'Total Interest Charged for this Period',
+        r'Interest Charge[ds]?',
+        r'Periodic (?:Finance )?Charge[ds]?',
+        r'Annual Fee',
+        r'Late (?:Payment )?Fee',
+        r'Minimum (?:Interest )?Charge',
+    ]
+
+    def _try_recover_balance(self) -> bool:
+        """
+        Attempt to close a balance discrepancy without Vision or human input.
+
+        Strategy: compute the gap (new_balance - computed), then search the raw
+        PDF text for a line whose dollar amount equals that gap and whose label
+        matches a known finance-charge / fee / interest pattern.  If exactly one
+        such line is found, assign the amount to self.fees and return True.
+
+        Returns True if recovery succeeded (balance now ties), False otherwise.
+        """
+        if self._tied_out():
+            return True
+
+        text = getattr(self, 'text', '') or ''
+        if not text.strip():
+            return False
+
+        prev   = Decimal(str(getattr(self, 'previous_balance', 0) or 0))
+        new    = Decimal(str(getattr(self, 'new_balance',      0) or 0))
+        pays   = Decimal(str(getattr(self, 'total_payments',   0) or 0))
+        cred   = sum((Decimal(str(c['amount'])) for c in getattr(self, 'credits',  [])), Decimal('0'))
+        chrg   = sum((Decimal(str(c['amount'])) for c in getattr(self, 'charges',  [])), Decimal('0'))
+        fees   = Decimal(str(getattr(self, 'fees',          0) or 0))
+        intr   = Decimal(str(getattr(self, 'interest',      0) or 0))
+        fc     = Decimal(str(getattr(self, 'finance_charge',0) or 0))
+        computed = prev + chrg + fees + intr + fc - pays - cred
+        gap = new - computed  # positive → missing charge; negative → missing credit
+
+        if abs(gap) < Decimal('0.01'):
+            return True  # already tied
+        if abs(gap) > Decimal('500'):
+            return False  # implausibly large for a missed label — don't guess
+
+        gap_str = f'{abs(gap):.2f}'
+        label_pattern = '|'.join(self._FINANCE_CHARGE_LABELS)
+        # Match lines like:  "Finance Charges   $  2.21"  or  "Finance Charges: $2.21"
+        pattern = re.compile(
+            rf'(?:{label_pattern})[^\n]{{0,60}}\$\s*{re.escape(gap_str)}',
+            re.IGNORECASE,
+        )
+        matches = pattern.findall(text)
+
+        if not matches:
+            return False
+
+        if len(matches) > 1:
+            # Multiple hits — ambiguous, don't auto-assign
+            print(
+                f"  ⚠ Recovery: found {len(matches)} lines matching gap ${gap_str} "
+                f"— ambiguous, not auto-assigning.",
+                file=sys.stderr,
+            )
+            return False
+
+        # Exactly one match: assign the gap to fees and report it.
+        matched_line = matches[0].strip()
+        if gap > 0:
+            self.fees = fees + gap
+            print(
+                f"  ✓ Recovery: assigned ${gap_str} from \"{matched_line}\" to finance charges.",
+                file=sys.stderr,
+            )
+        else:
+            # gap is negative → unaccounted credit; don't auto-assign to avoid
+            # mis-classifying a refund as an interest credit.
+            print(
+                f"  ⚠ Recovery: gap is negative (${gap_str}) — manual review needed.",
+                file=sys.stderr,
+            )
+            return False
+
+        return self._tied_out()
+
     def _try_vision_fallback(self):
         """
         If self-check failed, re-extract from page images via Claude Vision
@@ -592,18 +679,22 @@ class StatementParser:
 
         Silent no-op when self-check already passed.
 
-        If pdftotext extracted real text (text-based PDF), a tie-out failure is
-        most likely a parser bug.  Print a diagnostic and skip Vision — calling
-        Vision in this case just masks the bug without fixing it.
+        For text-based PDFs: first tries _try_recover_balance() to close the gap
+        without any API call.  Only falls through to Vision (or stops) if recovery
+        fails.
 
-        If pdftotext returned very little text (scanned/image PDF), Vision is the
+        For scanned/image PDFs (pdftotext returned very little): Vision is the
         appropriate fallback.
         """
         if self._tied_out():
             return  # parse already succeeded
 
         if self._pdf_is_text_based():
-            # pdftotext read real text but the numbers don't add up → parser bug.
+            # Try to recover before giving up or calling Vision.
+            if self._try_recover_balance():
+                return  # recovered — no Vision needed
+
+            # Recovery failed → parser bug, surface it clearly.
             print(
                 "  ⚠ pdftotext parse did not tie out on a text-based PDF — "
                 "this is likely a parser bug, not a scanned page.",
