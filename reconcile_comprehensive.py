@@ -1307,7 +1307,10 @@ def main():
                     import subprocess as _sp
                     from log_utils import get_logs_dir as _gld
                     _ld = str(_gld())  # logs live in the private logs dir, not the public repo
-                    _sp.run(['git', '-C', _ld, 'pull', '--rebase'], capture_output=True)
+                    _pr = _sp.run(['git', '-C', _ld, 'pull', '--rebase', 'origin', 'main'],
+                                  capture_output=True, text=True)
+                    if _pr.returncode != 0:
+                        print(f"  ⚠ Git pull failed: {_pr.stderr.strip()}")
                     _sp.run(['git', '-C', _ld, 'add', 'recon_log.json'], capture_output=True)
                     _sp.run(['git', '-C', _ld, 'commit', '-m',
                              f'digest: {parser.client_name} {stmt_type} IN_PROGRESS'], capture_output=True)
@@ -1399,7 +1402,10 @@ def main():
                     import subprocess as _sp
                     from log_utils import get_logs_dir as _gld
                     _ld = str(_gld())  # logs live in the private logs dir, not the public repo
-                    _sp.run(['git', '-C', _ld, 'pull', '--rebase'], capture_output=True)
+                    _pr = _sp.run(['git', '-C', _ld, 'pull', '--rebase', 'origin', 'main'],
+                                  capture_output=True, text=True)
+                    if _pr.returncode != 0:
+                        print(f"  ⚠ Git pull failed: {_pr.stderr.strip()}")
                     _sp.run(['git', '-C', _ld, 'add',
                              'reconciliation_log.csv', 'recon_log.json'], capture_output=True)
                     _sp.run(['git', '-C', _ld, 'commit', '-m',
