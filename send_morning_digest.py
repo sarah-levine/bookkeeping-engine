@@ -422,7 +422,7 @@ def build_html(recon_entries, manual_entries, log_date):
     def _status_style(has_pending):
         if has_pending:
             return ("#7c3aed", "#f5f3ff", "📋 PENDING QB")
-        return ("#166534", "#f0fdf4", "✅ CLEAN")
+        return ("#166534", "#f0fdf4", "✅ DONE")
 
     clients = {}  # display_client -> {"accounts": {account_type: {...}}, "has_pending"}
     for e in seen.values():

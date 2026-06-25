@@ -174,7 +174,7 @@ def log_recon(
     beginning_balance: str,
     ending_balance: str,
     total_payments: str = "0.00",
-    status: str = "CLEAN",
+    status: str = "DONE",
     commit_message: str = None,
     dispatch: bool = True,
 ) -> None:

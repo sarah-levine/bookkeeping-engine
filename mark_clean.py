@@ -2,7 +2,7 @@
 """
 mark_clean.py
 -------------
-Upgrade a IN_PROGRESS entry to CLEAN and trigger the Google Sheets tracker update.
+Upgrade a IN_PROGRESS entry to DONE and trigger the Google Sheets tracker update.
 
 Usage:
     python3 mark_clean.py <client_key> <account_type> [<statement_date>]
@@ -104,15 +104,15 @@ def find_pending(client_key: str, account_type: str, statement_date: str | None)
 
 
 def upgrade_to_clean(idx: int, entry: dict):
-    """Rewrite the entry in recon_log.json with status=CLEAN and a fresh run_time."""
+    """Rewrite the entry in recon_log.json with status=DONE and a fresh run_time."""
     from log_utils import _now_pst
     entries = _load_log()
     updated = dict(entry)
-    updated["status"]   = "CLEAN"
+    updated["status"]   = "DONE"
     updated["run_time"] = _now_pst().isoformat()
     entries[idx] = updated
     _save_log(entries)
-    print(f"  ✅ recon_log.json → CLEAN  ({entry['client']} | {entry['account_type']} | {entry['statement_end_date']})")
+    print(f"  ✅ recon_log.json → DONE  ({entry['client']} | {entry['account_type']} | {entry['statement_end_date']})")
     return updated
 
 
@@ -204,7 +204,7 @@ def git_push():
         _sys.path.insert(0, str(Path(__file__).parent))
         _os.environ.setdefault("BOOKKEEPING_CLIENTS_DIR", str(LOGS_DIR))
         from tools.github_clients import sync_up
-        sync_up("mark_clean: upgrade IN_PROGRESS → CLEAN")
+        sync_up("mark_clean: upgrade IN_PROGRESS → DONE")
     except Exception as e:
         print(f"  ⚠ Could not push logs via REST API ({e}). Push manually.")
 

@@ -138,7 +138,7 @@ def run(month_key=None, output_path=None):
             beginning_balance  = f"{float(_beg):,.2f}" if _beg is not None else '—',
             ending_balance     = f"{float(_end):,.2f}" if _end is not None else '—',
             total_payments     = f"{float(_pay):.2f}" if _pay is not None else '',
-            status             = "CLEAN",
+            status             = "DONE",
         )
     except Exception as _e:
         print(f"  ⚠ Log write failed: {_e}")

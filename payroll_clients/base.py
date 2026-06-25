@@ -311,7 +311,7 @@ def append_digest_log(client_name: str, check_date: str):
             client             = client_name,
             account_type       = "payroll",
             statement_end_date = check_date,
-            status             = "CLEAN",
+            status             = "DONE",
         )
         print(f"  📝 Digest log → recon_log.json")
         _git_push_logs(f"{client_name} payroll {check_date}")

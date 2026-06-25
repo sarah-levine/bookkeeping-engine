@@ -1367,7 +1367,7 @@ def main():
 
             # ── Reconciliation log ──────────────────────────────────────────
             # Always write to BOTH reconciliation_log.csv AND recon_log.json.
-            # "later" logs with IN_PROGRESS status; "done" logs with CLEAN status.
+            # "later" logs with IN_PROGRESS status; "done" logs with DONE status.
             # Sheet update only fires on "done".
             if has_data and parser.client_name:
                 try:
@@ -1388,7 +1388,7 @@ def main():
                         beginning_balance  = f"{float(_beg):,.2f}" if _beg is not None else '—',
                         ending_balance     = f"{float(_end):,.2f}" if _end is not None else '—',
                         total_payments     = f"{float(_pay):.2f}" if _pay is not None else '',
-                        status             = "CLEAN" if answer == 'done' else "IN_PROGRESS",
+                        status             = "DONE" if answer == 'done' else "IN_PROGRESS",
                     )
                     import subprocess as _sp
                     from log_utils import get_logs_dir as _gld
@@ -1396,7 +1396,7 @@ def main():
                     _sp.run(['git', '-C', _ld, 'add',
                              'reconciliation_log.csv', 'recon_log.json'], capture_output=True)
                     _sp.run(['git', '-C', _ld, 'commit', '-m',
-                             f'recon: {parser.client_name} {stmt_type} {"CLEAN" if answer == "done" else "IN_PROGRESS"}'], capture_output=True)
+                             f'recon: {parser.client_name} {stmt_type} {"DONE" if answer == "done" else "IN_PROGRESS"}'], capture_output=True)
                     _r = _sp.run(['git', '-C', _ld, 'push'],
                                  capture_output=True, text=True)
                     if _r.returncode == 0:

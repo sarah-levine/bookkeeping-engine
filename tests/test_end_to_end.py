@@ -149,7 +149,7 @@ def test_pdf_to_digest_flow():
             beginning_balance="",
             ending_balance=f"{bal}",
             total_payments="",
-            status="CLEAN",
+            status="DONE",
         )
 
         # 1. recon_log.json round-trips via load_recon_log (today's run).
