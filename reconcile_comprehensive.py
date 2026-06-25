@@ -1307,14 +1307,15 @@ def main():
                     import subprocess as _sp
                     from log_utils import get_logs_dir as _gld
                     _ld = str(_gld())  # logs live in the private logs dir, not the public repo
-                    # Stash any unstaged changes (e.g. the log file just written) so
-                    # pull --rebase doesn't refuse to run, then pop them back after.
-                    _sp.run(['git', '-C', _ld, 'stash'], capture_output=True)
-                    _pr = _sp.run(['git', '-C', _ld, 'pull', '--rebase', 'origin', 'main'],
-                                  capture_output=True, text=True)
-                    if _pr.returncode != 0:
-                        print(f"  ⚠ Git pull failed: {_pr.stderr.strip()}")
-                    _sp.run(['git', '-C', _ld, 'stash', 'pop'], capture_output=True)
+                    # Sync to remote without touching the working tree:
+                    # 1. abort any in-progress rebase (no-op if clean)
+                    # 2. fetch latest from remote
+                    # 3. re-attach HEAD to main branch (in case a prior failed rebase left detached HEAD)
+                    # 4. reset --mixed to FETCH_HEAD: moves branch pointer + unstages, keeps working tree
+                    _sp.run(['git', '-C', _ld, 'rebase', '--abort'], capture_output=True)
+                    _sp.run(['git', '-C', _ld, 'fetch', 'origin', 'main'], capture_output=True)
+                    _sp.run(['git', '-C', _ld, 'symbolic-ref', 'HEAD', 'refs/heads/main'], capture_output=True)
+                    _sp.run(['git', '-C', _ld, 'reset', '--mixed', 'FETCH_HEAD'], capture_output=True)
                     _sp.run(['git', '-C', _ld, 'add', 'recon_log.json'], capture_output=True)
                     _sp.run(['git', '-C', _ld, 'commit', '-m',
                              f'digest: {parser.client_name} {stmt_type} IN_PROGRESS'], capture_output=True)
@@ -1406,14 +1407,11 @@ def main():
                     import subprocess as _sp
                     from log_utils import get_logs_dir as _gld
                     _ld = str(_gld())  # logs live in the private logs dir, not the public repo
-                    # Stash any unstaged changes (e.g. log files just written) so
-                    # pull --rebase doesn't refuse to run, then pop them back after.
-                    _sp.run(['git', '-C', _ld, 'stash'], capture_output=True)
-                    _pr = _sp.run(['git', '-C', _ld, 'pull', '--rebase', 'origin', 'main'],
-                                  capture_output=True, text=True)
-                    if _pr.returncode != 0:
-                        print(f"  ⚠ Git pull failed: {_pr.stderr.strip()}")
-                    _sp.run(['git', '-C', _ld, 'stash', 'pop'], capture_output=True)
+                    # Sync to remote without touching the working tree (same approach as Step 12a).
+                    _sp.run(['git', '-C', _ld, 'rebase', '--abort'], capture_output=True)
+                    _sp.run(['git', '-C', _ld, 'fetch', 'origin', 'main'], capture_output=True)
+                    _sp.run(['git', '-C', _ld, 'symbolic-ref', 'HEAD', 'refs/heads/main'], capture_output=True)
+                    _sp.run(['git', '-C', _ld, 'reset', '--mixed', 'FETCH_HEAD'], capture_output=True)
                     _sp.run(['git', '-C', _ld, 'add',
                              'reconciliation_log.csv', 'recon_log.json'], capture_output=True)
                     _sp.run(['git', '-C', _ld, 'commit', '-m',

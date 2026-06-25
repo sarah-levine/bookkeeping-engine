@@ -62,7 +62,7 @@ message messages visit
 # ── Fonts / external products / file formats ───────────────────────
 ibm plex mono segoe ui roboto google sheet sheets drive gmail smtp api github
 actions json schema csv html pdf ocr pymupdf pytesseract tesseract http https
-ansi claude vision anthropic rest repo branch
+ansi claude vision anthropic rest repo branch head fetch symbolic ref mixed
 
 # ── Cities / generic geo that appear in vendor-stripping logic ─────
 san jose california ca
