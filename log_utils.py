@@ -147,6 +147,7 @@ def upsert_recon_log(
         "issues":             issues if issues is not None else [],
         "issue":              "",
     }
+    statement_end_date = _normalize_date_iso(statement_end_date)
     key = (client, account_type, statement_end_date)
     existing = _load_log()
     replaced = False
