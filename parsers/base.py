@@ -545,16 +545,29 @@ class StatementParser:
             return False
         if prev_d == 0 and new_d == 0:
             return False
-        total_payments = Decimal(str(getattr(self, 'total_payments', 0)))
+        # Prefer total_payments attribute; fall back to summing the payments list
+        # (some parsers set the attribute only inside generate_report, not parse).
+        total_payments = Decimal(str(getattr(self, 'total_payments', 0) or 0))
+        if total_payments == 0:
+            total_payments = sum(
+                (Decimal(str(p['amount'])) for p in getattr(self, 'payments', [])),
+                Decimal('0'),
+            )
         total_credits = sum(
             (Decimal(str(c['amount'])) for c in getattr(self, 'credits', [])),
             Decimal('0'),
         )
+        fees   = Decimal(str(getattr(self, 'fees',          0) or 0))
+        intr   = Decimal(str(getattr(self, 'interest',      0) or 0))
+        finance_charge = Decimal(str(getattr(self, 'finance_charge', 0) or 0)) + fees + intr
+        # Exclude charges whose vendor name contains INTEREST — those are finance-
+        # charge line items already captured in self.fees/self.interest; counting
+        # them here would double-count.
         total_charges = sum(
-            (Decimal(str(c['amount'])) for c in getattr(self, 'charges', [])),
+            (Decimal(str(c['amount'])) for c in getattr(self, 'charges', [])
+             if 'INTEREST' not in str(c.get('vendor', '')).upper()),
             Decimal('0'),
         )
-        finance_charge = Decimal(str(getattr(self, 'finance_charge', 0) or 0))
         computed = prev_d + total_charges + finance_charge - total_payments - total_credits
         return abs(computed - new_d) < Decimal('0.01')
 
@@ -567,8 +580,14 @@ class StatementParser:
         prev = Decimal(str(getattr(self, 'previous_balance', 0) or 0))
         new  = Decimal(str(getattr(self, 'new_balance',      0) or 0))
         pays = Decimal(str(getattr(self, 'total_payments',   0) or 0))
+        if pays == 0:
+            pays = sum((Decimal(str(p['amount'])) for p in getattr(self, 'payments', [])), Decimal('0'))
         cred = sum((Decimal(str(c['amount'])) for c in getattr(self, 'credits',  [])), Decimal('0'))
-        chrg = sum((Decimal(str(c['amount'])) for c in getattr(self, 'charges',  [])), Decimal('0'))
+        chrg = sum(
+            (Decimal(str(c['amount'])) for c in getattr(self, 'charges', [])
+             if 'INTEREST' not in str(c.get('vendor', '')).upper()),
+            Decimal('0'),
+        )
         fees = Decimal(str(getattr(self, 'fees',     0) or 0))
         intr = Decimal(str(getattr(self, 'interest', 0) or 0))
         fc   = Decimal(str(getattr(self, 'finance_charge', 0) or 0))
@@ -671,6 +690,60 @@ class StatementParser:
 
         return self._tied_out()
 
+    def _log_parser_bug_to_roadmap(self):
+        """Append a parser bug entry to REFACTORING_ROADMAP.md so it gets tracked."""
+        import datetime
+        roadmap = REPO_DIR / 'REFACTORING_ROADMAP.md'
+        if not roadmap.exists():
+            return
+        prev  = Decimal(str(getattr(self, 'previous_balance', 0) or 0))
+        new   = Decimal(str(getattr(self, 'new_balance',      0) or 0))
+        pays  = Decimal(str(getattr(self, 'total_payments',   0) or 0))
+        if pays == 0:
+            pays = sum((Decimal(str(p['amount'])) for p in getattr(self, 'payments', [])), Decimal('0'))
+        cred  = sum((Decimal(str(c['amount'])) for c in getattr(self, 'credits', [])), Decimal('0'))
+        chrg  = sum(
+            (Decimal(str(c['amount'])) for c in getattr(self, 'charges', [])
+             if 'INTEREST' not in str(c.get('vendor', '')).upper()),
+            Decimal('0'),
+        )
+        fees  = Decimal(str(getattr(self, 'fees',     0) or 0))
+        intr  = Decimal(str(getattr(self, 'interest', 0) or 0))
+        fc    = Decimal(str(getattr(self, 'finance_charge', 0) or 0))
+        finance = fees + intr + fc
+        computed = prev + chrg + finance - pays - cred
+        gap = abs(computed - new)
+        today = datetime.date.today().isoformat()
+        parser_name = type(self).__name__
+        pdf_name = Path(getattr(self, 'pdf_path', 'unknown')).name
+        entry = (
+            f"\n### Parser tie-out failure — {parser_name} — {today}\n"
+            f"- **PDF**: `{pdf_name}`\n"
+            f"- **Gap**: ${gap:.2f} (computed={computed:.2f}, statement={new:.2f})\n"
+            f"- **Breakdown**: prev={prev} charges={chrg} finance={finance} "
+            f"payments={pays} credits={cred}\n"
+            f"- **Action**: Review `{parser_name}` extraction and add to "
+            f"`_FINANCE_CHARGE_LABELS` or skip-list as needed.\n"
+        )
+        try:
+            with open(roadmap, 'r') as f:
+                content = f.read()
+            marker = '## Open: Needs Root Cause Fix'
+            if entry.strip() in content:
+                return  # already logged (same parser + date)
+            insert_at = content.find(marker)
+            if insert_at == -1:
+                with open(roadmap, 'a') as f:
+                    f.write(entry)
+            else:
+                end_of_marker = content.find('\n', insert_at) + 1
+                new_content = content[:end_of_marker] + entry + content[end_of_marker:]
+                with open(roadmap, 'w') as f:
+                    f.write(new_content)
+            print(f"  📋 Parser bug logged → REFACTORING_ROADMAP.md", file=sys.stderr)
+        except Exception:
+            pass  # roadmap logging is best-effort; never block reconciliation
+
     def _try_vision_fallback(self):
         """
         If self-check failed, re-extract from page images via Claude Vision
@@ -701,6 +774,7 @@ class StatementParser:
                 file=sys.stderr,
             )
             self._tie_out_diagnostic()
+            self._log_parser_bug_to_roadmap()
             print(
                 "  ℹ  Fix the parser and re-run.  "
                 "Skipping Vision fallback (it would mask the bug).",

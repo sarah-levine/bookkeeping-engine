@@ -285,6 +285,20 @@ class AmexStatementParser(StatementParser):
             if m:
                 self.fees = Decimal(m.group(1).replace(',', ''))
 
+        # Remove any charge transaction whose amount equals the captured finance-
+        # charge total — AMEX sometimes emits these as dated line items in the
+        # charges section even though they're already tallied in fees/interest.
+        finance_total = self.fees + self.interest
+        if finance_total > 0:
+            self.charges = [
+                c for c in self.charges
+                if not (
+                    abs(Decimal(str(c['amount'])) - finance_total) < Decimal('0.01')
+                    and any(kw in c.get('vendor', '').upper()
+                            for kw in ('INTEREST', 'FINANCE', 'PERIODIC', 'FEE', 'CHARGE'))
+                )
+            ]
+
     def generate_report(self):
         aggregated = self._aggregate_by_vendor(
             [{'date': c['date'], 'vendor': c['vendor'], 'amount': c['amount']}
