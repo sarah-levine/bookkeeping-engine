@@ -558,6 +558,32 @@ class StatementParser:
         computed = prev_d + total_charges + finance_charge - total_payments - total_credits
         return abs(computed - new_d) < Decimal('0.01')
 
+    def _pdf_is_text_based(self, min_chars: int = 300) -> bool:
+        """Return True if pdftotext extracted enough text to be trustworthy."""
+        return bool(getattr(self, 'text', None)) and len(self.text.strip()) >= min_chars
+
+    def _tie_out_diagnostic(self):
+        """Print a breakdown of what the parser extracted vs. the statement total."""
+        prev = Decimal(str(getattr(self, 'previous_balance', 0) or 0))
+        new  = Decimal(str(getattr(self, 'new_balance',      0) or 0))
+        pays = Decimal(str(getattr(self, 'total_payments',   0) or 0))
+        cred = sum((Decimal(str(c['amount'])) for c in getattr(self, 'credits',  [])), Decimal('0'))
+        chrg = sum((Decimal(str(c['amount'])) for c in getattr(self, 'charges',  [])), Decimal('0'))
+        fees = Decimal(str(getattr(self, 'fees',     0) or 0))
+        intr = Decimal(str(getattr(self, 'interest', 0) or 0))
+        fc   = Decimal(str(getattr(self, 'finance_charge', 0) or 0))
+        finance = fees + intr + fc
+        computed = prev + chrg + finance - pays - cred
+        print("  ── Parser diagnostic ──────────────────────────────────────────", file=sys.stderr)
+        print(f"    Previous balance : {prev:>10}", file=sys.stderr)
+        print(f"  + Charges          : {chrg:>10}  ({len(getattr(self,'charges',[]))} items)", file=sys.stderr)
+        print(f"  + Finance charges  : {finance:>10}  (fees={fees} interest={intr})", file=sys.stderr)
+        print(f"  - Payments         : {pays:>10}", file=sys.stderr)
+        print(f"  - Credits          : {cred:>10}  ({len(getattr(self,'credits',[]))} items)", file=sys.stderr)
+        print(f"  = Computed         : {computed:>10}", file=sys.stderr)
+        print(f"    Statement says   : {new:>10}  (diff={abs(computed-new):.2f})", file=sys.stderr)
+        print("  ───────────────────────────────────────────────────────────────", file=sys.stderr)
+
     def _try_vision_fallback(self):
         """
         If self-check failed, re-extract from page images via Claude Vision
@@ -565,12 +591,33 @@ class StatementParser:
         self.total_payments, self.payments, self.credits, self.charges.
 
         Silent no-op when self-check already passed.
-        Prints a clear message to stderr if vision is unavailable but parse
-        failed — so the user can see why the report's numbers are wrong.
+
+        If pdftotext extracted real text (text-based PDF), a tie-out failure is
+        most likely a parser bug.  Print a diagnostic and skip Vision — calling
+        Vision in this case just masks the bug without fixing it.
+
+        If pdftotext returned very little text (scanned/image PDF), Vision is the
+        appropriate fallback.
         """
         if self._tied_out():
             return  # parse already succeeded
 
+        if self._pdf_is_text_based():
+            # pdftotext read real text but the numbers don't add up → parser bug.
+            print(
+                "  ⚠ pdftotext parse did not tie out on a text-based PDF — "
+                "this is likely a parser bug, not a scanned page.",
+                file=sys.stderr,
+            )
+            self._tie_out_diagnostic()
+            print(
+                "  ℹ  Fix the parser and re-run.  "
+                "Skipping Vision fallback (it would mask the bug).",
+                file=sys.stderr,
+            )
+            return
+
+        # PDF appears to be scanned/image — Vision fallback is appropriate.
         # Lazy-import to avoid pulling in anthropic SDK for clean parses
         try:
             from extractors import vision_helper
