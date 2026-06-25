@@ -272,13 +272,18 @@ class AmexStatementParser(StatementParser):
                     vendor_raw = re.sub(r'\s+[A-Z][A-Z\s]+[A-Z]{2}\s*$', '', vendor_raw).strip()
                 pending_vendor = vendor_raw
 
-        # Fees / Interest
+        # Fees / Interest — try the detailed section labels first, then fall back
+        # to the summary "Finance Charges" line used on some AMEX statement formats.
         m = re.search(r'Total Fees for this Period\s+\$([0-9,]+\.\d{2})', self.text)
         if m:
             self.fees = Decimal(m.group(1).replace(',', ''))
         m = re.search(r'Total Interest Charged for this Period\s+\$([0-9,]+\.\d{2})', self.text)
         if m:
             self.interest = Decimal(m.group(1).replace(',', ''))
+        if self.fees == 0 and self.interest == 0:
+            m = re.search(r'Finance Charges[:\s]+\$\s*([0-9,]+\.\d{2})', self.text)
+            if m:
+                self.fees = Decimal(m.group(1).replace(',', ''))
 
     def generate_report(self):
         aggregated = self._aggregate_by_vendor(
