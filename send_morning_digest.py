@@ -340,9 +340,8 @@ def build_html(recon_entries, manual_entries, log_date):
     except Exception:
         friendly_date = log_date
 
-    has_recon_issues  = any(e.get("status") == "ISSUES FOUND" for e in recon_entries)
     has_manual_issues = len(manual_entries) > 0
-    has_any_issues    = has_recon_issues or has_manual_issues
+    has_any_issues    = has_manual_issues
 
     subject = f"Reconciliation Digest — {friendly_date}"
 
@@ -420,25 +419,20 @@ def build_html(recon_entries, manual_entries, log_date):
             seen[key] = e
 
     # Group deduplicated entries by display_client, then by account_type — one card per client
-    def _status_style(has_issue, has_pending):
-        if has_issue:
-            return ("#b91c1c", "#fef2f2", "⚠️ ISSUES FOUND")
+    def _status_style(has_pending):
         if has_pending:
             return ("#7c3aed", "#f5f3ff", "📋 PENDING QB")
         return ("#166534", "#f0fdf4", "✅ CLEAN")
 
-    clients = {}  # display_client -> {"accounts": {account_type: {...}}, "has_issue", "has_pending"}
+    clients = {}  # display_client -> {"accounts": {account_type: {...}}, "has_pending"}
     for e in seen.values():
         client_disp  = display_name(e.get("client", "—"))
         account_type = display_account(e.get("account_type", ""))
-        c = clients.setdefault(client_disp, {"accounts": {}, "has_issue": False, "has_pending": False})
-        a = c["accounts"].setdefault(account_type, {"dates": [], "issues": [], "has_issue": False, "has_pending": False})
+        c = clients.setdefault(client_disp, {"accounts": {}, "has_pending": False})
+        a = c["accounts"].setdefault(account_type, {"dates": [], "has_pending": False})
         d = e.get("statement_end_date", "")
         if d and d not in a["dates"]:
             a["dates"].append(d)
-        if e.get("status") == "ISSUES FOUND":
-            a["has_issue"] = c["has_issue"] = True
-            a["issues"].extend(e.get("issues", []))
         if e.get("status") == "IN_PROGRESS":
             a["has_pending"] = c["has_pending"] = True
 
@@ -446,18 +440,14 @@ def build_html(recon_entries, manual_entries, log_date):
     runs_html = ""
     if clients:
         for client_disp, c in clients.items():
-            run_color, run_bg, run_badge = _status_style(c["has_issue"], c["has_pending"] and not c["has_issue"])
+            run_color, run_bg, run_badge = _status_style(c["has_pending"])
             acct_rows = ""
             for account_type, a in c["accounts"].items():
-                a_color, _a_bg, a_badge = _status_style(a["has_issue"], a["has_pending"] and not a["has_issue"])
+                a_color, _a_bg, a_badge = _status_style(a["has_pending"])
                 dates_label = "Completed dates:" if account_type == "Payroll" else "Statement dates:"
                 dates_html  = "".join(
                     f'<li style="padding:1px 0;color:#374151">{d}</li>' for d in sorted(a["dates"])
                 )
-                issues_html = ""
-                if a["issues"]:
-                    issues_html = "<div style='margin-top:6px;color:#6b7280;font-size:12px'>Issues:</div><ul style='margin:2px 0 0 16px;padding:0;font-size:13px'>" + \
-                        "".join(f'<li style="color:#b91c1c">{i}</li>' for i in a["issues"]) + "</ul>"
                 acct_rows += f"""
                 <div style="padding:8px 0;border-top:1px solid #f3f4f6">
                   <div style="display:flex;justify-content:space-between;align-items:center">
@@ -466,7 +456,6 @@ def build_html(recon_entries, manual_entries, log_date):
                   </div>
                   <div style="color:#6b7280;margin-top:4px;font-size:12px">{dates_label}</div>
                   <ul style="margin:2px 0 0 16px;padding:0;list-style:disc">{dates_html}</ul>
-                  {issues_html}
                 </div>"""
             runs_html += f"""
             <div style="border:1px solid #e5e7eb;border-radius:8px;margin-bottom:12px;overflow:hidden">

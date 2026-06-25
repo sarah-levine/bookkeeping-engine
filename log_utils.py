@@ -15,7 +15,7 @@ Schema (each entry):
     "beginning_balance":  str
     "ending_balance":     str
     "difference":         str
-    "status":             "IN_PROGRESS"|"CLEAN"|"ISSUES FOUND"|""
+    "status":             "IN_PROGRESS"|"CLEAN"|""
     "issues":             list[str]
     "issue":              str
   }
@@ -208,7 +208,7 @@ def load_recon_log(log_date) -> tuple[list[dict], list[dict]]:
     """Return (recon_entries, manual_entries) for one or more YYYY-MM-DD dates.
 
     log_date: str or list/set of str
-    - recon_entries: CLEAN/ISSUES FOUND entries whose run_time matches any of the dates
+    - recon_entries: CLEAN/IN_PROGRESS entries whose run_time matches any of the dates
     - manual_entries: ALL unresolved manual notes (regardless of date)
     """
     dates = {log_date} if isinstance(log_date, str) else set(log_date)
