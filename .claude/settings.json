@@ -10,6 +10,13 @@
             "command": "output=$(python3 tools/pii_scan.py 2>&1); rc=$?; if [ $rc -ne 0 ]; then python3 -c \"import json,sys; print(json.dumps({'decision':'block','reason':'pii-scan found issues — fix before committing:\\n'+sys.argv[1]}))\" \"$output\"; fi; exit $rc",
             "timeout": 30,
             "statusMessage": "Running PII scan..."
+          },
+          {
+            "type": "command",
+            "if": "Bash(git push*)",
+            "command": "output=$(python3 tools/pii_scan.py 2>&1); rc=$?; if [ $rc -ne 0 ]; then python3 -c \"import json,sys; print(json.dumps({'decision':'block','reason':'pii-scan found issues — fix before pushing:\\n'+sys.argv[1]}))\" \"$output\"; fi; exit $rc",
+            "timeout": 30,
+            "statusMessage": "Running PII scan..."
           }
         ]
       }
