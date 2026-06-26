@@ -12,6 +12,34 @@
 > repo. Scripts run from `/tmp/engine`; data, logs, and configs are pulled to
 > `~/.bookkeeping/clients` via the REST API helper — no git auth URL needed.
 
+> **Client name normalization:** All client names are automatically resolved to
+> their canonical form (e.g. `JoJo Hair Studio Inc` → `JOJO HAIR STUDIO INC`,
+> `FCBA` → `FCBA ACADEMY`) before writing to any log. Do not manually
+> normalize — the engine handles it via the client registry.
+
+> **Vendor normalization (two-tier):** Transaction descriptions are normalized
+> using two tiers: (1) client-specific rules in each `<client>.json` take
+> priority, (2) global rules in `vendor_rules_global.json` fire as fallback
+> for common vendors (Amazon, PG&E, Apple, Comcast, ADP, etc.). When adding a
+> new vendor rule, put it in the client config if it's specific to one client,
+> or in `vendor_rules_global.json` if it applies to everyone.
+
+> **Drive archiving:** After each successful reconciliation, the statement PDF
+> is auto-archived to Google Drive under `Bookkeeping/<Client>/<Account Type>/`.
+> Files are deduplicated by name. Only the 2 most recent statements per folder
+> are kept — older ones are deleted automatically.
+
+> **Name normalization:** Client names are automatically resolved to their
+> canonical form (e.g. `JoJo Hair Studio Inc` → `JOJO HAIR STUDIO INC`) before
+> writing to any log. Do not manually normalize — the engine handles it.
+
+> **Vendor normalization (two-tier):** Transaction descriptions are normalized
+> using two tiers of rules: (1) client-specific rules in each `<client>.json`
+> take priority, (2) global rules in `vendor_rules_global.json` fire as
+> fallback for common vendors (Amazon, PG&E, Apple, Comcast, ADP, etc.).
+> When adding a new vendor rule, put it in the client config if it's specific
+> to one client, or in `vendor_rules_global.json` if it applies to everyone.
+
 ## Mode Detection
 
 Read the attached files and the user's message, then pick a mode:
@@ -156,11 +184,22 @@ All logs live in `~/.bookkeeping/clients/` (pulled by Shared Setup) and are
 written automatically by the scripts. `sync_up()` pushes them back to
 Bookkeeping-clients and triggers Google Sheets sync — no manual git needed.
 
+### `recon_log.json`
+Primary reconciliation log. Upsert key: `(client, account_type, statement_end_date)`.
+Status values: `DONE`/`CLEAN`, `IN_PROGRESS`, `ERROR`, `ISSUES FOUND`.
+- `ERROR` entries store the error message in the `issue` field; the `issues` array stays empty (reserved for bookkeeping discrepancies).
+- When a successful re-run replaces an `ERROR` entry, the old entry is removed automatically.
+- `ERROR` status skips writing to `reconciliation_log.csv` to protect the tracker.
+
 ### `payroll_log.csv`
 Columns: `client, client_name, check_date, bank_credit, balanced, run_timestamp`
 
 ### `reconciliation_log.csv`
 Columns: `client, client_name, account_type, account_ending, statement_date, beginning_balance, ending_balance, total_payments, run_timestamp`
+
+### `vendor_rules_global.json`
+Shared vendor normalization rules applied as fallback after client-specific rules.
+Contains common vendors (Amazon, PG&E, Apple, Comcast, ADP, etc.).
 
 ```bash
 grep "<client>" ~/.bookkeeping/clients/reconciliation_log.csv
@@ -192,6 +231,8 @@ Watch for these signals in stderr:
 - `⚠ Vision fallback unavailable: ANTHROPIC_API_KEY not set` → numbers unreliable on scanned PDFs. Ask Sarah to set `ANTHROPIC_API_KEY` and re-run.
 - `⚠ pdftotext parse did not tie out — invoking Claude Vision fallback` → normal for scanned PDFs; should be followed by `✓ Vision fallback succeeded`.
 - `⚠ Could not extract balance data` → switch to Mode G (Manual Statement Entry).
+- `⚠ Previous run ended with ERROR:` → the last run for this client+account failed. The script will retry automatically. Review the error message to decide if the root cause is resolved.
+- `⚠ Skipping reconciliation_log.csv (ERROR status)` → a failed run wrote to `recon_log.json` with ERROR status but did not touch the CSV tracker, so previously good data is preserved.
 
 ### Client Notes (check before QB confirmation)
 
@@ -237,6 +278,13 @@ sync_up("Reconciliation: <Client> <account_type> <statement_date>")
 `sync_up()` pushes the log files AND fires the `logs-updated` dispatch which
 automatically syncs the Google Sheets Reconciliation Tracker — no manual sheet
 update needed.
+
+**Drive archiving:** The reconciliation script auto-archives the statement PDF
+to Google Drive under `Bookkeeping/<Client>/<Account Type>/`. Files are
+deduplicated by name and only the 2 most recent statements per folder are kept
+(older ones are deleted). This happens automatically — no manual step needed.
+If Drive upload fails (e.g. missing credentials), it prints a warning but does
+not block the reconciliation.
 
 **IN_PROGRESS entries:** If the script logged a status of `IN_PROGRESS` (e.g.,
 balance didn't tie out but Sarah wants to continue), upgrade it to `CLEAN` once
