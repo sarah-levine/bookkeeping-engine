@@ -172,15 +172,19 @@ class AmexStatementParser(StatementParser):
         ) if cardholders else None
 
         # Match transactions with amount inline at end of line (e.g. "01/28/26   Extra Space   $38.00 ⧫")
+        # Also matches negative amounts for credits (e.g. "-$1.98")
         txn_line_inline = re.compile(
-            r'^(\d{2}/\d{2}/\d{2})\*?\s+(.+?)\s+\$([0-9,]+\.\d{2})\s*[⧫\*]?\s*$'
+            r'^(\d{2}/\d{2}/\d{2})\*?\s+(.+?)\s+(-?)\$([0-9,]+\.\d{2})\s*[⧫\*]?\s*$'
         )
         txn_line = re.compile(r'^(\d{2}/\d{2}/\d{2})\s+(.+)')
-        amount_line = re.compile(r'^\$([0-9,]+\.\d{2})')
-        skip_keywords = ['ELECTRONIC PAYMENT', 'AUTOPAY PAYMENT', 'Total Fees', 'Total Interest',
+        amount_line = re.compile(r'^(-?)\$([0-9,]+\.\d{2})')
+        skip_keywords = ['ELECTRONIC PAYMENT', 'AUTOPAY PAYMENT', 'PAYMENT RECEIVED',
+                         'ONLINE PAYMENT', 'PAYMENT - THANK',
+                         'Total Fees', 'Total Interest',
                          'Closing Date', 'Account Ending', 'Card Ending',
                          'Customer Care', 'Next Closing', 'AMEX Wireless Credit',
                          'Payments', 'Credits', 'New Charges', 'Total Payments',
+                         'Payments/Credits',
                          'Detail', 'Summary', 'Amount']
 
         current_cardholder = None
@@ -201,7 +205,8 @@ class AmexStatementParser(StatementParser):
             if inline_m:
                 date_str = inline_m.group(1)
                 vendor_raw = inline_m.group(2).strip()
-                txn_amount_str = inline_m.group(3)
+                is_negative = inline_m.group(3) == '-'
+                txn_amount_str = inline_m.group(4)
                 if any(kw in vendor_raw for kw in skip_keywords):
                     pending_date = None
                     pending_vendor = None
@@ -217,7 +222,8 @@ class AmexStatementParser(StatementParser):
                 vendor = self.normalize_vendor(vendor_raw)
                 txn_amount = Decimal(txn_amount_str.replace(',', ''))
                 txn_type = _classify_cc_transaction(vendor, txn_amount)
-                if txn_type == 'credit':
+                # Negative amounts are always credits (e.g. refunds on cardholder cards)
+                if is_negative or txn_type == 'credit':
                     self.credits.append({
                         'date': date_str,
                         'description': vendor,
@@ -237,10 +243,11 @@ class AmexStatementParser(StatementParser):
             # Fallback: separate-line amount
             amt_m = amount_line.match(stripped)
             if amt_m and pending_date and pending_vendor:
+                is_negative = amt_m.group(1) == '-'
                 vendor = self.normalize_vendor(pending_vendor)
-                txn_amount = Decimal(amt_m.group(1).replace(',', ''))
+                txn_amount = Decimal(amt_m.group(2).replace(',', ''))
                 txn_type = _classify_cc_transaction(vendor, txn_amount)
-                if txn_type == 'credit':
+                if is_negative or txn_type == 'credit':
                     self.credits.append({
                         'date': pending_date,
                         'description': vendor,

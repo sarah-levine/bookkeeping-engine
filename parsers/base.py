@@ -727,7 +727,8 @@ class StatementParser:
     def _log_parser_bug_to_roadmap(self):
         """Append a parser bug entry to REFACTORING_ROADMAP.md so it gets tracked."""
         import datetime
-        roadmap = REPO_DIR / 'REFACTORING_ROADMAP.md'
+        from pathlib import Path
+        roadmap = Path(__file__).resolve().parent.parent / 'REFACTORING_ROADMAP.md'
         if not roadmap.exists():
             return
         prev  = Decimal(str(getattr(self, 'previous_balance', 0) or 0))
