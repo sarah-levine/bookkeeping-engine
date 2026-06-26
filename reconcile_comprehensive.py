@@ -1368,26 +1368,9 @@ def main():
                         status             = "IN_PROGRESS",
                     )
                     print(f"[Step 12a] 📝 Digest log → recon_log.json (IN_PROGRESS)")
-                    import subprocess as _sp
-                    from log_utils import get_logs_dir as _gld
-                    _ld = str(_gld())  # logs live in the private logs dir, not the public repo
-                    # Sync to remote without touching the working tree:
-                    # 1. abort any in-progress rebase (no-op if clean)
-                    # 2. fetch latest from remote
-                    # 3. re-attach HEAD to main branch (in case a prior failed rebase left detached HEAD)
-                    # 4. reset --mixed to FETCH_HEAD: moves branch pointer + unstages, keeps working tree
-                    _sp.run(['git', '-C', _ld, 'rebase', '--abort'], capture_output=True)
-                    _sp.run(['git', '-C', _ld, 'fetch', 'origin', 'main'], capture_output=True)
-                    _sp.run(['git', '-C', _ld, 'symbolic-ref', 'HEAD', 'refs/heads/main'], capture_output=True)
-                    _sp.run(['git', '-C', _ld, 'reset', '--mixed', 'FETCH_HEAD'], capture_output=True)
-                    _sp.run(['git', '-C', _ld, 'add', 'recon_log.json'], capture_output=True)
-                    _sp.run(['git', '-C', _ld, 'commit', '-m',
-                             f'digest: {parser.client_name} {stmt_type} IN_PROGRESS'], capture_output=True)
-                    _r = _sp.run(['git', '-C', _ld, 'push'], capture_output=True, text=True)
-                    if _r.returncode == 0:
-                        print(f"  ✅ Pushed to GitHub")
-                    else:
-                        print(f"  ⚠ Git push failed: {_r.stderr.strip()}")
+                    from tools.github_clients import sync_up as _sync_up
+                    _sync_up(f'digest: {parser.client_name} {stmt_type} IN_PROGRESS', dispatch=False)
+                    print(f"  ✅ Pushed to GitHub")
                 except Exception as _e:
                     print(f"  ⚠ Digest log not updated: {_e}")
             # ────────────────────────────────────────────────────────────────
@@ -1471,24 +1454,10 @@ def main():
                         total_payments     = f"{float(_pay):.2f}" if _pay is not None else '',
                         status             = "DONE" if answer == 'done' else "IN_PROGRESS",
                     )
-                    import subprocess as _sp
-                    from log_utils import get_logs_dir as _gld
-                    _ld = str(_gld())  # logs live in the private logs dir, not the public repo
-                    # Sync to remote without touching the working tree (same approach as Step 12a).
-                    _sp.run(['git', '-C', _ld, 'rebase', '--abort'], capture_output=True)
-                    _sp.run(['git', '-C', _ld, 'fetch', 'origin', 'main'], capture_output=True)
-                    _sp.run(['git', '-C', _ld, 'symbolic-ref', 'HEAD', 'refs/heads/main'], capture_output=True)
-                    _sp.run(['git', '-C', _ld, 'reset', '--mixed', 'FETCH_HEAD'], capture_output=True)
-                    _sp.run(['git', '-C', _ld, 'add',
-                             'reconciliation_log.csv', 'recon_log.json'], capture_output=True)
-                    _sp.run(['git', '-C', _ld, 'commit', '-m',
-                             f'recon: {parser.client_name} {stmt_type} {"DONE" if answer == "done" else "IN_PROGRESS"}'], capture_output=True)
-                    _r = _sp.run(['git', '-C', _ld, 'push'],
-                                 capture_output=True, text=True)
-                    if _r.returncode == 0:
-                        print(f"  ✅ Both logs pushed to GitHub")
-                    else:
-                        print(f"  ⚠ Git push failed: {_r.stderr.strip()}")
+                    from tools.github_clients import sync_up as _sync_up
+                    _status = "DONE" if answer == "done" else "IN_PROGRESS"
+                    _sync_up(f'recon: {parser.client_name} {stmt_type} {_status}')
+                    print(f"  ✅ Both logs pushed to GitHub")
                 except Exception as _e:
                     print(f"  ✗ LOG WRITE FAILED — {_e}")
                     print(f"  ✗ reconciliation_log.csv and recon_log.json may be out of sync.")
