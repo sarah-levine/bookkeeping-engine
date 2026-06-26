@@ -59,6 +59,19 @@ def _save_log(entries: list[dict]) -> None:
     _recon_log_path().write_text(json.dumps(entries, indent=2, ensure_ascii=False) + "\n")
 
 
+def entry_status(client: str, account_type: str, statement_end_date: str) -> str | None:
+    """Return the current status of a recon entry, or None if not found."""
+    client = _normalize_client_name(client)
+    statement_end_date = _normalize_date_iso(statement_end_date)
+    for e in reversed(_load_log()):
+        if (e.get("type") == "recon"
+                and _normalize_client_name(e.get("client", "")) == client
+                and e.get("account_type") == account_type
+                and _normalize_date_iso(e.get("statement_end_date", "")) == statement_end_date):
+            return e.get("status")
+    return None
+
+
 def _assert_known_account_type(client: str, account_type: str) -> None:
     """Warn or prompt if account_type is not in the client's statement_types config.
 

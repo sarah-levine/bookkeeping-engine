@@ -1214,6 +1214,7 @@ def main():
 
     all_reports = []
     _session_stmt_types = []  # tracks (stmt_type, client_name) for each statement processed
+    _session_pushed = False   # set True if any sync_up() actually ran
     try:
         for stmt_type, seg_path in segments:
             print(f"[Step 4] Detected: {stmt_type}  ({Path(seg_path).name})")
@@ -1370,6 +1371,9 @@ def main():
                             getattr(parser, 'statement_date', ''))
                     _beg_f = f"{float(_beg):,.2f}" if _beg is not None else '—'
                     _end_f = f"{float(_end):,.2f}" if _end is not None else '—'
+                    from log_utils import entry_status as _entry_status
+                    _existing = _entry_status(parser.client_name, stmt_type,
+                                              str(_date) if _date else '')
                     _upsert_log(
                         client             = parser.client_name,
                         account_type       = stmt_type,
@@ -1381,9 +1385,13 @@ def main():
                         status             = "IN_PROGRESS",
                     )
                     print(f"[Step 12a] 📝 Digest log → recon_log.json (IN_PROGRESS)")
-                    from tools.github_clients import sync_up as _sync_up
-                    _sync_up(f'digest: {parser.client_name} {stmt_type} IN_PROGRESS', dispatch=False)
-                    print(f"  ✅ Pushed to GitHub")
+                    if _existing in ("DONE", "IN_PROGRESS"):
+                        print(f"  ⊘ Skipping push (already {_existing})")
+                    else:
+                        from tools.github_clients import sync_up as _sync_up
+                        _sync_up(f'digest: {parser.client_name} {stmt_type} IN_PROGRESS', dispatch=False)
+                        _session_pushed = True
+                        print(f"  ✅ Pushed to GitHub")
                 except Exception as _e:
                     print(f"  ⚠ Digest log not updated: {_e}")
             # ────────────────────────────────────────────────────────────────
@@ -1456,6 +1464,10 @@ def main():
                     _pay = getattr(parser, 'total_payments', None)
                     _date = getattr(parser, 'closing_date',
                             getattr(parser, 'statement_date', ''))
+                    _status = "DONE" if answer == 'done' else "IN_PROGRESS"
+                    from log_utils import entry_status as _entry_status
+                    _existing = _entry_status(parser.client_name, stmt_type,
+                                              str(_date) if _date else '')
                     _write_logs(
                         client             = parser.client_name,
                         client_name        = parser.client_name,
@@ -1465,12 +1477,15 @@ def main():
                         beginning_balance  = f"{float(_beg):,.2f}" if _beg is not None else '—',
                         ending_balance     = f"{float(_end):,.2f}" if _end is not None else '—',
                         total_payments     = f"{float(_pay):.2f}" if _pay is not None else '',
-                        status             = "DONE" if answer == 'done' else "IN_PROGRESS",
+                        status             = _status,
                     )
-                    from tools.github_clients import sync_up as _sync_up
-                    _status = "DONE" if answer == "done" else "IN_PROGRESS"
-                    _sync_up(f'recon: {parser.client_name} {stmt_type} {_status}')
-                    print(f"  ✅ Both logs pushed to GitHub")
+                    if _existing == _status:
+                        print(f"  ⊘ Skipping push (already {_existing})")
+                    else:
+                        from tools.github_clients import sync_up as _sync_up
+                        _sync_up(f'recon: {parser.client_name} {stmt_type} {_status}')
+                        _session_pushed = True
+                        print(f"  ✅ Both logs pushed to GitHub")
                 except Exception as _e:
                     print(f"  ✗ LOG WRITE FAILED — {_e}")
                     print(f"  ✗ reconciliation_log.csv and recon_log.json may be out of sync.")
@@ -1534,7 +1549,7 @@ def main():
     # ── Auto-trigger Google Sheet update ────────────────────────────────────
     # Trigger the update_sheet GitHub Actions workflow so the Reconciliation
     # Tracker always reflects the latest dates without manual intervention.
-    if any(s for s, _ in _session_stmt_types) and not dry_run:
+    if any(s for s, _ in _session_stmt_types) and not dry_run and _session_pushed:
         try:
             import urllib.request, json as _json, os as _os, time as _time
             pat = _os.environ.get("GITHUB_PAT_BOOKKEEPING", "").strip()
