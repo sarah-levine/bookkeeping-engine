@@ -112,7 +112,56 @@ def phrase_ok(phrase, allow):
                for w in re.split(r"[\s&]+", phrase) if w)
 
 
-def scan_file(path, allow, audit=False):
+def _load_client_blocklist():
+    """Build a set of client-name patterns to block in public code.
+
+    Reads client config filenames from the private clients dir and generates
+    lowercase patterns: the config slug (e.g. 'acme_inc'), words from
+    canonical_name, and aliases. These catch references like
+    'fixture_amex_acme.pdf' or 'acme_inc.json' that slip past the
+    ALLCAPS-only name scanner.
+    """
+    blocklist = set()
+    clients_dir = os.environ.get("BOOKKEEPING_CLIENTS_DIR", "")
+    if not clients_dir:
+        return blocklist
+    import json, pathlib
+    cd = pathlib.Path(clients_dir)
+    if not cd.exists():
+        return blocklist
+    skip = {"sheets_config.json", "sheets_credentials.json", "digest_config.json",
+            "fixtures_manifest.json", "manual_statements.json", "recon_log.json",
+            "vendor_rules_global.json", "drive_credentials.json", "drive_token.pickle"}
+    for f in cd.glob("*.json"):
+        if f.name in skip or f.name.startswith("_"):
+            continue
+        try:
+            cfg = json.loads(f.read_text())
+        except Exception:
+            continue
+        if not isinstance(cfg, dict) or not cfg.get("canonical_name"):
+            continue
+        # Add the config slug (e.g. "acme_inc")
+        slug = f.stem.lower()
+        blocklist.add(slug)
+        # Add individual words from canonical_name (skip short ones)
+        for w in re.split(r"[\s&,.']+", cfg.get("canonical_name", "")):
+            if len(w) >= 4:
+                blocklist.add(w.lower())
+        # Add aliases
+        for alias in cfg.get("aliases", []):
+            for w in re.split(r"[\s&,.']+", alias):
+                if len(w) >= 4:
+                    blocklist.add(w.lower())
+    # Remove generic words that would cause false positives
+    generics = {"hair", "studio", "parts", "service", "academy", "west",
+                "human", "capital", "partners", "appliance", "realty",
+                "silicon", "valley", "north", "south", "east"}
+    blocklist -= generics
+    return blocklist
+
+
+def scan_file(path, allow, audit=False, client_blocklist=None):
     findings = []
     full = os.path.join(ROOT, path)
     try:
@@ -139,6 +188,12 @@ def scan_file(path, allow, audit=False):
             if m.lower() not in allow and m.lower() not in STOPWORDS:
                 findings.append((lineno, "name?", m))
         if not audit:
+            # Client-name blocklist: catch lowercase/underscore references
+            if client_blocklist and name_scan:
+                line_lower = line.lower()
+                for blocked in client_blocklist:
+                    if blocked in line_lower:
+                        findings.append((lineno, "client?", blocked))
             continue
         # max-recall extra shapes: Titlecase phrases + InternalCaps tokens
         for m in TITLE_MULTI.findall(line):
@@ -147,6 +202,12 @@ def scan_file(path, allow, audit=False):
         for m in CAMEL.findall(line):
             if m.lower() not in allow:
                 findings.append((lineno, "name?", m))
+        # Client-name blocklist (audit mode too)
+        if client_blocklist:
+            line_lower = line.lower()
+            for blocked in client_blocklist:
+                if blocked in line_lower:
+                    findings.append((lineno, "client?", blocked))
     return findings
 
 
@@ -163,11 +224,12 @@ def main():
     else:
         files = tracked_text_files()
 
+    client_blocklist = _load_client_blocklist()
     total = 0
     for f in files:
         if f in EXCLUDE_PATHS:
             continue
-        hits = scan_file(f, allow, audit=audit)
+        hits = scan_file(f, allow, audit=audit, client_blocklist=client_blocklist)
         # de-dupe identical (type,value) per file to keep output readable
         seen = set()
         for lineno, kind, val in hits:

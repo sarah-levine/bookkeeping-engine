@@ -8,9 +8,9 @@ make log entries and push them back without needing a local clone.
 Usage (programmatic):
     from tools.github_clients import pull_files, push_files, trigger_dispatch
 
-    pull_files(['reconciliation_log.csv', 'recon_log.json', 'de_anza.json'])
+    pull_files(['reconciliation_log.csv', 'recon_log.json', 'acme_inc.json'])
     # ... make changes locally in ~/.bookkeeping/clients/ ...
-    push_files(['reconciliation_log.csv', 'recon_log.json'], "Log De Anza May 2026")
+    push_files(['reconciliation_log.csv', 'recon_log.json'], "Log Acme Inc May 2026")
     trigger_dispatch()
 """
 
@@ -136,19 +136,30 @@ def list_files(subdir: str = "") -> list[str]:
 # ── high-level helpers ──────────────────────────────────────────────────────
 
 _LOG_FILES = ["reconciliation_log.csv", "recon_log.json"]
-_CLIENT_CONFIGS = [f for f in [
-    "de_anza.json", "duran_hcp.json", "estudillo_realty.json",
-    "fcba_academy.json", "jojo_hair_studio.json", "mp_cheng.json",
-    "needles_studio.json", "paintbox_hair_studio.json",
-    "silicon_valley_west.json", "sheets_config.json", "digest_config.json",
-]]
+_SHARED_CONFIGS = ["sheets_config.json", "digest_config.json",
+                   "vendor_rules_global.json", "manual_statements.json"]
+
+
+def _discover_client_configs() -> list[str]:
+    """List client config filenames from the repo via the REST API."""
+    try:
+        all_files = list_files()
+        return [f for f in all_files
+                if f.endswith(".json")
+                and f not in _LOG_FILES
+                and f not in _SHARED_CONFIGS
+                and not f.startswith("_")
+                and f not in ("fixtures_manifest.json", "sheets_credentials.json",
+                              "drive_credentials.json")]
+    except Exception:
+        return []
 
 
 def sync_down(include_configs: bool = True) -> None:
     """Pull log files (and optionally client configs) from Bookkeeping-clients."""
     targets = list(_LOG_FILES)
     if include_configs:
-        targets += _CLIENT_CONFIGS
+        targets += _SHARED_CONFIGS + _discover_client_configs()
     for name in targets:
         try:
             pull_file(name)

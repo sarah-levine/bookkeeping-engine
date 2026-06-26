@@ -130,7 +130,7 @@ def _normalize_client_name(client: str) -> str:
         canonical = _registry.resolve(client)
         if canonical:
             return canonical
-        # Try stripping department suffix (e.g. "Duran HCP — Admin")
+        # Try stripping department suffix (e.g. "Acme Corp — Admin")
         # Keep the suffix but normalize the base name
         if " — " in client:
             base, suffix = client.rsplit(" — ", 1)

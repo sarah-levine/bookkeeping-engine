@@ -9,7 +9,7 @@ but with --dry-run so nothing is logged, pushed, or updated.
 
 Usage:
     python3 tests/smoke_all_fixtures.py                   # all fixtures
-    python3 tests/smoke_all_fixtures.py amex_fcba          # one fixture by name
+    python3 tests/smoke_all_fixtures.py amex_acme           # one fixture by name
     python3 tests/smoke_all_fixtures.py --format amex      # all fixtures of a format
 
 Requires:
