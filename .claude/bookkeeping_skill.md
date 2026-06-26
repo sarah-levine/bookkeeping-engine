@@ -221,9 +221,21 @@ The script auto-writes logs to `~/.bookkeeping/clients/` — no extra step neede
 
 ### Handle output
 
-Print the FULL report to Sarah verbatim inside a fenced code block — every
-charge line, summary, payments, credits, exactly as emitted. Do **not**
-summarize, reformat, regroup, or truncate.
+**CRITICAL — show ALL output.** Print the COMPLETE script output to Sarah in a
+fenced code block. This includes:
+
+1. Pipeline steps as they run (`[Step 2] Splitting...`, `[Step 4] Detected...`,
+   `[Step 6] Client:...`, `[Step 7] Parsing...`, `[Step 7b] Verifying...`,
+   `[Step 7c] Checking...`, `[Step 12] Writing logs...`, etc.)
+2. The full reconciliation report — every charge line, summary, payments,
+   credits, checks, exactly as emitted
+3. Balance verification result (`✓ PASSED` or `✗ FAILED`)
+4. Log write confirmations (`📋 Logged →`, `📝 Digest log →`, `✅ Pushed`)
+5. Drive archive result (`📁 Drive: archived →` or `📁 Drive: already exists`)
+6. Any warnings or errors
+
+Do **NOT** summarize, reformat, regroup, truncate, or omit any section.
+Show everything exactly as the script printed it.
 
 Then call `present_files` on the saved `.txt` for download.
 
