@@ -39,8 +39,10 @@ class ClientRegistry:
         self._config_files = {}   # canonical_name → source JSON filename
         self._alias_map = {}      # any name (upper) → canonical_name
         self._normalizer_cache = {}
+        self._global_vendor_rules = []  # shared rules applied as fallback
         self._schema = self._load_schema(Path(clients_dir))
         self._load(Path(clients_dir))
+        self._load_global_vendor_rules(Path(clients_dir))
 
     @staticmethod
     def _load_schema(clients_dir):
@@ -115,6 +117,18 @@ class ClientRegistry:
         return None
 
 
+    def _load_global_vendor_rules(self, clients_dir):
+        """Load shared vendor rules from vendor_rules_global.json."""
+        path = clients_dir / "vendor_rules_global.json"
+        if not path.exists():
+            return
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            self._global_vendor_rules = data.get("vendor_rules", [])
+        except Exception:
+            pass
+
     def resolve(self, name):
         """Return canonical client name, or None if not found."""
         if not name:
@@ -125,39 +139,59 @@ class ClientRegistry:
         canonical = self.resolve(name)
         return self._configs.get(canonical) if canonical else None
 
-    def normalize_vendor(self, client_name, description):
-        """Apply client vendor rules to normalize a transaction description."""
-        cfg = self.get_config(client_name)
-        if not cfg:
-            return description
-        rules = cfg.get('vendor_rules', [])
-        d = description.upper().strip()
+    @staticmethod
+    def _match_rules(rules, d_upper):
+        """Try to match a description against a list of vendor rules.
+
+        Returns the normalized string if a rule matches, else None.
+        """
         for rule in rules:
             contains = rule.get('contains', '').upper()
             starts = rule.get('starts_with', '').upper()
-            # A rule must declare at least one primary matcher (contains or
-            # starts_with); a rule with neither matches nothing.
             if not contains and not starts:
                 continue
-            if contains and contains not in d:
+            if contains and contains not in d_upper:
                 continue
-            if starts and not d.startswith(starts):
+            if starts and not d_upper.startswith(starts):
                 continue
-            # Check optional secondary conditions
             also = rule.get('also_contains', '').upper()
-            if also and also not in d:
+            if also and also not in d_upper:
                 continue
             also2 = rule.get('also_contains2', '').upper()
-            if also2 and also2 not in d:
+            if also2 and also2 not in d_upper:
                 continue
             also_any = [x.upper() for x in rule.get('also_contains_any', [])]
-            if also_any and not any(x in d for x in also_any):
+            if also_any and not any(x in d_upper for x in also_any):
                 continue
             result = rule['normalize_to']
             suffix = rule.get('display_suffix', '')
             if suffix:
                 result = f"{result} ({suffix})"
             return result
+        return None
+
+    def normalize_vendor(self, client_name, description):
+        """Normalize a transaction description using two tiers of rules.
+
+        1. Client-specific rules (highest priority)
+        2. Global rules (fallback for common vendors)
+
+        Returns the original description if no rule matches.
+        """
+        d = description.upper().strip()
+
+        # Tier 1: client-specific rules
+        cfg = self.get_config(client_name)
+        if cfg:
+            result = self._match_rules(cfg.get('vendor_rules', []), d)
+            if result is not None:
+                return result
+
+        # Tier 2: global rules
+        result = self._match_rules(self._global_vendor_rules, d)
+        if result is not None:
+            return result
+
         return description
 
     def clean_and_normalize(self, client_name, description):
