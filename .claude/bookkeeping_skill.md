@@ -13,9 +13,9 @@
 > `~/.bookkeeping/clients` via the REST API helper — no git auth URL needed.
 
 > **Client name normalization:** All client names are automatically resolved to
-> their canonical form (e.g. `JoJo Hair Studio Inc` → `JOJO HAIR STUDIO INC`,
-> `FCBA` → `FCBA ACADEMY`) before writing to any log. Do not manually
-> normalize — the engine handles it via the client registry.
+> their canonical form before writing to any log. Aliases, mixed-case variants,
+> and short names all resolve to the uppercase canonical name from the client
+> registry. Do not manually normalize — the engine handles it.
 
 > **Vendor normalization (two-tier):** Transaction descriptions are normalized
 > using two tiers: (1) client-specific rules in each `<client>.json` take
