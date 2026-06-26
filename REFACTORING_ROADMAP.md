@@ -33,7 +33,7 @@ validate. Alternatively, auto-derive the enum from registered parser
   debit+credit rows using `workers_comp_account`/`pay_by_pay_account` config key and
   print a JE balance cross-check. Code supports both key names; rename `pay_by_pay_account`
   → `workers_comp_account` in client configs when convenient.
-- Ghost row in `reconciliation_log.csv` for JoJo Citi Costco May 2026 (`total_payments = 0.00`,
+- Ghost row in `reconciliation_log.csv` for a Citi Costco May 2026 entry (`total_payments = 0.00`,
   no `account_ending`) — confirmed absent from Bookkeeping-clients on 2026-06-24; row was
   never written to the canonical copy, so no deletion needed.
 - `citi_visa_costco → citi_costco` alias missing from `load_reconciliation_log`

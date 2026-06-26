@@ -126,7 +126,7 @@ def mark_done(client_key: str, account_type: str, statement_date: str = "") -> s
     """Mark a reconciliation entry as DONE after QuickBooks entry is complete.
 
     Args:
-        client_key: Client key, e.g. "silicon_valley_west", "jojo_hair_studio".
+        client_key: Client key, e.g. "acme_inc", "contoso_llc".
         account_type: Account type, e.g. "amex", "bofa_checking", "citi_checking".
         statement_date: Optional statement closing date (MM/DD/YY or YYYY-MM-DD).
                         If omitted and only one IN_PROGRESS entry matches, uses that.

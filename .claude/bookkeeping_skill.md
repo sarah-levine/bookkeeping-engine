@@ -30,7 +30,7 @@
 > are kept — older ones are deleted automatically.
 
 > **Name normalization:** Client names are automatically resolved to their
-> canonical form (e.g. `JoJo Hair Studio Inc` → `JOJO HAIR STUDIO INC`) before
+> canonical form before
 > writing to any log. Do not manually normalize — the engine handles it.
 
 > **Vendor normalization (two-tier):** Transaction descriptions are normalized
