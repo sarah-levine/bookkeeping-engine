@@ -129,6 +129,7 @@ def upsert_recon_log(
     difference: str = "0.00",
     status: str = "DONE",
     issues: list[str] | None = None,
+    issue: str = "",
 ) -> None:
     """Upsert a reconciliation or payroll entry into recon_log.json."""
     _assert_known_client(client)
@@ -146,10 +147,24 @@ def upsert_recon_log(
         "difference":         difference,
         "status":             status,
         "issues":             issues if issues is not None else [],
-        "issue":              "",
+        "issue":              issue,
     }
     key = (client, account_type, statement_end_date)
     existing = _load_log()
+
+    # If this is a successful run (not ERROR), remove any prior ERROR entries
+    # for the same client + account_type — they're resolved now.
+    if status != "ERROR":
+        existing = [
+            e for e in existing
+            if not (
+                e.get("type") == "recon"
+                and e.get("status") == "ERROR"
+                and e.get("client") == client
+                and e.get("account_type") == account_type
+            )
+        ]
+
     replaced = False
     for i, e in enumerate(existing):
         if e.get("type") == "recon" and (
@@ -479,49 +494,54 @@ def write_both_logs(
     statement_end_date = _normalize_date_iso(statement_end_date)
 
     # ── 1. reconciliation_log.csv ─────────────────────────────────────────
-    csv_path = get_logs_dir() / "reconciliation_log.csv"
-    fields = ["client", "client_name", "account_type", "account_ending",
-              "statement_date", "beginning_balance", "ending_balance",
-              "total_payments", "run_timestamp", "source"]
+    # Skip CSV write for ERROR status — don't overwrite a previously good
+    # statement date in the tracker with a failed run.
+    if status == "ERROR":
+        print(f"  ⚠ Skipping reconciliation_log.csv (ERROR status)")
+    else:
+        csv_path = get_logs_dir() / "reconciliation_log.csv"
+        fields = ["client", "client_name", "account_type", "account_ending",
+                  "statement_date", "beginning_balance", "ending_balance",
+                  "total_payments", "run_timestamp", "source"]
 
-    row = {
-        "client":             client_key,
-        "client_name":        client_name,
-        "account_type":       account_type,
-        "account_ending":     "",
-        "statement_date":     statement_end_date,
-        "beginning_balance":  beginning_balance,
-        "ending_balance":     ending_balance,
-        "total_payments":     total_payments,
-        "run_timestamp":      ts,
-        "source":             "claude",
-    }
+        row = {
+            "client":             client_key,
+            "client_name":        client_name,
+            "account_type":       account_type,
+            "account_ending":     "",
+            "statement_date":     statement_end_date,
+            "beginning_balance":  beginning_balance,
+            "ending_balance":     ending_balance,
+            "total_payments":     total_payments,
+            "run_timestamp":      ts,
+            "source":             "claude",
+        }
 
-    existing_rows = []
-    if csv_path.exists():
-        with open(csv_path, newline="") as f:
-            existing_rows = list(csv.DictReader(f))
+        existing_rows = []
+        if csv_path.exists():
+            with open(csv_path, newline="") as f:
+                existing_rows = list(csv.DictReader(f))
 
-    # Upsert: replace matching (client, account_type, statement_date) row.
-    # Normalize existing dates for comparison to handle legacy MM/DD/YY entries.
-    replaced = False
-    for i, r in enumerate(existing_rows):
-        if (r.get("client") == client_key
-                and r.get("account_type") == account_type
-                and _normalize_date_iso(r.get("statement_date", "")) == statement_end_date):
-            existing_rows[i] = row
-            replaced = True
-            break
-    if not replaced:
-        existing_rows.append(row)
+        # Upsert: replace matching (client, account_type, statement_date) row.
+        # Normalize existing dates for comparison to handle legacy MM/DD/YY entries.
+        replaced = False
+        for i, r in enumerate(existing_rows):
+            if (r.get("client") == client_key
+                    and r.get("account_type") == account_type
+                    and _normalize_date_iso(r.get("statement_date", "")) == statement_end_date):
+                existing_rows[i] = row
+                replaced = True
+                break
+        if not replaced:
+            existing_rows.append(row)
 
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(existing_rows)
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(existing_rows)
 
-    verb = "Updated" if replaced else "Logged"
-    print(f"  📋 {verb} → reconciliation_log.csv  ({statement_end_date}  ending ${ending_balance})")
+        verb = "Updated" if replaced else "Logged"
+        print(f"  📋 {verb} → reconciliation_log.csv  ({statement_end_date}  ending ${ending_balance})")
 
     # ── 2. recon_log.json ─────────────────────────────────────────────────
     upsert_recon_log(

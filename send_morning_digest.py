@@ -341,7 +341,8 @@ def build_html(recon_entries, manual_entries, log_date):
         friendly_date = log_date
 
     has_manual_issues = len(manual_entries) > 0
-    has_any_issues    = has_manual_issues
+    has_error_entries = any(e.get("status") == "ERROR" for e in recon_entries)
+    has_any_issues    = has_manual_issues or has_error_entries
 
     subject = f"Reconciliation Digest — {friendly_date}"
 
@@ -419,41 +420,50 @@ def build_html(recon_entries, manual_entries, log_date):
             seen[key] = e
 
     # Group deduplicated entries by display_client, then by account_type — one card per client
-    def _status_style(has_pending):
+    def _status_style(has_pending, has_error=False):
+        if has_error:
+            return ("#dc2626", "#fef2f2", "❌ ERROR")
         if has_pending:
             return ("#7c3aed", "#f5f3ff", "📋 PENDING QB")
         return ("#166534", "#f0fdf4", "✅ DONE")
 
-    clients = {}  # display_client -> {"accounts": {account_type: {...}}, "has_pending"}
+    clients = {}  # display_client -> {"accounts": {account_type: {...}}, "has_pending", "has_error"}
     for e in seen.values():
         client_disp  = display_name(e.get("client", "—"))
         account_type = display_account(e.get("account_type", ""))
-        c = clients.setdefault(client_disp, {"accounts": {}, "has_pending": False})
-        a = c["accounts"].setdefault(account_type, {"dates": [], "has_pending": False})
+        c = clients.setdefault(client_disp, {"accounts": {}, "has_pending": False, "has_error": False})
+        a = c["accounts"].setdefault(account_type, {"dates": [], "has_pending": False, "has_error": False, "error_issue": ""})
         d = e.get("statement_end_date", "")
         if d and d not in a["dates"]:
             a["dates"].append(d)
         if e.get("status") == "IN_PROGRESS":
             a["has_pending"] = c["has_pending"] = True
+        if e.get("status") == "ERROR":
+            a["has_error"] = c["has_error"] = True
+            a["error_issue"] = e.get("issue", "")
 
     # ── Build reconciliation runs HTML — one card per client, all account types inside ──
     runs_html = ""
     if clients:
         for client_disp, c in clients.items():
-            run_color, run_bg, run_badge = _status_style(c["has_pending"])
+            run_color, run_bg, run_badge = _status_style(c["has_pending"], c["has_error"])
             acct_rows = ""
             for account_type, a in c["accounts"].items():
-                a_color, _a_bg, a_badge = _status_style(a["has_pending"])
+                a_color, _a_bg, a_badge = _status_style(a["has_pending"], a["has_error"])
                 dates_label = "Completed dates:" if account_type == "Payroll" else "Statement dates:"
                 dates_html  = "".join(
                     f'<li style="padding:1px 0;color:#374151">{d}</li>' for d in sorted(a["dates"])
                 )
+                error_html = ""
+                if a["has_error"] and a["error_issue"]:
+                    error_html = f'<div style="margin-top:4px;padding:6px 8px;background:#fef2f2;border:1px solid #fecaca;border-radius:4px;font-size:12px;color:#dc2626">{a["error_issue"]}</div>'
                 acct_rows += f"""
                 <div style="padding:8px 0;border-top:1px solid #f3f4f6">
                   <div style="display:flex;justify-content:space-between;align-items:center">
                     <span style="font-weight:600;font-size:13px;color:#374151">{account_type}</span>
                     <span style="font-size:12px;font-weight:600;color:{a_color}">{a_badge}</span>
                   </div>
+                  {error_html}
                   <div style="color:#6b7280;margin-top:4px;font-size:12px">{dates_label}</div>
                   <ul style="margin:2px 0 0 16px;padding:0;list-style:disc">{dates_html}</ul>
                 </div>"""

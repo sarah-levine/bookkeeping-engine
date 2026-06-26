@@ -1232,6 +1232,19 @@ def main():
                 parser.client_name = original_parser.client_name
             if parser.client_name:
                 print(f"[Step 6] Client: {parser.client_name}")
+                # Check for prior ERROR entry for this client + account_type
+                try:
+                    from log_utils import _load_log as _ll
+                    for _prev in reversed(_ll()):
+                        if (_prev.get("type") == "recon"
+                                and _prev.get("client") == parser.client_name
+                                and _prev.get("account_type") == stmt_type):
+                            if _prev.get("status") == "ERROR":
+                                print(f"  ⚠ Previous run ended with ERROR: {_prev.get('issue', '(no details)')}")
+                                print(f"    Retrying...")
+                            break
+                except Exception:
+                    pass
             else:
                 print(f"[Step 6] ⚠ Client not recognized in this statement.")
                 if no_prompt:
