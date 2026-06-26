@@ -153,10 +153,12 @@ def _load_client_blocklist():
             for w in re.split(r"[\s&,.']+", alias):
                 if len(w) >= 4:
                     blocklist.add(w.lower())
-    # Remove generic words that would cause false positives
+    # Remove common English words that would cause false positives.
+    # Keep words specific enough to identify a client (e.g. "duran", "cheng",
+    # "fcba", "needles", "paintbox", "jojo").
     generics = {"hair", "studio", "parts", "service", "academy", "west",
                 "human", "capital", "partners", "appliance", "realty",
-                "silicon", "valley", "north", "south", "east"}
+                "silicon", "valley", "north", "south", "east", "inc", "llc"}
     blocklist -= generics
     return blocklist
 

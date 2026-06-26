@@ -37,7 +37,9 @@ from parsers.report import (
 # (Total Fees for this Period). Skip them in the charges detail to avoid
 # double-counting.
 _FEE_KEYWORDS = ['ANNUAL FEE', 'LATE PAYMENT FEE', 'OVERLIMIT FEE',
-                 'RETURNED PAYMENT FEE', 'CARD REPLACEMENT FEE']
+                 'RETURNED PAYMENT FEE', 'CARD REPLACEMENT FEE',
+                 'FOREIGN TRANSACTION FEE', 'CASH ADVANCE FEE',
+                 'STATEMENT FEE', 'MEMBERSHIP FEE']
 
 
 class AmexStatementParser(StatementParser):

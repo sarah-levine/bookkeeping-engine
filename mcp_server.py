@@ -92,7 +92,7 @@ def check_status(status_filter: str = "") -> str:
     """Check reconciliation status from recon_log.json.
 
     Args:
-        status_filter: Optional filter — "in_progress", "done", "issues", or "" for all.
+        status_filter: Optional filter — "in_progress", "done", "error", or "all".
                        Leave empty to see all IN_PROGRESS entries (most common use).
     """
     entries = _load_recon_log()

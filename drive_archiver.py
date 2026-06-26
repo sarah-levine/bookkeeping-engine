@@ -61,11 +61,12 @@ def _get_service():
         with open(token_path, "rb") as f:
             creds = pickle.load(f)
 
-    if creds and creds.expired and creds.refresh_token:
-        from google.auth.transport.requests import Request
-        creds.refresh(Request())
-        with open(token_path, "wb") as f:
-            pickle.dump(creds, f)
+    if creds and not creds.valid:
+        if creds.expired and creds.refresh_token:
+            from google.auth.transport.requests import Request
+            creds.refresh(Request())
+            with open(token_path, "wb") as f:
+                pickle.dump(creds, f)
 
     if not creds or not creds.valid:
         if oauth_creds_path.exists():
