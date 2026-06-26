@@ -809,7 +809,6 @@ class StatementParser:
                 file=sys.stderr,
             )
             self._tie_out_diagnostic()
-            self._log_parser_bug_to_roadmap()
             print(
                 "  ℹ  Fix the parser and re-run.  "
                 "Skipping Vision fallback (it would mask the bug).",

@@ -2,10 +2,24 @@
 
 > **Code changes are out of scope for this skill.** If a workflow surfaces a
 > bug, a missing parser, a config field that needs updating, or any change to
-> `.py`, `.json`, or `.md` files in the engine repo — stop, describe the issue
-> clearly, and tell Sarah to take it to Claude Code. Do not edit files inline.
-> The only writes this skill performs are to log files in Bookkeeping-clients
-> via `sync_up()`.
+> `.py`, `.json`, or `.md` files in the engine repo — stop and give Sarah a
+> **ready-to-paste Claude Code command** describing the fix. Do not edit files
+> inline. The only writes this skill performs are to log files in
+> Bookkeeping-clients via `sync_up()`.
+>
+> **When reporting a bug or suggestion**, format it as a block Sarah can copy
+> straight into Claude Code:
+>
+> ```
+> cd /path/to/bookkeeping-engine
+> claude "<Describe the bug clearly: what file, what's wrong, what the fix
+> should be, and which statement/fixture reproduces it.>"
+> ```
+>
+> Be specific — include the file name, the line or function involved, the
+> observed vs expected behavior, and which client/statement triggered it.
+> Do NOT log it to REFACTORING_ROADMAP.md — Sarah will fix it in Claude Code
+> immediately.
 
 > **Repo layout (read once):** code lives in the **public** `bookkeeping-engine`
 > repo; client configs + logs live in the **private** `Bookkeeping-clients`
