@@ -1476,6 +1476,22 @@ def main():
                     print(f"  ✗ reconciliation_log.csv and recon_log.json may be out of sync.")
                     print(f"  ✗ Do not proceed until this is resolved.")
 
+            # ── Drive archive ─────────────────────────────────────────────
+            if has_data and parser.client_name and not dry_run:
+                try:
+                    from drive_archiver import archive_statement as _archive
+                    _date = getattr(parser, 'closing_date',
+                            getattr(parser, 'statement_date', ''))
+                    _archive(
+                        pdf_path=seg_path,
+                        client_name=parser.client_name,
+                        account_type=stmt_type,
+                        statement_date=str(_date) if _date else '',
+                    )
+                except Exception as _e:
+                    print(f"  ⚠ Drive archive skipped: {_e}")
+            # ───────────────────────────────────────────────────────────────
+
             # ── Google Sheet update ─────────────────────────────────────────
             if has_data and parser.client_name and answer == "done" and not dry_run:
                 print(f"[Step 14] Updating Google Sheet...")
