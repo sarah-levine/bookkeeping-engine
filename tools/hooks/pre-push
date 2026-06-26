@@ -1,0 +1,7 @@
+#!/bin/sh
+# pre-push hook: runs quick checks before pushing to remote.
+# Catches PII leaks, broken tests, normalization issues, and missing configs.
+#
+# Install once:   git config core.hooksPath tools/hooks
+# Bypass (use sparingly):  git push --no-verify
+python3 "$(git rev-parse --show-toplevel)/tests/check_all.py" --quick

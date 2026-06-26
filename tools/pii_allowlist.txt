@@ -90,3 +90,4 @@ shipping
 town
 store
 UPLOADED
+ALLCAPS
