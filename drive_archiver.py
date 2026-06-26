@@ -11,6 +11,10 @@ Folder structure:
         statement_2026-02-06.pdf
 
 Uses the same service account credentials as sheets_updater.py.
+The service account must have Editor access on the target Drive folders.
+
+Usage (standalone dry-run test):
+    python3 drive_archiver.py --dry-run <pdf_path> <client_name> <account_type> [<date>]
 """
 
 import json
@@ -56,7 +60,7 @@ def _get_service():
     return build("drive", "v3", credentials=creds)
 
 
-def _find_or_create_folder(service, name: str, parent_id: str) -> str:
+def _find_or_create_folder(service, name: str, parent_id: str, dry_run: bool = False) -> str:
     """Find a subfolder by name under parent_id, or create it."""
     query = (
         f"'{parent_id}' in parents "
@@ -71,6 +75,10 @@ def _find_or_create_folder(service, name: str, parent_id: str) -> str:
     if files:
         return files[0]["id"]
 
+    if dry_run:
+        print(f"  [dry-run] Would create folder: {name} (under {parent_id})")
+        return f"DRY_RUN_FOLDER_{name}"
+
     metadata = {
         "name": name,
         "mimeType": "application/vnd.google-apps.folder",
@@ -78,6 +86,20 @@ def _find_or_create_folder(service, name: str, parent_id: str) -> str:
     }
     folder = service.files().create(body=metadata, fields="id").execute()
     return folder["id"]
+
+
+def _list_files(service, folder_id: str) -> list[dict]:
+    """List PDF files in a folder, sorted newest first."""
+    query = (
+        f"'{folder_id}' in parents "
+        f"and mimeType = 'application/pdf' "
+        f"and trashed = false"
+    )
+    results = service.files().list(
+        q=query, fields="files(id, name, createdTime)",
+        orderBy="createdTime desc", pageSize=100
+    ).execute()
+    return results.get("files", [])
 
 
 def _file_exists(service, name: str, folder_id: str) -> bool:
@@ -93,23 +115,26 @@ def _file_exists(service, name: str, folder_id: str) -> bool:
     return len(results.get("files", [])) > 0
 
 
-def _prune_old_statements(service, folder_id: str, keep: int = 2) -> None:
+def _prune_old_statements(service, folder_id: str, keep: int = 2, dry_run: bool = False) -> None:
     """Keep only the most recent `keep` PDFs in a folder, delete the rest."""
-    query = (
-        f"'{folder_id}' in parents "
-        f"and mimeType = 'application/pdf' "
-        f"and trashed = false"
-    )
-    results = service.files().list(
-        q=query, fields="files(id, name, createdTime)",
-        orderBy="createdTime desc", pageSize=100
-    ).execute()
-    files = results.get("files", [])
+    files = _list_files(service, folder_id)
     if len(files) <= keep:
         return
     for old in files[keep:]:
-        service.files().delete(fileId=old["id"]).execute()
-        print(f"  🗑  Drive: deleted old statement — {old['name']}")
+        if dry_run:
+            print(f"  [dry-run] Would delete: {old['name']}")
+        else:
+            service.files().delete(fileId=old["id"]).execute()
+            print(f"  🗑  Drive: deleted old statement — {old['name']}")
+
+
+def _build_target_name(client_name: str, account_type: str, statement_date: str) -> str:
+    """Build a clean filename for the archived PDF."""
+    if statement_date:
+        from log_utils import _normalize_date_iso
+        date_clean = _normalize_date_iso(statement_date)
+        return f"{client_name}_{account_type}_{date_clean}.pdf"
+    return ""
 
 
 def archive_statement(
@@ -117,6 +142,7 @@ def archive_statement(
     client_name: str,
     account_type: str,
     statement_date: str = "",
+    dry_run: bool = False,
 ) -> str | None:
     """Upload a statement PDF to Drive under Client/AccountType/.
 
@@ -126,6 +152,7 @@ def archive_statement(
     """
     root_id = STATEMENTS_ROOT
     if not root_id:
+        print("  ⚠ Drive archive: no drive_statements_folder configured")
         return None
 
     pdf = Path(pdf_path)
@@ -133,13 +160,7 @@ def archive_statement(
         print(f"  ⚠ Drive archive: file not found: {pdf_path}")
         return None
 
-    # Build a clean filename: {client}_{account}_{date}.pdf
-    if statement_date:
-        from log_utils import _normalize_date_iso
-        date_clean = _normalize_date_iso(statement_date)
-        target_name = f"{client_name}_{account_type}_{date_clean}.pdf"
-    else:
-        target_name = pdf.name
+    target_name = _build_target_name(client_name, account_type, statement_date) or pdf.name
 
     # Sanitize folder names
     client_folder = client_name.strip().title()
@@ -149,13 +170,18 @@ def archive_statement(
         service = _get_service()
 
         # Navigate/create folder structure: Root / Client / Account Type
-        client_id = _find_or_create_folder(service, client_folder, root_id)
-        account_id = _find_or_create_folder(service, account_folder, client_id)
+        client_id = _find_or_create_folder(service, client_folder, root_id, dry_run=dry_run)
+        account_id = _find_or_create_folder(service, account_folder, client_id, dry_run=dry_run)
 
-        # Dedup check
-        if _file_exists(service, target_name, account_id):
+        # Dedup check (skip for dry-run folders that don't exist yet)
+        if not account_id.startswith("DRY_RUN_") and _file_exists(service, target_name, account_id):
             print(f"  📁 Drive: already exists — {client_folder}/{account_folder}/{target_name}")
             return None
+
+        if dry_run:
+            print(f"  [dry-run] Would upload: {client_folder}/{account_folder}/{target_name}")
+            _prune_old_statements(service, account_id, keep=2, dry_run=True)
+            return "DRY_RUN"
 
         # Upload
         from googleapiclient.http import MediaFileUpload
@@ -181,10 +207,12 @@ def archive_fixture(
     pdf_path: str,
     client_name: str,
     account_type: str,
+    dry_run: bool = False,
 ) -> str | None:
     """Upload a test fixture PDF to Drive under Client/AccountType/.
 
     Same structure as archive_statement but uses the fixtures root folder.
+    No pruning — keeps all fixtures.
     """
     root_id = FIXTURES_ROOT
     if not root_id:
@@ -200,12 +228,16 @@ def archive_fixture(
 
     try:
         service = _get_service()
-        client_id = _find_or_create_folder(service, client_folder, root_id)
-        account_id = _find_or_create_folder(service, account_folder, client_id)
+        client_id = _find_or_create_folder(service, client_folder, root_id, dry_run=dry_run)
+        account_id = _find_or_create_folder(service, account_folder, client_id, dry_run=dry_run)
 
-        if _file_exists(service, target_name, account_id):
+        if not account_id.startswith("DRY_RUN_") and _file_exists(service, target_name, account_id):
             print(f"  SKIP (already exists): {client_folder}/{account_folder}/{target_name}")
             return None
+
+        if dry_run:
+            print(f"  [dry-run] Would upload: {client_folder}/{account_folder}/{target_name}")
+            return "DRY_RUN"
 
         from googleapiclient.http import MediaFileUpload
         metadata = {"name": target_name, "parents": [account_id]}
@@ -219,3 +251,15 @@ def archive_fixture(
     except Exception as e:
         print(f"  ⚠ Fixture upload failed: {e}")
         return None
+
+
+if __name__ == "__main__":
+    import sys
+    dry = "--dry-run" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--dry-run"]
+    if len(args) < 3:
+        print("Usage: python3 drive_archiver.py [--dry-run] <pdf_path> <client_name> <account_type> [<date>]")
+        sys.exit(1)
+    pdf, client, acct = args[0], args[1], args[2]
+    date = args[3] if len(args) > 3 else ""
+    archive_statement(pdf, client, acct, date, dry_run=dry)

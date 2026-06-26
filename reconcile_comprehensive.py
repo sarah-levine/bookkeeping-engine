@@ -1477,7 +1477,7 @@ def main():
                     print(f"  ✗ Do not proceed until this is resolved.")
 
             # ── Drive archive ─────────────────────────────────────────────
-            if has_data and parser.client_name and not dry_run:
+            if has_data and parser.client_name:
                 try:
                     from drive_archiver import archive_statement as _archive
                     _date = getattr(parser, 'closing_date',
@@ -1487,6 +1487,7 @@ def main():
                         client_name=parser.client_name,
                         account_type=stmt_type,
                         statement_date=str(_date) if _date else '',
+                        dry_run=dry_run,
                     )
                 except Exception as _e:
                     print(f"  ⚠ Drive archive skipped: {_e}")
