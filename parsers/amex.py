@@ -33,6 +33,13 @@ from parsers.report import (
     _safe_date_key,
 )
 
+# Fee line keywords — these are already captured in Finance Charges
+# (Total Fees for this Period). Skip them in the charges detail to avoid
+# double-counting.
+_FEE_KEYWORDS = ['ANNUAL FEE', 'LATE PAYMENT FEE', 'OVERLIMIT FEE',
+                 'RETURNED PAYMENT FEE', 'CARD REPLACEMENT FEE']
+
+
 class AmexStatementParser(StatementParser):
     """
     American Express Business statements.
@@ -211,9 +218,9 @@ class AmexStatementParser(StatementParser):
                     pending_date = None
                     pending_vendor = None
                     continue
-                # Annual fees are captured in Finance Charges — skip them here
-                # to avoid double-counting
-                if 'ANNUAL FEE' in vendor_raw.upper():
+                # Fees (annual, late payment, etc.) are captured in Finance
+                # Charges via Total Fees — skip them here to avoid double-counting
+                if any(kw in vendor_raw.upper() for kw in _FEE_KEYWORDS):
                     pending_date = None
                     pending_vendor = None
                     continue
@@ -270,8 +277,8 @@ class AmexStatementParser(StatementParser):
                     pending_date = None
                     pending_vendor = None
                     continue
-                # Annual fees are captured in Finance Charges — skip them here
-                if 'ANNUAL FEE' in txn_m.group(2).upper():
+                # Fees are captured in Finance Charges — skip them here
+                if any(kw in txn_m.group(2).upper() for kw in _FEE_KEYWORDS):
                     pending_date = None
                     pending_vendor = None
                     continue
