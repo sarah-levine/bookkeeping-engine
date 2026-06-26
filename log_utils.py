@@ -118,6 +118,30 @@ def _assert_known_client(client: str) -> None:
         raise ValueError(f"Aborted: refusing to write unrecognized client '{client}' to log.")
 
 
+def _normalize_client_name(client: str) -> str:
+    """Resolve a client name to its canonical form from the registry.
+
+    Returns the canonical_name if found, otherwise returns the input
+    unchanged. Handles department suffixes like '— Admin' / '— Agency'
+    by normalizing the base and preserving the suffix.
+    """
+    try:
+        from parsers.base import _registry
+        canonical = _registry.resolve(client)
+        if canonical:
+            return canonical
+        # Try stripping department suffix (e.g. "Duran HCP — Admin")
+        # Keep the suffix but normalize the base name
+        if " — " in client:
+            base, suffix = client.rsplit(" — ", 1)
+            canonical = _registry.resolve(base)
+            if canonical:
+                return f"{canonical} — {suffix}"
+    except Exception:
+        pass
+    return client
+
+
 def upsert_recon_log(
     *,
     client: str,
@@ -132,6 +156,7 @@ def upsert_recon_log(
     issue: str = "",
 ) -> None:
     """Upsert a reconciliation or payroll entry into recon_log.json."""
+    client = _normalize_client_name(client)
     _assert_known_client(client)
     _assert_known_account_type(client, account_type)
     statement_end_date = _normalize_date_iso(statement_end_date)
@@ -160,7 +185,7 @@ def upsert_recon_log(
             if not (
                 e.get("type") == "recon"
                 and e.get("status") == "ERROR"
-                and e.get("client") == client
+                and _normalize_client_name(e.get("client", "")) == client
                 and e.get("account_type") == account_type
             )
         ]
@@ -168,7 +193,7 @@ def upsert_recon_log(
     replaced = False
     for i, e in enumerate(existing):
         if e.get("type") == "recon" and (
-            e.get("client"), e.get("account_type"),
+            _normalize_client_name(e.get("client", "")), e.get("account_type"),
             _normalize_date_iso(e.get("statement_end_date", ""))
         ) == key:
             existing[i] = entry
@@ -181,6 +206,7 @@ def upsert_recon_log(
 
 def append_manual_issue(*, client: str, issue: str) -> None:
     """Append a manual issue note to recon_log.json (idempotent by client+issue)."""
+    client = _normalize_client_name(client)
     _assert_known_client(client)
     entry = {
         "run_time":           _now_pst().isoformat(),
