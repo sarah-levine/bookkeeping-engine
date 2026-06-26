@@ -206,12 +206,14 @@ class AmexStatementParser(StatementParser):
                     pending_date = None
                     pending_vendor = None
                     continue
-                # Check if this is an ANNUAL FEE line — if so, use "ANNUAL FEE" as vendor instead of cardholder
-                if 'ANNUAL FEE' in vendor_raw:
-                    vendor_raw = 'ANNUAL FEE'
-                else:
-                    # Remove trailing ref numbers / extra merchant detail
-                    vendor_raw = re.sub(r'\s{2,}.*$', '', vendor_raw)
+                # Annual fees are captured in Finance Charges — skip them here
+                # to avoid double-counting
+                if 'ANNUAL FEE' in vendor_raw.upper():
+                    pending_date = None
+                    pending_vendor = None
+                    continue
+                # Remove trailing ref numbers / extra merchant detail
+                vendor_raw = re.sub(r'\s{2,}.*$', '', vendor_raw)
                 vendor = self.normalize_vendor(vendor_raw)
                 txn_amount = Decimal(txn_amount_str.replace(',', ''))
                 txn_type = _classify_cc_transaction(vendor, txn_amount)
@@ -261,15 +263,16 @@ class AmexStatementParser(StatementParser):
                     pending_date = None
                     pending_vendor = None
                     continue
+                # Annual fees are captured in Finance Charges — skip them here
+                if 'ANNUAL FEE' in txn_m.group(2).upper():
+                    pending_date = None
+                    pending_vendor = None
+                    continue
                 pending_date = txn_m.group(1)
                 vendor_raw = txn_m.group(2)
-                # Check if this is an ANNUAL FEE line — if so, use "ANNUAL FEE" as vendor instead of cardholder
-                if 'ANNUAL FEE' in vendor_raw:
-                    vendor_raw = 'ANNUAL FEE'
-                else:
-                    # Normal extraction: remove amount and trailing state codes
-                    vendor_raw = re.sub(r'\s{2,}.*$', '', vendor_raw)
-                    vendor_raw = re.sub(r'\s+[A-Z][A-Z\s]+[A-Z]{2}\s*$', '', vendor_raw).strip()
+                # Normal extraction: remove amount and trailing state codes
+                vendor_raw = re.sub(r'\s{2,}.*$', '', vendor_raw)
+                vendor_raw = re.sub(r'\s+[A-Z][A-Z\s]+[A-Z]{2}\s*$', '', vendor_raw).strip()
                 pending_vendor = vendor_raw
 
         # Fees / Interest — try the detailed section labels first, then fall back
