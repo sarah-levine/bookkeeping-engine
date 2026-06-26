@@ -62,12 +62,29 @@ python3 reconcile_comprehensive.py statement.pdf --check-payee 1235='Jane Doe'
 # Non-interactive (auto-answers "later" at QB prompt)
 python3 reconcile_comprehensive.py statement.pdf --no-prompt
 
+# Dry run (parse + balance check, no log writes or uploads)
+python3 reconcile_comprehensive.py statement.pdf --dry-run
+
+# From Google Drive
+python3 reconcile_comprehensive.py --from-drive <drive_file_id_or_url>
+
 # Manual entry (no PDF)
 python3 reconcile_comprehensive.py --manual
 
 # Payroll
 python3 payroll.py <client_key> payroll.pdf
+
+# Mark a statement as done after QB entry
+python3 mark_clean.py <client_key> <account_type> [<statement_date>]
 ```
+
+### MCP Server (Claude Desktop integration)
+
+```bash
+python3 mcp_server.py
+```
+
+Exposes tools to Claude chat via the Model Context Protocol: `reconcile`, `reconcile_from_drive`, `check_status`, `mark_done`, `open_issues`, `client_list`. Configured in Claude Desktop's `claude_desktop_config.json`.
 
 ---
 
@@ -113,17 +130,21 @@ What the script does from the moment you hand it a PDF:
     - 11b. `later` → mark as IN_PROGRESS, skip the sheet for now
     - 11c. `--no-prompt` → auto-answers `later`
 
-12. **Write the logs** — Save to both `reconciliation_log.csv` and `recon_log.json`, then push to the private repo.
+12. **Write the logs** — Save to both `reconciliation_log.csv` and `recon_log.json`, then push via GitHub REST API.
     - 12a. Unknown client → stop and ask
     - 12b. Unknown account type → stop and ask
+    - 12c. Client names are normalized to canonical form before writing
+    - 12d. ERROR status → writes to `recon_log.json` only, skips CSV to protect the tracker
 
 13. **Are there any CC payments we can't explain?** — Flag any credit card payments in a checking account with no matching CC statement in this session.
 
-14. **Update Google Sheets** (only if answered `done`)
-    - 14a. Update the tracker cell for this client/account
-    - 14b. Append a row to the audit log tab
+14. **Archive to Google Drive** — Upload the statement PDF to `Bookkeeping/<Client>/<Account Type>/`, dedup by filename, keep only the 2 most recent per folder.
 
-15. **Trigger the sheet sync** — Fire a GitHub Actions workflow to refresh the full Reconciliation Tracker.
+15. **Update Google Sheets** (only if answered `done`)
+    - 15a. Update the tracker cell for this client/account
+    - 15b. Append a row to the audit log tab
+
+16. **Trigger the sheet sync** — Fire a GitHub Actions workflow to refresh the full Reconciliation Tracker.
 
 ---
 
@@ -136,6 +157,7 @@ What the script does from the moment you hand it a PDF:
     - 17b. Yellow — statement available but not reconciled yet
     - 17c. Orange — CC is pending and checking is blocked
     - 17d. Pink — overdue
+    - 17e. Red — ERROR (technical failure, with error detail)
 
 18. **Send the email** — Deliver via Gmail SMTP.
 
@@ -162,7 +184,10 @@ python3 mark_clean.py <client_key> <account_type> [<statement_date>]
 - **Auto-detection** — identifies bank and account type from PDF text; no manual flags needed
 - **Vision fallback** — if pdftotext produces numbers that don't tie, Claude Vision re-extracts the data automatically
 - **Config-driven** — client behavior (vendor rules, payroll format, CC blocking) lives in `clients/*.json`; adding a client requires no code changes
-- **Vendor normalization** — aggregates by vendor with configurable rules; prompts to approve new descriptions
+- **Two-tier vendor normalization** — global rules for common vendors (Amazon, PG&E, etc.) with client-specific overrides; prompts to approve new descriptions
+- **Client name normalization** — all name variants resolved to canonical form via the client registry before writing to logs
+- **Google Drive archiving** — auto-archives reconciled PDFs by client/account type; deduplicates; keeps only the 2 most recent statements
+- **MCP server** — Claude Desktop integration for running reconciliation from chat
 - **Penny-perfect verification** — every report includes a balance check; a FAILED check halts the pipeline before logging
 - **Append-only audit trail** — the Recon Log tab in Google Sheets is never overwritten, only appended to
 - **CC blocking rules** — checking accounts are shown as blocked in the digest until their CC statements are reconciled
