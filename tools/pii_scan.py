@@ -154,8 +154,6 @@ def _load_client_blocklist():
                 if len(w) >= 4:
                     blocklist.add(w.lower())
     # Remove common English words that would cause false positives.
-    # Keep words specific enough to identify a client (e.g. "duran", "cheng",
-    # "fcba", "needles", "paintbox", "jojo").
     generics = {"hair", "studio", "parts", "service", "academy", "west",
                 "human", "capital", "partners", "appliance", "realty",
                 "silicon", "valley", "north", "south", "east", "inc", "llc"}
