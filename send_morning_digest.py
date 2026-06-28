@@ -711,13 +711,18 @@ def build_cc_due_email(due_items, today=None):
     for client_entry in TRACKER:
         client_name = client_entry["client"]
         is_manual = client_entry.get("manual_client", False)
+        if is_manual:
+            continue
         client_keys = client_entry.get("client_keys", [])
 
+        # Build set of CC blocker keys + their closing days for this client
+        client_rules = CC_BLOCKING_RULES.get(client_name, {})
+        cc_closing_days = {b["key"]: b["closing_day"] for b in client_rules.get("cc_blockers", [])}
+
         for acct in client_entry.get("accounts", []):
-            # Skip payroll, client_provided, and manual_client accounts
             if acct["key"] == "payroll":
                 continue
-            if acct.get("client_provided", False) or is_manual:
+            if acct.get("client_provided", False):
                 continue
 
             # Find latest reconciled date
@@ -729,14 +734,34 @@ def build_cc_due_email(due_items, today=None):
                     if d and (last_date is None or d > last_date):
                         last_date = d
 
-            # Overdue if last statement date is before the previous month
-            # (i.e. they haven't even done last month's statement yet)
-            if last_date is None or last_date < prev_month_start:
-                due = prev_month_end
-                overdue_by_client.setdefault(client_name, []).append({
-                    "label": acct["label"],
-                    "due_date": due.strftime("%m/%d/%y"),
-                })
+            # For CC blockers: overdue if the current cycle's closing date
+            # has passed but the statement hasn't been reconciled through it
+            if acct["key"] in cc_closing_days:
+                import calendar
+                closing_day = cc_closing_days[acct["key"]]
+                try:
+                    current_close = today.replace(day=closing_day)
+                except ValueError:
+                    last_day = calendar.monthrange(today.year, today.month)[1]
+                    current_close = today.replace(day=min(closing_day, last_day))
+                if current_close > today:
+                    # This month's close hasn't happened yet — check last month's
+                    if today.month == 1:
+                        current_close = current_close.replace(year=today.year - 1, month=12)
+                    else:
+                        current_close = current_close.replace(month=today.month - 1)
+                if last_date is None or last_date < current_close:
+                    overdue_by_client.setdefault(client_name, []).append({
+                        "label": acct["label"],
+                        "due_date": current_close.strftime("%m/%d/%y"),
+                    })
+            else:
+                # Non-CC accounts: overdue if last date is before prior month
+                if last_date is None or last_date < prev_month_start:
+                    overdue_by_client.setdefault(client_name, []).append({
+                        "label": acct["label"],
+                        "due_date": prev_month_end.strftime("%m/%d/%y"),
+                    })
 
     overdue_html = ""
     has_overdue = bool(overdue_by_client)
