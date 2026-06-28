@@ -92,7 +92,7 @@ def load_reconciliation_log():
 def parse_date(date_str):
     """Parse a date string into a comparable date object. Returns None if unparseable."""
     from datetime import datetime
-    for fmt in ("%m/%d/%Y", "%m/%d/%y"):
+    for fmt in ("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d"):
         try:
             return datetime.strptime(date_str.strip(), fmt).date()
         except Exception:
@@ -698,7 +698,13 @@ def build_cc_due_email(due_items, today=None):
 
     # ── Overdue accounts section ────────────────────────────────────────
     recon_dates = load_reconciliation_log()
+    from datetime import timedelta
     current_month_start = today.replace(day=1)
+    # Previous month start: an account is current if its last statement
+    # closing date falls in the previous month or later. E.g. in June,
+    # a statement closing 05/31 means May is done — not overdue.
+    prev_month_end = current_month_start - timedelta(days=1)
+    prev_month_start = prev_month_end.replace(day=1)
     month_name = today.strftime("%B")
 
     overdue_by_client = {}
@@ -723,11 +729,10 @@ def build_cc_due_email(due_items, today=None):
                     if d and (last_date is None or d > last_date):
                         last_date = d
 
-            # Overdue if last reconciled month is before current month
-            if last_date is None or last_date < current_month_start:
-                # Due date = end of previous month (the statement they should have done)
-                from datetime import timedelta
-                due = current_month_start - timedelta(days=1)
+            # Overdue if last statement date is before the previous month
+            # (i.e. they haven't even done last month's statement yet)
+            if last_date is None or last_date < prev_month_start:
+                due = prev_month_end
                 overdue_by_client.setdefault(client_name, []).append({
                     "label": acct["label"],
                     "due_date": due.strftime("%m/%d/%y"),
