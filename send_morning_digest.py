@@ -695,6 +695,68 @@ def build_cc_due_email(due_items, today=None):
           </div>
         </div>"""
 
+    # ── Overdue accounts section ────────────────────────────────────────
+    recon_dates = load_reconciliation_log()
+    current_month_start = today.replace(day=1)
+    month_name = today.strftime("%B")
+
+    overdue_by_client = {}
+    for client_entry in TRACKER:
+        client_name = client_entry["client"]
+        is_manual = client_entry.get("manual_client", False)
+        client_keys = client_entry.get("client_keys", [])
+
+        for acct in client_entry.get("accounts", []):
+            # Skip payroll, client_provided, and manual_client accounts
+            if acct["key"] == "payroll":
+                continue
+            if acct.get("client_provided", False) or is_manual:
+                continue
+
+            # Find latest reconciled date
+            last_date = None
+            for ck in client_keys:
+                val = recon_dates.get((ck, acct["key"]))
+                if val:
+                    d = parse_date(val)
+                    if d and (last_date is None or d > last_date):
+                        last_date = d
+
+            # Overdue if last reconciled month is before current month
+            if last_date is None or last_date < current_month_start:
+                display_date = last_date.strftime("%m/%d/%y") if last_date else "Never"
+                overdue_by_client.setdefault(client_name, []).append({
+                    "label": acct["label"],
+                    "last_date": display_date,
+                })
+
+    overdue_html = ""
+    if overdue_by_client:
+        overdue_rows = ""
+        for client_name, accounts in overdue_by_client.items():
+            acct_items = "".join(
+                f'<li style="padding:3px 0;font-size:13px;color:#374151">'
+                f'{a["label"]} — last: <strong>{a["last_date"]}</strong></li>'
+                for a in accounts
+            )
+            overdue_rows += f"""
+            <div style="padding:8px 0;border-top:1px solid #fecaca">
+              <div style="font-weight:600;font-size:13px;color:#9d174d">{client_name}</div>
+              <ul style="margin:4px 0 0 16px;padding:0;list-style:disc">
+                {acct_items}
+              </ul>
+            </div>"""
+
+        overdue_html = f"""
+        <div style="margin-top:20px;border:1px solid #fecaca;border-radius:8px;overflow:hidden">
+          <div style="background:#fce7f3;padding:10px 14px;font-weight:700;font-size:14px;color:#9d174d">
+            🔴 Overdue — {month_name} Not Yet Reconciled
+          </div>
+          <div style="padding:2px 14px 10px 14px">
+            {overdue_rows}
+          </div>
+        </div>"""
+
     html = f"""
 <!DOCTYPE html>
 <html>
@@ -712,6 +774,7 @@ def build_cc_due_email(due_items, today=None):
       Reconcile these first — the accounts listed below will be ready once each CC is done.
     </p>
     {client_blocks}
+    {overdue_html}
   </div>
 
   <div style="background:#f9fafb;padding:12px 24px;font-size:11px;color:#9ca3af;border-top:1px solid #e5e7eb;text-align:center">
