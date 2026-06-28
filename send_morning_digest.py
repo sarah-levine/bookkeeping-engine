@@ -657,7 +657,8 @@ def build_cc_due_email(due_items, today=None):
         today = date_cls.today()
 
     friendly_date = today.strftime("%B %-d, %Y")
-    subject = f"📋 CC Statements Due Today — {friendly_date}"
+    has_overdue = False  # set below after computing overdue accounts
+    subject = None       # set after overdue check
 
     # Group by client
     by_client = {}
@@ -724,19 +725,27 @@ def build_cc_due_email(due_items, today=None):
 
             # Overdue if last reconciled month is before current month
             if last_date is None or last_date < current_month_start:
-                display_date = last_date.strftime("%m/%d/%y") if last_date else "Never"
+                # Due date = end of previous month (the statement they should have done)
+                from datetime import timedelta
+                due = current_month_start - timedelta(days=1)
                 overdue_by_client.setdefault(client_name, []).append({
                     "label": acct["label"],
-                    "last_date": display_date,
+                    "due_date": due.strftime("%m/%d/%y"),
                 })
 
     overdue_html = ""
-    if overdue_by_client:
+    has_overdue = bool(overdue_by_client)
+    if has_overdue:
+        subject = f"📋 CC Due Today + Past Due — {friendly_date}"
+    else:
+        subject = f"📋 CC Statements Due Today — {friendly_date}"
+
+    if has_overdue:
         overdue_rows = ""
         for client_name, accounts in overdue_by_client.items():
             acct_items = "".join(
                 f'<li style="padding:3px 0;font-size:13px;color:#374151">'
-                f'{a["label"]} — last: <strong>{a["last_date"]}</strong></li>'
+                f'{a["label"]} — due: <strong>{a["due_date"]}</strong></li>'
                 for a in accounts
             )
             overdue_rows += f"""
