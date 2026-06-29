@@ -352,31 +352,84 @@ def build_html(recon_entries, manual_entries, log_date):
 
     recon_dates = load_reconciliation_log()
 
-    # ── Build tracker HTML ──
-    tracker_rows = ""
+    # ── Build tracker HTML — row-per-account card layout ──
+    today_date = date.today()
+
+    def _acct_group(key):
+        k = key.lower()
+        if k == "payroll":
+            return "Payroll"
+        if "checking" in k or "savings" in k:
+            return "Bank Accounts"
+        cc_patterns = ["credit", "chase_ink", "chase_sapphire", "chase_united",
+                       "citi_visa", "citi_costco", "bmo_credit", "wells_fargo_credit"]
+        if any(p in k for p in cc_patterns):
+            return "Credit Cards"
+        if "amex" in k and "checking" not in k:
+            return "Credit Cards"
+        return "Other"
+
+    _GROUP_ORDER = ["Credit Cards", "Bank Accounts", "Payroll", "Other"]
+
+    def _tracker_badge(last_date_str, is_client_provided):
+        if is_client_provided:
+            return "📬 Client Provided", "#f1f5f9", "#64748b"
+        if not last_date_str or last_date_str == "—":
+            return "⚫ Never", "#f3f4f6", "#6b7280"
+        d = parse_date(last_date_str)
+        if d is None:
+            return "⚫ Never", "#f3f4f6", "#6b7280"
+        if (d.year, d.month) >= (today_date.year, today_date.month):
+            return "✅ Current", "#dcfce7", "#166534"
+        return "🔴 Overdue", "#fce7f3", "#9d174d"
+
+    tracker_cards = ""
     for client in TRACKER:
-        name     = client["client"]
-        accounts = client["accounts"]
-        keys     = client["client_keys"]
-        header_cells = "".join(
-            f'<th style="padding:6px 12px;text-align:center;font-weight:600;font-size:12px;color:#374151;border:1px solid #e5e7eb">{a["label"]}</th>'
-            for a in accounts
+        name      = client["client"]
+        accounts  = client["accounts"]
+        keys      = client["client_keys"]
+        is_manual = client.get("manual_client", False)
+
+        grouped = {}
+        for acct in accounts:
+            grp = _acct_group(acct["key"])
+            grouped.setdefault(grp, []).append(acct)
+
+        table_body = ""
+        for grp in _GROUP_ORDER:
+            if grp not in grouped:
+                continue
+            table_body += (
+                f'<tr><td colspan="3" style="background:#f9fafb;padding:4px 12px;'
+                f'font-size:10px;font-weight:600;color:#9ca3af;text-transform:uppercase;'
+                f'letter-spacing:0.05em;border-top:1px solid #e5e7eb">{grp}</td></tr>'
+            )
+            for acct in grouped[grp]:
+                is_cp = is_manual or acct.get("client_provided", False)
+                last_date = get_tracker_date(recon_dates, name, keys, acct)
+                badge_text, badge_bg, badge_fg = _tracker_badge(last_date, is_cp)
+                date_cell  = last_date if (last_date and last_date != "—") else "—"
+                lbl_style  = "color:#9ca3af" if is_cp else "color:#1f2937"
+                date_style = "color:#9ca3af;font-style:italic" if is_cp else "color:#374151"
+                table_body += (
+                    f'<tr style="border-top:1px solid #f3f4f6">'
+                    f'<td style="padding:7px 12px;font-size:13px;{lbl_style}">{acct["label"]}</td>'
+                    f'<td style="padding:7px 12px;font-size:12px;{date_style}">{date_cell}</td>'
+                    f'<td style="padding:7px 12px;text-align:right">'
+                    f'<span style="border-radius:999px;padding:2px 10px;font-size:11px;font-weight:600;'
+                    f'background:{badge_bg};color:{badge_fg}">{badge_text}</span>'
+                    f'</td></tr>'
+                )
+
+        tracker_cards += (
+            f'<div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;'
+            f'margin-bottom:12px;overflow:hidden">'
+            f'<div style="background:#1e3a5f;padding:10px 14px;font-weight:700;'
+            f'font-size:13px;color:#fff">{name}</div>'
+            f'<table style="width:100%;border-collapse:collapse;font-size:13px">'
+            f'{table_body}'
+            f'</table></div>'
         )
-        def make_date_cell(a):
-            d     = get_tracker_date(recon_dates, name, keys, a)
-            bg, fg, tip, label_override = get_cell_style(name, a["key"], recon_dates, keys,
-                                                              client_provided=a.get("client_provided", False))
-            display = label_override if label_override else d
-            title = f' title="{tip}"' if tip else ""
-            return (f'<td{title} style="padding:6px 12px;text-align:center;font-size:13px;'
-                    f'color:{fg};background:{bg};border:1px solid #e5e7eb;font-weight:500">{display}</td>')
-        date_cells = "".join(make_date_cell(a) for a in accounts)
-        tracker_rows += f"""
-        <tr><td colspan="{len(accounts)}" style="padding:8px 12px 2px;font-weight:700;font-size:13px;color:#1e40af;background:#eff6ff;border:1px solid #e5e7eb">{name}</td></tr>
-        <tr>{header_cells}</tr>
-        <tr style="background:#f9fafb">{date_cells}</tr>
-        <tr><td colspan="{len(accounts)}" style="padding:4px;border:none"></td></tr>
-        """
 
     # ── Build manual notes HTML ──
     manual_html = ""
@@ -514,19 +567,7 @@ def build_html(recon_entries, manual_entries, log_date):
         <span style="font-weight:700;font-size:14px;color:#1f2937">Reconciliation Tracker</span>
         <a href="{SHEET_URL}" style="font-size:12px;color:#2563eb;text-decoration:none">📊 Open in Google Sheets →</a>
       </div>
-      <div style="overflow-x:auto">
-        <table style="border-collapse:collapse;width:100%;font-size:13px">
-          {tracker_rows}
-        </table>
-      </div>
-      <!-- Legend -->
-      <div style="margin-top:12px;display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:#6b7280">
-        <span><span style="display:inline-block;width:12px;height:12px;background:#dcfce7;border:1px solid #bbf7d0;border-radius:2px;vertical-align:middle;margin-right:4px"></span>Ready / up to date</span>
-        <span><span style="display:inline-block;width:12px;height:12px;background:#fef9c3;border:1px solid #fde68a;border-radius:2px;vertical-align:middle;margin-right:4px"></span>CC due — not yet reconciled</span>
-        <span><span style="display:inline-block;width:12px;height:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:2px;vertical-align:middle;margin-right:4px"></span>Blocked — waiting on prior step</span>
-        <span><span style="display:inline-block;width:12px;height:12px;background:#fce7f3;border:1px solid #fbcfe8;border-radius:2px;vertical-align:middle;margin-right:4px"></span>Blocked — CC more than 1 month overdue</span>
-        <span><span style="display:inline-block;width:12px;height:12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:2px;vertical-align:middle;margin-right:4px"></span>No rule</span>
-      </div>
+      {tracker_cards}
     </div>
 
   </div>
@@ -696,36 +737,21 @@ def build_cc_due_email(due_items, today=None):
           </div>
         </div>"""
 
-    # ── Overdue accounts section ────────────────────────────────────────
+    # ── Overdue accounts section ──────────────────────────────────────
     recon_dates = load_reconciliation_log()
-    from datetime import timedelta
-    current_month_start = today.replace(day=1)
-    # Previous month start: an account is current if its last statement
-    # closing date falls in the previous month or later. E.g. in June,
-    # a statement closing 05/31 means May is done — not overdue.
-    prev_month_end = current_month_start - timedelta(days=1)
-    prev_month_start = prev_month_end.replace(day=1)
     month_name = today.strftime("%B")
 
     overdue_by_client = {}
     for client_entry in TRACKER:
         client_name = client_entry["client"]
-        is_manual = client_entry.get("manual_client", False)
-        if is_manual:
+        if client_entry.get("manual_client", False):
             continue
         client_keys = client_entry.get("client_keys", [])
-
-        # Build set of CC blocker keys + their closing days for this client
-        client_rules = CC_BLOCKING_RULES.get(client_name, {})
-        cc_closing_days = {b["key"]: b["closing_day"] for b in client_rules.get("cc_blockers", [])}
-
         for acct in client_entry.get("accounts", []):
             if acct["key"] == "payroll":
                 continue
             if acct.get("client_provided", False):
                 continue
-
-            # Find latest reconciled date
             last_date = None
             for ck in client_keys:
                 val = recon_dates.get((ck, acct["key"]))
@@ -733,35 +759,12 @@ def build_cc_due_email(due_items, today=None):
                     d = parse_date(val)
                     if d and (last_date is None or d > last_date):
                         last_date = d
-
-            # For CC blockers: overdue if the current cycle's closing date
-            # has passed but the statement hasn't been reconciled through it
-            if acct["key"] in cc_closing_days:
-                import calendar
-                closing_day = cc_closing_days[acct["key"]]
-                try:
-                    current_close = today.replace(day=closing_day)
-                except ValueError:
-                    last_day = calendar.monthrange(today.year, today.month)[1]
-                    current_close = today.replace(day=min(closing_day, last_day))
-                if current_close > today:
-                    # This month's close hasn't happened yet — check last month's
-                    if today.month == 1:
-                        current_close = current_close.replace(year=today.year - 1, month=12)
-                    else:
-                        current_close = current_close.replace(month=today.month - 1)
-                if last_date is None or last_date < current_close:
-                    overdue_by_client.setdefault(client_name, []).append({
-                        "label": acct["label"],
-                        "due_date": current_close.strftime("%m/%d/%y"),
-                    })
-            else:
-                # Non-CC accounts: overdue if last date is before prior month
-                if last_date is None or last_date < prev_month_start:
-                    overdue_by_client.setdefault(client_name, []).append({
-                        "label": acct["label"],
-                        "due_date": prev_month_end.strftime("%m/%d/%y"),
-                    })
+            if last_date is None or (last_date.year, last_date.month) < (today.year, today.month):
+                last_str = last_date.strftime("%m/%d/%y") if last_date else "Never"
+                overdue_by_client.setdefault(client_name, []).append({
+                    "label":     acct["label"],
+                    "last_date": last_str,
+                })
 
     overdue_html = ""
     has_overdue = bool(overdue_by_client)
@@ -772,18 +775,24 @@ def build_cc_due_email(due_items, today=None):
 
     if has_overdue:
         overdue_rows = ""
-        for client_name, accounts in overdue_by_client.items():
+        for client_name, acct_list in overdue_by_client.items():
             acct_items = "".join(
-                f'<li style="padding:3px 0;font-size:13px;color:#374151">'
-                f'{a["label"]} — due: <strong>{a["due_date"]}</strong></li>'
-                for a in accounts
+                f'<tr style="border-top:1px solid #fecaca">'
+                f'<td style="padding:6px 12px;font-size:13px;color:#374151">{a["label"]}</td>'
+                f'<td style="padding:6px 12px;font-size:12px;color:#9d174d;white-space:nowrap">{a["last_date"]}</td>'
+                f'</tr>'
+                for a in acct_list
             )
             overdue_rows += f"""
             <div style="padding:8px 0;border-top:1px solid #fecaca">
-              <div style="font-weight:600;font-size:13px;color:#9d174d">{client_name}</div>
-              <ul style="margin:4px 0 0 16px;padding:0;list-style:disc">
+              <div style="font-weight:600;font-size:13px;color:#9d174d;margin-bottom:4px">{client_name}</div>
+              <table style="width:100%;border-collapse:collapse">
+                <tr>
+                  <th style="text-align:left;padding:3px 12px;font-size:11px;color:#9ca3af;font-weight:600">Account</th>
+                  <th style="text-align:left;padding:3px 12px;font-size:11px;color:#9ca3af;font-weight:600">Last Reconciled</th>
+                </tr>
                 {acct_items}
-              </ul>
+              </table>
             </div>"""
 
         overdue_html = f"""
