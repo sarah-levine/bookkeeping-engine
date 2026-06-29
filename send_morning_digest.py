@@ -361,17 +361,24 @@ def build_html(recon_entries, manual_entries, log_date):
             return "Payroll"
         if "checking" in k or "savings" in k:
             return "Bank Accounts"
+        # Known bank account keys that don't contain "checking"/"savings"
+        if k in ("northern",):
+            return "Bank Accounts"
         cc_patterns = ["credit", "chase_ink", "chase_sapphire", "chase_united",
-                       "citi_visa", "citi_costco", "bmo_credit", "wells_fargo_credit"]
+                       "citi_visa", "citi_costco", "bmo_credit", "wells_fargo_credit",
+                       "wf_visa"]
         if any(p in k for p in cc_patterns):
             return "Credit Cards"
         if "amex" in k and "checking" not in k:
+            return "Credit Cards"
+        # bmo_* accounts that aren't checking/savings are personal CC cards
+        if k.startswith("bmo_"):
             return "Credit Cards"
         return "Other"
 
     _GROUP_ORDER = ["Credit Cards", "Bank Accounts", "Payroll", "Other"]
 
-    def _tracker_badge(last_date_str, is_client_provided):
+    def _tracker_badge(last_date_str, is_client_provided, group=""):
         if is_client_provided:
             return "📬 Client Provided", "#f1f5f9", "#64748b"
         if not last_date_str or last_date_str == "—":
@@ -379,7 +386,16 @@ def build_html(recon_entries, manual_entries, log_date):
         d = parse_date(last_date_str)
         if d is None:
             return "⚫ Never", "#f3f4f6", "#6b7280"
-        if (d.year, d.month) >= (today_date.year, today_date.month):
+        # EOM accounts (bank accounts, payroll) close on the last day of the month.
+        # Until EOM passes, the prior month's statement is the most recently closed
+        # period — so "current" means reconciled in the previous month or later.
+        # CC accounts close mid-month, so "current" means this month or later.
+        if group in ("Bank Accounts", "Payroll"):
+            prev = today_date.replace(day=1) - timedelta(days=1)
+            threshold = (prev.year, prev.month)
+        else:
+            threshold = (today_date.year, today_date.month)
+        if (d.year, d.month) >= threshold:
             return "✅ Current", "#dcfce7", "#166534"
         return "🔴 Overdue", "#fce7f3", "#9d174d"
 
@@ -405,17 +421,17 @@ def build_html(recon_entries, manual_entries, log_date):
                 f'letter-spacing:0.05em;border-top:1px solid #e5e7eb">{grp}</td></tr>'
             )
             for acct in grouped[grp]:
-                is_cp = is_manual or acct.get("client_provided", False)
+                is_cp = acct["key"] != "payroll" and (is_manual or acct.get("client_provided", False))
                 last_date = get_tracker_date(recon_dates, name, keys, acct)
-                badge_text, badge_bg, badge_fg = _tracker_badge(last_date, is_cp)
+                badge_text, badge_bg, badge_fg = _tracker_badge(last_date, is_cp, grp)
                 date_cell  = last_date if (last_date and last_date != "—") else "—"
                 lbl_style  = "color:#9ca3af" if is_cp else "color:#1f2937"
                 date_style = "color:#9ca3af;font-style:italic" if is_cp else "color:#374151"
                 table_body += (
                     f'<tr style="border-top:1px solid #f3f4f6">'
                     f'<td style="padding:7px 12px;font-size:13px;{lbl_style}">{acct["label"]}</td>'
-                    f'<td style="padding:7px 12px;font-size:12px;{date_style}">{date_cell}</td>'
-                    f'<td style="padding:7px 12px;text-align:right">'
+                    f'<td style="padding:7px 12px;font-size:12px;width:100px;{date_style}">{date_cell}</td>'
+                    f'<td style="padding:7px 12px;text-align:right;width:150px">'
                     f'<span style="border-radius:999px;padding:2px 10px;font-size:11px;font-weight:600;'
                     f'background:{badge_bg};color:{badge_fg}">{badge_text}</span>'
                     f'</td></tr>'
@@ -875,8 +891,21 @@ def main():
     recon_entries  = load_log(log_dates)
     manual_entries = load_manual_issues(log_dates)
 
-    if not recon_entries and not manual_entries:
-        print("No entries found — nothing to send.")
+    # Determine the primary log date (yesterday in the default case)
+    yesterday = date.fromisoformat(log_dates[0])
+
+    # Check whether any account's statement period closed yesterday
+    import calendar as _cal
+    yesterday_was_eom = yesterday.day == _cal.monthrange(yesterday.year, yesterday.month)[1]
+    cc_due_yesterday = any(
+        b["closing_day"] == yesterday.day
+        for rules in CC_BLOCKING_RULES.values()
+        for b in rules.get("cc_blockers", [])
+    )
+    accounts_due_yesterday = yesterday_was_eom or cc_due_yesterday
+
+    if not recon_entries and not manual_entries and not accounts_due_yesterday:
+        print("No reconciliations yesterday and no accounts due — nothing to send.")
         sys.exit(0)
 
     subject, html = build_html(recon_entries, manual_entries, log_date)
