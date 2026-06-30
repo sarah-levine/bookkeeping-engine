@@ -57,6 +57,7 @@ from parsers import (
     BankOfAmericaCreditCardParser, BankOfAmericaCheckingParser, BankOfAmericaSavingsParser,
     CitiCheckingParser, CitiVisaCostcoParser, CitiSavingsParser,
     BMOCheckingParser, BMOCreditCardParser, USBankCheckingParser, NorthernTrustCheckingParser,
+    CapitalOneParser,
     _safe_date_key, _report_header, _summary_block, _balance_check,
     _payments_section, _credits_section, _individual_section,
     _deposits_section, _checks_section, _adp_section,
@@ -240,6 +241,13 @@ def detect_statement_type(pdf_path):
             return 'amex_checking'
         return 'amex'
 
+    # Capital One — gate on "STATEMENT ENDING" or brand domain so "CAPITAL ONE"
+    # as a payment payee in other statements (e.g. US Bank) doesn't match here.
+    if ('CAPITAL ONE' in text and
+            ('STATEMENT ENDING' in text or 'CAPITALONE.COM' in text or
+             'SPARK' in text or 'VENTURE' in text)):
+        return 'capital_one'
+
     # U.S. Bank Business Checking
     if 'U.S. BANK' in text and 'BUSINESS CHECKING' in text:
         return 'usbank_checking'
@@ -419,6 +427,7 @@ _PAGE_TYPE_SIGNATURES = {
     'bofa_savings':     [['YOUR SAVINGS ACCOUNT'], ['BUSINESS INVESTMENT ACCOUNT']],
     'amex':             [['AMERICAN EXPRESS']],
     'amex_checking':    [['AMERICAN EXPRESS', 'BUSINESS CHECKING ACCOUNT STATEMENT']],
+    'capital_one':      [['CAPITAL ONE', 'STATEMENT ENDING']],
     'usbank_checking':  [['U.S. BANK', 'BUSINESS CHECKING'], ['USBANK.COM', 'BUSINESS CHECKING'], ['U.S. BANK SILVER']],
     'chase_ink':        [['CHASE INK', 'INK BUSINESS CASH', 'INK BUSINESS PREFERRED',
                           'INK BUSINESS UNLIMITED']],
@@ -613,6 +622,7 @@ STATEMENT_TYPE_LABELS = {
     'northern_trust_checking': 'Northern Trust Business Checking',
     'wells_fargo_checking':    'Wells Fargo Business Checking',
     'wells_fargo_credit':      'Wells Fargo Business Credit Card',
+    'capital_one':             'Capital One Business Credit Card',
 }
 
 def _ask(prompt, required=True, default=None):
@@ -653,7 +663,7 @@ def manual_entry_for_parser(stmt_type_code, client_name):
 
     print()
     is_cc = stmt_type_code in ('chase_ink', 'chase_united', 'amex', 'bofa_credit',
-                                'citi_visa_costco', 'wells_fargo_credit')
+                                'citi_visa_costco', 'wells_fargo_credit', 'capital_one')
 
     if is_cc:
         print("Enter amounts from the Account Summary:")
@@ -758,7 +768,7 @@ def manual_entry():
 
     print()
     is_cc = stmt_type_code in ('chase_ink', 'chase_united', 'amex', 'bofa_credit',
-                                'citi_visa_costco', 'wells_fargo_credit')
+                                'citi_visa_costco', 'wells_fargo_credit', 'capital_one')
 
     if is_cc:
         # Credit card fields
@@ -1205,6 +1215,7 @@ def main():
         'usbank_checking':          USBankCheckingParser,
         'wells_fargo_credit':       WellsFargoCreditCardParser,
         'wells_fargo_checking':     WellsFargoCheckingParser,
+        'capital_one':              CapitalOneParser,
     }
 
     # Split combined PDFs (e.g. files that bundle Meevo + Citi Costco)
@@ -1266,6 +1277,7 @@ def main():
             _CC_STATEMENT_TYPES = {
                 'citi_visa_costco', 'chase_ink', 'chase_united',
                 'amex', 'bofa_credit', 'wells_fargo_credit', 'bmo_credit',
+                'capital_one',
             }
             if stmt_type in _CC_STATEMENT_TYPES and not dry_run:
                 print(f"[Step 7b] Verifying balance (Vision fallback if needed)...")
@@ -1309,7 +1321,7 @@ def main():
                         s for s in [t[0] for t in _session_stmt_types]
                         if s in ('amex', 'bofa_credit', 'chase_ink',
                                  'chase_united', 'chase_sapphire', 'citi_costco',
-                                 'bmo_credit')
+                                 'bmo_credit', 'capital_one')
                     }
                     cc_payments = getattr(parser, 'credit_card_payments', [])
                     for pmt in cc_payments:
