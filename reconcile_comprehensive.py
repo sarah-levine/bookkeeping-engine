@@ -4,7 +4,7 @@ Unified Bank Statement Reconciliation Tool
 
 Supported statement formats:
   Credit Cards:  Chase Ink Business, Chase United, American Express, BofA Credit Card,
-                 Citi Costco Anywhere Visa, Wells Fargo Signify
+                 Citi Costco Anywhere Visa, Wells Fargo Signify, Capital One Business
   Checking:      Citi Business Checking, BofA Business Checking, Wells Fargo Checking,
                  BMO Premium Business Checking, Northern Trust Checking, US Bank Checking,
                  American Express Business Checking
