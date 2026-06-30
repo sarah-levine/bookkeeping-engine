@@ -65,7 +65,8 @@
           "bmo_credit_roger",
           "bmo_credit_nicholas",
           "bmo_credit_peter",
-          "bmo_credit_christopher"
+          "bmo_credit_christopher",
+          "capital_one"
         ]
       },
       "description": "Which parsers apply to this client's statements."

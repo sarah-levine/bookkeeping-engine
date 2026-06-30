@@ -8,6 +8,7 @@ bank america american express national wells fargo bofa bmo citi citibank
 citicards citictp citibusiness chase jpmorgan amex northern trust us usbank
 costco visa mastercard master card sapphire ink freedom united club mileageplus
 ultimate rewards anywhere preferred reserve platinum gold green silver unlimited
+capital one capitalone spark venture
 business advantage cash fundamentals relationship essential premium checking
 savings money market imma investment
 
@@ -49,6 +50,7 @@ gov govt government mfg manufacturing
 client cardholder owner recipient counterparty bookkeeping sarah operator
 
 # ── Code / structural / tooling words ──────────────────────────────
+category
 base parser parsers registry detection report helpers utilities log fixtures root
 reconciliation comparison quickbooks qb pending clean done issues found error
 handling critical rules verify output mode columns final shared setup interactive

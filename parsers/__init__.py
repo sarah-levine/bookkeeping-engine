@@ -17,3 +17,4 @@ from parsers.citi import CitiCheckingParser, CitiVisaCostcoParser, CitiSavingsPa
 from parsers.bmo import BMOCheckingParser, BMOCreditCardParser
 from parsers.usbank import USBankCheckingParser
 from parsers.northern_trust import NorthernTrustCheckingParser
+from parsers.capital_one import CapitalOneParser
