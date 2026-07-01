@@ -484,6 +484,14 @@ class StatementParser:
         for name in KNOWN_CLIENTS:
             if name in text_upper:
                 return CLIENT_CANONICAL.get(name, name)
+        # Fallback: no name found — try resolving by card/account last-4.
+        # Handles formats (e.g. Capital One print-view) that show only
+        # "Account Ending in ...XXXX" with no company name anywhere.
+        m = re.search(r'ACCOUNT ENDING IN\s+\.+(\d{4})', text_upper)
+        if m:
+            result = _registry.lookup_account_ending(m.group(1))
+            if result:
+                return result[0]
         return None
 
     def normalize_vendor(self, description):
