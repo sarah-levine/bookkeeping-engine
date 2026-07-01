@@ -369,6 +369,11 @@ Client-specific flags (check client config for `payroll_format`):
 - `adp_payroll_tipped` clients: use `--pay-by-pay AMOUNT` if applicable
 - `adp_labor_distribution` clients: script emits two separate journal entries — present them one at a time; wait for QB confirmation on the first before showing the second
 
+> ⚠️ **STOP after the Agency entry.** Even though payroll.py prints both
+> entries in one run, do **not** include the Admin entry in the same chat
+> response. Wait for explicit user confirmation that Agency was entered into
+> QuickBooks before showing Admin.
+
 After each run the script auto-upserts `payroll_log.csv`. Sync when Sarah confirms QB entry:
 
 ```python
@@ -386,6 +391,11 @@ status shows **OUT OF BALANCE**, report it prominently before Sarah uses the ent
 
 For clients with two journal entries (Labor Distribution format): present Agency
 entry first, wait for QB confirmation, then present Admin entry.
+
+> ⚠️ **STOP after the Agency entry.** Even though payroll.py prints both
+> entries in one run, do **not** include the Admin entry in the same chat
+> response. Wait for explicit user confirmation that Agency was entered into
+> QuickBooks before showing Admin.
 
 ### Payroll fixture prompt (after sync)
 
