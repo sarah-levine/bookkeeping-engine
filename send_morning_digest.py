@@ -402,7 +402,7 @@ def build_html(recon_entries, manual_entries, log_date):
             next_day = min(d.day, calendar.monthrange(next_yr, next_mo)[1])
             from datetime import date as _date
             next_close = _date(next_yr, next_mo, next_day)
-            if today_date <= next_close:
+            if today_date <= next_close + timedelta(days=1):
                 return "✅ Current", "#dcfce7", "#166534"
         return "🔴 Overdue", "#fce7f3", "#9d174d"
 
