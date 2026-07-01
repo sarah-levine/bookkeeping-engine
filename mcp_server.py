@@ -145,7 +145,7 @@ def run_payroll(client_key: str, pdf_path: str) -> str:
     """Run payroll journal entry processing on an ADP payroll PDF.
 
     Args:
-        client_key: Client key, e.g. "jojo_hair_studio", "duran_hcp".
+        client_key: Client key, e.g. "acme_inc", "contoso_llc".
         pdf_path: Absolute path to the ADP payroll PDF file.
     """
     pdf = Path(pdf_path).expanduser()
