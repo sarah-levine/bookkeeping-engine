@@ -265,11 +265,17 @@ def _charges_section(aggregated, total_charges, title='CHARGES', paired_vendors=
                 continue  # already rendered this date+vendor group
             rendered_paired_keys.add(key)
             amounts = paired_groups[key]
-            amt = sum(amounts)
             count_suffix = f" ({len(amounts)})" if len(amounts) > 1 else ""
             lines.append(f"{row['date']:<12} {(vendor_clean + count_suffix)[:50]}")
-            lines.append(f"{'':12}   DR  {pair['debit_account']:<44} ${amt:>15,.2f}")
-            lines.append(f"{'':12}   CR  {pair['credit_account']:<44} ${amt:>15,.2f}")
+            for i in range(0, len(amounts), 2):
+                dr_amt = amounts[i]
+                if i + 1 < len(amounts):
+                    cr_amt = amounts[i + 1]
+                else:
+                    lines.append(f"  ⚠ WARNING: odd number of paired transactions for {vendor_clean} on {row['date']} — CR has no partner, reusing DR amount")
+                    cr_amt = dr_amt
+                lines.append(f"{'':12}   DR  {pair['debit_account']:<44} ${dr_amt:>15,.2f}")
+                lines.append(f"{'':12}   CR  {pair['credit_account']:<44} ${cr_amt:>15,.2f}")
         else:
             lines.append(f"{row['date']:<12} {vendor_display[:50]:<50} ${row['amount']:>15,.2f}")
     lines.append(f"{'':63} {'-' * 17}")
