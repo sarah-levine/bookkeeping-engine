@@ -219,7 +219,7 @@ def _upsert_csv(log_path: Path, fields: list, key_fields: list, entry: dict):
     return replaced
 
 
-def append_payroll_log(client: str, client_name: str, check_date: str, rows: list):
+def append_payroll_log(client: str, client_name: str, check_date: str, rows: list, *, recon_client: str = None):
     """Upsert one row into payroll_log.csv and reconciliation_log.csv (last run wins for same client+date)."""
     from log_utils import _assert_known_client
     _assert_known_client(client)
@@ -243,10 +243,11 @@ def append_payroll_log(client: str, client_name: str, check_date: str, rows: lis
     # The tracker reads from reconciliation_log only, so payroll dates must always land here.
     # Use _normalize_client_key so the key matches the cell_map regardless of config naming.
     from log_utils import _normalize_client_key
-    normalized_key = _normalize_client_key(client)
+    normalized_key = _normalize_client_key(recon_client if recon_client else client)
+    recon_client_name = client_name.split(" — ")[0] if recon_client else client_name
     recon_entry = {
         "client":             normalized_key,
-        "client_name":        client_name,
+        "client_name":        recon_client_name,
         "account_type":       "payroll",
         "account_ending":     "",
         "statement_date":     check_date,

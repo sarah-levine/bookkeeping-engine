@@ -161,9 +161,9 @@ def run_adp_labor_distribution(args, config_name):
     admin_confirmed  = _qb_confirm(f"{cfg['client_name']} — Admin (Div 10)")
 
     if agency_confirmed and admin_confirmed:
-        append_payroll_log("adp_labor_agency", f"{cfg['client_name']} — Agency", check_date, agency_rows)
+        append_payroll_log(f"{cfg['payroll_key']}_agency", f"{cfg['client_name']} — Agency", check_date, agency_rows, recon_client=cfg["payroll_key"])
         append_digest_log(f"{cfg['client_name']} — Agency", check_date)
-        append_payroll_log("adp_labor_admin",  f"{cfg['client_name']} — Admin",  check_date, admin_rows)
+        append_payroll_log(f"{cfg['payroll_key']}_admin",  f"{cfg['client_name']} — Admin",  check_date, admin_rows,  recon_client=cfg["payroll_key"])
         append_digest_log(f"{cfg['client_name']} — Admin",  check_date)
         archive_payroll_pdf(pdf_path, cfg["client_name"], check_date)
         print(f"  ✅ Both Div 50 + Div 10 confirmed — logged.")

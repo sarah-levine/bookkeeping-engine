@@ -115,7 +115,15 @@ def _assert_known_client(client: str) -> None:
     import os
     try:
         from parsers.base import _registry
-        if _registry.resolve(client) is not None:
+        # Strip _agency/_admin suffixes used by adp_labor_distribution to
+        # keep per-division payroll_log.csv rows distinct while still resolving
+        # to a known client key.
+        probe = client
+        for _sfx in ("_agency", "_admin"):
+            if probe.lower().endswith(_sfx):
+                probe = probe[: -len(_sfx)]
+                break
+        if _registry.resolve(probe) is not None:
             return  # known — proceed normally
     except Exception:
         return  # registry unavailable (e.g. no client configs) — don't block
@@ -457,6 +465,20 @@ def _normalize_client_key(raw: str) -> str:
                 tk = cc.get("tracker_key")
                 if tk:
                     return tk
+        # Fallback: strip _agency/_admin suffix and retry all lookups
+        for _sfx in ("_agency", "_admin"):
+            if raw.lower().endswith(_sfx):
+                base = raw[: -len(_sfx)]
+                base_cfg = _registry.get_config(base)
+                if base_cfg is None:
+                    for cc in _registry._configs.values():
+                        if cc.get("payroll_key", "").lower() == base.lower():
+                            base_cfg = cc
+                            break
+                if base_cfg is not None:
+                    tk = base_cfg.get("tracker_key")
+                    if tk:
+                        return tk
     except Exception:
         pass
     return raw.upper().replace(" ", "_")
