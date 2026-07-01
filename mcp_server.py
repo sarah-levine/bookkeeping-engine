@@ -141,6 +141,23 @@ def mark_done(client_key: str, account_type: str, statement_date: str = "") -> s
 
 
 @mcp.tool()
+def run_payroll(client_key: str, pdf_path: str) -> str:
+    """Run payroll journal entry processing on an ADP payroll PDF.
+
+    Args:
+        client_key: Client key, e.g. "jojo_hair_studio", "duran_hcp".
+        pdf_path: Absolute path to the ADP payroll PDF file.
+    """
+    pdf = Path(pdf_path).expanduser()
+    if not pdf.exists():
+        return f"Error: file not found: {pdf_path}"
+    return _run_script([
+        "python3", str(ENGINE_DIR / "payroll.py"),
+        client_key, str(pdf), "--no-prompt",
+    ])
+
+
+@mcp.tool()
 def open_issues() -> str:
     """Show all unresolved manual issues from recon_log.json."""
     entries = _load_recon_log()
