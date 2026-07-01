@@ -220,7 +220,12 @@ def _upsert_csv(log_path: Path, fields: list, key_fields: list, entry: dict):
 
 
 def append_payroll_log(client: str, client_name: str, check_date: str, rows: list, *, recon_client: str = None):
-    """Upsert one row into payroll_log.csv and reconciliation_log.csv (last run wins for same client+date)."""
+    """Upsert one row into payroll_log.csv and reconciliation_log.csv.
+
+    payroll_log.csv key: [client, check_date] — one row per division per date.
+    reconciliation_log.csv key: [client, account_type] — one row per client,
+    updated in-place each run so the tracker always shows the latest date.
+    """
     from log_utils import _assert_known_client
     _assert_known_client(client)
     from datetime import datetime
@@ -257,7 +262,7 @@ def append_payroll_log(client: str, client_name: str, check_date: str, rows: lis
         "run_timestamp":      _now_pst().strftime("%Y-%m-%d %H:%M:%S"),
     }
     _upsert_csv(RECON_LOG_PATH, RECON_LOG_FIELDS,
-                ["client", "account_type", "statement_date"], recon_entry)
+                ["client", "account_type"], recon_entry)
     print(f"  📋 {verb} → reconciliation_log.csv  (payroll  {check_date})")
 
 
