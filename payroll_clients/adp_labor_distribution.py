@@ -156,12 +156,8 @@ def run_adp_labor_distribution(args, config_name):
     agency_rows = _build_agency_journal(agency_data, cfg, check_date)
 
     print_journal_table(agency_rows, f"{cfg['client_name']} — AGENCY/1099 (Div 50)", check_date)
-    iif_agency = write_iif(agency_rows, f"{cfg['client_name']}_agency", check_date)
-    print(f"  📄 IIF ready for QB import: {iif_agency}")
     agency_confirmed = _qb_confirm(f"{cfg['client_name']} — Agency (Div 50)")
     print_journal_table(admin_rows,  f"{cfg['client_name']} — ADMIN (Div 10)",  check_date)
-    iif_admin = write_iif(admin_rows, f"{cfg['client_name']}_admin", check_date)
-    print(f"  📄 IIF ready for QB import: {iif_admin}")
     admin_confirmed  = _qb_confirm(f"{cfg['client_name']} — Admin (Div 10)")
 
     if agency_confirmed and admin_confirmed:

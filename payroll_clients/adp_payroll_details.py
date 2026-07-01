@@ -274,8 +274,6 @@ def run_adp_payroll_details(args, config_name):
 
     rows = _build_journal(data, wc_amount, cfg)
     print_journal_table(rows, cfg["client_name"], data["check_date"])
-    iif = write_iif(rows, cfg["client_name"], data["check_date"])
-    print(f"  📄 IIF ready for QB import: {iif}")
     if _qb_confirm(cfg["client_name"]):
         append_payroll_log("adp_payroll_details", cfg["client_name"], data["check_date"], rows)
         append_digest_log(cfg["client_name"], data["check_date"])

@@ -284,8 +284,6 @@ def run_adp_payroll_professional(args, config_name):
     if abs(total_d - total_c) > 0.01:
         print(f"⚠️  JE out of balance: debits ${total_d:,.2f} vs credits ${total_c:,.2f}")
     print_journal_table(rows, cfg["client_name"], check_date)
-    iif = write_iif(rows, cfg["client_name"], check_date)
-    print(f"  📄 IIF ready for QB import: {iif}")
     if _qb_confirm(cfg["client_name"]):
         append_payroll_log("adp_payroll_professional", cfg["client_name"], check_date, rows)
         append_digest_log(cfg["client_name"], check_date)

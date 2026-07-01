@@ -162,37 +162,9 @@ def write_csv(rows: list, output_path: str):
                     "Memo": "", "Name": ""})
 
 
-def write_iif(rows: list, client_name: str, check_date: str) -> str:
-    """Write journal rows to a QuickBooks Desktop IIF file.
-
-    Positive AMOUNT = debit, negative AMOUNT = credit (QB convention).
-    Returns the filename written.
-    """
-    import re
-    safe_client = re.sub(r"[^\w]", "_", client_name).strip("_")
-    safe_date   = check_date.replace("/", "-")
-    filename    = f"{safe_client}_{safe_date}.iif"
-
-    lines = [
-        "!TRNS\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO",
-        "!SPL\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO",
-        "!ENDTRNS",
-    ]
-    for i, row in enumerate(rows):
-        tag    = "TRNS" if i == 0 else "SPL"
-        amount = float(row["Debit"]) if row["Debit"] else (
-                -float(row["Credit"]) if row["Credit"] else 0.0)
-        name   = (row.get("Name") or "").strip()
-        memo   = (row.get("Memo") or "").strip()
-        lines.append(
-            f"{tag}\tGENERAL JOURNAL\t{row['Date']}\t{row['Account']}"
-            f"\t{name}\t{amount:.2f}\t{memo}"
-        )
-    lines.append("ENDTRNS")
-
-    with open(filename, "w", newline="\r\n", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-    return filename
+def write_iif(rows: list, client_name: str, check_date: str) -> None:
+    """IIF generation is disabled — QB import uses manual journal entry instead."""
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

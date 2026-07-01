@@ -225,8 +225,6 @@ def run_adp_payroll_tipped(args, config_name):
 
     rows = _build_journal(cfg, officers, support, company, total_1099, check_date)
     print_journal_table(rows, cfg["client_name"], check_date)
-    iif = write_iif(rows, cfg["client_name"], check_date)
-    print(f"  📄 IIF ready for QB import: {iif}")
     if _qb_confirm(cfg["client_name"]):
         append_payroll_log("adp_payroll_tipped", cfg["client_name"], check_date, rows)
         append_digest_log(cfg["client_name"], check_date)
