@@ -1,5 +1,53 @@
 # Bookkeeping Skill — Full Instructions
 
+## Environment Detection (READ THIS FIRST)
+
+Before doing anything else, call the **`client_list`** MCP tool.
+
+- **If it returns client data** → you are in **MCP Mode** (Claude Desktop with the bookkeeping connector). Follow the MCP Mode section immediately below and **ignore all Shared Setup / sandbox instructions entirely**.
+- **If the tool is unavailable or errors** → you are in **Sandbox Mode**. Skip to Shared Setup and follow the existing instructions.
+
+---
+
+## MCP Mode (Claude Desktop)
+
+`~/Bookkeeping-clients` is already mounted on the local machine. No git clone, no PAT, no sync step needed. The tools handle everything.
+
+### Tool map
+
+| Situation | Call |
+|---|---|
+| Reconcile a local PDF | `reconcile(pdf_path)` |
+| Reconcile from Google Drive | `reconcile_from_drive(file_id)` |
+| Run payroll | `run_payroll(client_key, pdf_path)` |
+| Check what's in progress | `check_status()` |
+| Mark done after QB entry | `mark_done(client_key, account_type, statement_date)` |
+| Open manual issues | `open_issues()` |
+| Look up a client key | `client_list()` |
+
+### Rules
+
+**Output:** Show the full tool output verbatim in a fenced code block. Never summarize, truncate, or reformat.
+
+**QB confirmation:** After presenting each report, ask:
+> "Done entering **[Client] [Account type] [Statement period]** in QuickBooks?"
+
+Wait for an affirmative before proceeding. Then call `mark_done` if the status is IN_PROGRESS, or confirm DONE if already marked.
+
+**Payroll — adp_labor_distribution clients only:** Stop after the Agency entry. Do not show the Admin entry until Sarah confirms Agency is in QB.
+
+**Multiple statements:** One at a time, earliest date first. Stop and wait after each QB confirmation.
+
+**Sync:** Happens automatically inside the script — no explicit sync call needed after reconciliation or payroll.
+
+**Errors:** Same rules as Sandbox Mode — stop on unknown client, unknown account type, balance failure, or statement date warning. Do not guess or proceed without confirmation.
+
+**Bug or code change needed:** Stop and give Sarah a ready-to-paste Claude Code command exactly as described in the Code Changes note below. Do not edit files inline.
+
+**In MCP Mode, stop here. Do not clone the engine, do not run bash setup, do not follow Shared Setup.**
+
+---
+
 > **Code changes are out of scope for this skill.** If a workflow surfaces a
 > bug, a missing parser, a config field that needs updating, or any change to
 > `.py`, `.json`, or `.md` files in the engine repo — stop and give Sarah a
@@ -42,17 +90,6 @@
 > is auto-archived to Google Drive under `Bookkeeping/<Client>/<Account Type>/`.
 > Files are deduplicated by name. Only the 2 most recent statements per folder
 > are kept — older ones are deleted automatically.
-
-> **Name normalization:** Client names are automatically resolved to their
-> canonical form before
-> writing to any log. Do not manually normalize — the engine handles it.
-
-> **Vendor normalization (two-tier):** Transaction descriptions are normalized
-> using two tiers of rules: (1) client-specific rules in each `<client>.json`
-> take priority, (2) global rules in `vendor_rules_global.json` fire as
-> fallback for common vendors (Amazon, PG&E, Apple, Comcast, ADP, etc.).
-> When adding a new vendor rule, put it in the client config if it's specific
-> to one client, or in `vendor_rules_global.json` if it applies to everyone.
 
 ## Mode Detection
 
