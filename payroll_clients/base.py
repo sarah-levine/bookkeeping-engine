@@ -348,7 +348,8 @@ def archive_payroll_pdf(pdf_path: str, client_name: str, check_date: str, dry_ru
             dry_run=dry_run,
         )
     except Exception as _e:
-        print(f"  ⚠ Drive archive skipped: {_e}")
+        print(f"  ✗ Drive archive ERROR — {_e}")
+        print(f"  ✗ Payroll PDF was NOT archived to Drive. Fix credentials and re-run to archive.")
 
 
 def _qb_confirm(label: str) -> bool:

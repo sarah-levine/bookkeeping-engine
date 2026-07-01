@@ -219,41 +219,36 @@ def archive_statement(
     client_folder = client_name.strip().title()
     account_folder = account_type.strip().replace("_", " ").title()
 
-    try:
-        service = _get_service()
+    service = _get_service()
 
-        # Navigate/create folder structure: Root / Client / Account Type
-        client_id = _find_or_create_folder(service, client_folder, root_id, dry_run=dry_run)
-        account_id = _find_or_create_folder(service, account_folder, client_id, dry_run=dry_run)
+    # Navigate/create folder structure: Root / Client / Account Type
+    client_id = _find_or_create_folder(service, client_folder, root_id, dry_run=dry_run)
+    account_id = _find_or_create_folder(service, account_folder, client_id, dry_run=dry_run)
 
-        # Dedup check (skip for dry-run folders that don't exist yet)
-        if not account_id.startswith("DRY_RUN_") and _file_exists(service, target_name, account_id):
-            print(f"  📁 Drive: already exists — {client_folder}/{account_folder}/{target_name}")
-            return None
-
-        if dry_run:
-            print(f"  [dry-run] Would upload: {client_folder}/{account_folder}/{target_name}")
-            _prune_old_statements(service, account_id, keep=2, dry_run=True)
-            return "DRY_RUN"
-
-        # Upload
-        from googleapiclient.http import MediaFileUpload
-        metadata = {"name": target_name, "parents": [account_id]}
-        media = MediaFileUpload(str(pdf), mimetype="application/pdf", resumable=True)
-        uploaded = service.files().create(
-            body=metadata, media_body=media, fields="id"
-        ).execute()
-        file_id = uploaded["id"]
-        print(f"  📁 Drive: archived → {client_folder}/{account_folder}/{target_name}")
-
-        # Prune: keep only the 2 most recent statements
-        _prune_old_statements(service, account_id, keep=2)
-
-        return file_id
-
-    except Exception as e:
-        print(f"  ⚠ Drive archive failed: {e}")
+    # Dedup check (skip for dry-run folders that don't exist yet)
+    if not account_id.startswith("DRY_RUN_") and _file_exists(service, target_name, account_id):
+        print(f"  📁 Drive: already exists — {client_folder}/{account_folder}/{target_name}")
         return None
+
+    if dry_run:
+        print(f"  [dry-run] Would upload: {client_folder}/{account_folder}/{target_name}")
+        _prune_old_statements(service, account_id, keep=2, dry_run=True)
+        return "DRY_RUN"
+
+    # Upload
+    from googleapiclient.http import MediaFileUpload
+    metadata = {"name": target_name, "parents": [account_id]}
+    media = MediaFileUpload(str(pdf), mimetype="application/pdf", resumable=True)
+    uploaded = service.files().create(
+        body=metadata, media_body=media, fields="id"
+    ).execute()
+    file_id = uploaded["id"]
+    print(f"  📁 Drive: archived → {client_folder}/{account_folder}/{target_name}")
+
+    # Prune: keep only the 2 most recent statements
+    _prune_old_statements(service, account_id, keep=2)
+
+    return file_id
 
 
 def archive_fixture(

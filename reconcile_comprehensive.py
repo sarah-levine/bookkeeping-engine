@@ -1523,7 +1523,8 @@ def main():
                         dry_run=dry_run,
                     )
                 except Exception as _e:
-                    print(f"  ⚠ Drive archive skipped: {_e}")
+                    print(f"  ✗ Drive archive ERROR — {_e}")
+                    print(f"  ✗ Statement was NOT archived to Drive. Fix credentials and re-run to archive.")
             # ───────────────────────────────────────────────────────────────
 
             # ── Google Sheet update ─────────────────────────────────────────
