@@ -243,9 +243,14 @@ def detect_statement_type(pdf_path):
 
     # Capital One — gate on "STATEMENT ENDING" or brand domain so "CAPITAL ONE"
     # as a payment payee in other statements (e.g. US Bank) doesn't match here.
+    # The portal print-view format omits all Capital One branding; match on its
+    # distinctive "Download Transactions" + "Account Ending in" phrases instead.
     if ('CAPITAL ONE' in text and
             ('STATEMENT ENDING' in text or 'CAPITALONE.COM' in text or
              'SPARK' in text or 'VENTURE' in text)):
+        return 'capital_one'
+    if ('STATEMENT ENDING' in text and 'ACCOUNT ENDING IN' in text and
+            'DOWNLOAD TRANSACTIONS' in text):
         return 'capital_one'
 
     # U.S. Bank Business Checking
@@ -427,7 +432,8 @@ _PAGE_TYPE_SIGNATURES = {
     'bofa_savings':     [['YOUR SAVINGS ACCOUNT'], ['BUSINESS INVESTMENT ACCOUNT']],
     'amex':             [['AMERICAN EXPRESS']],
     'amex_checking':    [['AMERICAN EXPRESS', 'BUSINESS CHECKING ACCOUNT STATEMENT']],
-    'capital_one':      [['CAPITAL ONE', 'STATEMENT ENDING']],
+    'capital_one':      [['CAPITAL ONE', 'STATEMENT ENDING'],
+                         ['STATEMENT ENDING', 'ACCOUNT ENDING IN', 'DOWNLOAD TRANSACTIONS']],
     'usbank_checking':  [['U.S. BANK', 'BUSINESS CHECKING'], ['USBANK.COM', 'BUSINESS CHECKING'], ['U.S. BANK SILVER']],
     'chase_ink':        [['CHASE INK', 'INK BUSINESS CASH', 'INK BUSINESS PREFERRED',
                           'INK BUSINESS UNLIMITED']],
