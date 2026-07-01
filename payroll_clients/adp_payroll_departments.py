@@ -18,7 +18,7 @@ from payroll_clients.base import (
     extract_text, amt, parse_header, verify_same_check_date,
     make_row, check_balance, print_journal_table, write_csv, write_iif,
     _upsert_csv, append_payroll_log, append_digest_log, append_recon_log,
-    load_config, _qb_confirm, _now_pst,
+    load_config, _qb_confirm, _now_pst, archive_payroll_pdf,
     REPO_DIR, PAYROLL_LOG_PATH, RECON_LOG_PATH, PAYROLL_LOG_FIELDS, RECON_LOG_FIELDS,
 )
 
@@ -179,6 +179,7 @@ def run_adp_payroll_departments(args, config_name):
     if _qb_confirm(cfg["client_name"]):
         append_payroll_log("adp_payroll_departments", cfg["client_name"], check_date, rows)
         append_digest_log(cfg["client_name"], check_date)
+        archive_payroll_pdf(args[0], cfg["client_name"], check_date)
 
 
 

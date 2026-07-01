@@ -336,6 +336,21 @@ def load_config(filename: str) -> dict:
 
 
 
+def archive_payroll_pdf(pdf_path: str, client_name: str, check_date: str, dry_run: bool = False) -> None:
+    """Best-effort Drive archive for a payroll PDF under Client/Payroll/."""
+    try:
+        from drive_archiver import archive_statement as _archive
+        _archive(
+            pdf_path=pdf_path,
+            client_name=client_name,
+            account_type="Payroll",
+            statement_date=check_date,
+            dry_run=dry_run,
+        )
+    except Exception as _e:
+        print(f"  ⚠ Drive archive skipped: {_e}")
+
+
 def _qb_confirm(label: str) -> bool:
     """Prompt user to confirm QB entry. Returns True if done, False if later.
 

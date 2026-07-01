@@ -18,7 +18,7 @@ from payroll_clients.base import (
     extract_text, amt, parse_header, verify_same_check_date,
     make_row, check_balance, print_journal_table, write_csv, write_iif,
     _upsert_csv, append_payroll_log, append_digest_log, append_recon_log,
-    load_config, _qb_confirm, _now_pst,
+    load_config, _qb_confirm, _now_pst, archive_payroll_pdf,
     REPO_DIR, PAYROLL_LOG_PATH, RECON_LOG_PATH, PAYROLL_LOG_FIELDS, RECON_LOG_FIELDS,
 )
 
@@ -165,6 +165,7 @@ def run_adp_labor_distribution(args, config_name):
         append_digest_log(f"{cfg['client_name']} — Agency", check_date)
         append_payroll_log("adp_labor_admin",  f"{cfg['client_name']} — Admin",  check_date, admin_rows)
         append_digest_log(f"{cfg['client_name']} — Admin",  check_date)
+        archive_payroll_pdf(pdf_path, cfg["client_name"], check_date)
         print(f"  ✅ Both Div 50 + Div 10 confirmed — logged.")
     else:
         pending = []
