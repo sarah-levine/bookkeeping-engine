@@ -389,14 +389,21 @@ def build_html(recon_entries, manual_entries, log_date):
         # EOM accounts (bank accounts, payroll) close on the last day of the month.
         # Until EOM passes, the prior month's statement is the most recently closed
         # period — so "current" means reconciled in the previous month or later.
-        # CC accounts close mid-month, so "current" means this month or later.
+        # CC accounts close mid-month on a fixed day. Overdue only once today is
+        # strictly past the next closing date (last_date + 1 month, same day).
+        import calendar
         if group in ("Bank Accounts", "Payroll"):
             prev = today_date.replace(day=1) - timedelta(days=1)
-            threshold = (prev.year, prev.month)
+            if (d.year, d.month) >= (prev.year, prev.month):
+                return "✅ Current", "#dcfce7", "#166534"
         else:
-            threshold = (today_date.year, today_date.month)
-        if (d.year, d.month) >= threshold:
-            return "✅ Current", "#dcfce7", "#166534"
+            next_yr  = d.year + (d.month == 12)
+            next_mo  = (d.month % 12) + 1
+            next_day = min(d.day, calendar.monthrange(next_yr, next_mo)[1])
+            from datetime import date as _date
+            next_close = _date(next_yr, next_mo, next_day)
+            if today_date <= next_close:
+                return "✅ Current", "#dcfce7", "#166534"
         return "🔴 Overdue", "#fce7f3", "#9d174d"
 
     tracker_cards = ""
