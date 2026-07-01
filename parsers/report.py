@@ -265,10 +265,8 @@ def _charges_section(aggregated, total_charges, title='CHARGES', paired_vendors=
                 continue  # already rendered this date+vendor group
             rendered_paired_keys.add(key)
             lines.append(f"{row['date']:<12} {vendor_clean[:50]}")
-            # Every 2 transactions = 1 DR/CR pair, each at the individual transaction amount
             amounts = paired_groups[key]
-            for i in range(0, len(amounts), 2):
-                amt = amounts[i]
+            for amt in amounts:
                 lines.append(f"{'':12}   DR  {pair['debit_account']:<44} ${amt:>15,.2f}")
                 lines.append(f"{'':12}   CR  {pair['credit_account']:<44} ${amt:>15,.2f}")
         else:
