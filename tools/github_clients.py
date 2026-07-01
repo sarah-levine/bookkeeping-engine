@@ -8,9 +8,9 @@ make log entries and push them back without needing a local clone.
 Usage (programmatic):
     from tools.github_clients import pull_files, push_files, trigger_dispatch
 
-    pull_files(['reconciliation_log.csv', 'recon_log.json', 'acme_inc.json'])
+    pull_files(['reconciliation_log.csv', 'recon_log.json', 'payroll_log.csv', 'acme_inc.json'])
     # ... make changes locally in ~/.bookkeeping/clients/ ...
-    push_files(['reconciliation_log.csv', 'recon_log.json'], "Log Acme Inc May 2026")
+    push_files(['reconciliation_log.csv', 'recon_log.json', 'payroll_log.csv'], "Log Acme Inc May 2026")
     trigger_dispatch()
 """
 
@@ -135,7 +135,7 @@ def list_files(subdir: str = "") -> list[str]:
 
 # ── high-level helpers ──────────────────────────────────────────────────────
 
-_LOG_FILES = ["reconciliation_log.csv", "recon_log.json"]
+_LOG_FILES = ["reconciliation_log.csv", "recon_log.json", "payroll_log.csv"]
 _SHARED_CONFIGS = ["sheets_config.json", "digest_config.json",
                    "vendor_rules_global.json", "manual_statements.json"]
 
