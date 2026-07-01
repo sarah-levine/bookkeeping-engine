@@ -387,6 +387,36 @@ status shows **OUT OF BALANCE**, report it prominently before Sarah uses the ent
 For clients with two journal entries (Labor Distribution format): present Agency
 entry first, wait for QB confirmation, then present Admin entry.
 
+### Payroll fixture prompt (after sync)
+
+After syncing, check `fixtures_manifest.json` for a payroll entry matching
+this client:
+
+```python
+import sys, os, json
+from pathlib import Path
+sys.path.insert(0, '/tmp/engine')
+os.environ.setdefault('BOOKKEEPING_CLIENTS_DIR', os.path.expanduser('~/.bookkeeping/clients'))
+manifest_path = Path.home() / '.bookkeeping/clients/fixtures_manifest.json'
+manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+statements = manifest.get('statements', [])
+client_key = '<client_key>'
+has_payroll_fixture = any(
+    'payroll' in e.get('format', '') and client_key in e.get('name', '')
+    for e in statements
+)
+print('has_payroll_fixture:', has_payroll_fixture)
+```
+
+If no payroll fixture exists for this client, ask:
+
+> "No payroll test fixture on file for [Client]. Want me to upload this PDF
+> to Google Drive? (Mode H)"
+
+Only proceed with Mode H if Sarah says yes. Use `format` = the client's
+`payroll_format` value (e.g. `adp_labor_distribution`) and a name like
+`adp_labor_distribution_duran`.
+
 ---
 
 ## Mode C — Payroll + Checking Account Tie-Out
