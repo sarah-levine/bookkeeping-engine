@@ -32,18 +32,19 @@ FIXTURES_ROOT = _CONFIG.get("drive_fixtures_folder", "")
 
 
 def _get_service():
-    """Build the Drive API service using OAuth2 user credentials.
+    """Build the Drive API service. Credential resolution order:
 
-    Service accounts can't upload to personal Google Drive (no storage
-    quota), so this uses OAuth2 with a saved token. On first run, opens
-    a browser for login and saves the token for future use.
-
-    Token location: <BOOKKEEPING_CLIENTS_DIR>/drive_token.pickle
-    OAuth client: <BOOKKEEPING_CLIENTS_DIR>/drive_credentials.json
-
-    If neither exists, falls back to service account credentials
-    (works for listing/reading but not uploads).
+    1. DRIVE_TOKEN_B64 env var — base64-encoded OAuth pickle, for sandboxed
+       sessions without filesystem access. Generate with:
+           python3 tools/export_drive_token.py
+    2. drive_token.pickle file in BOOKKEEPING_CLIENTS_DIR — standard local
+       OAuth token; auto-refreshed when expired and written back to disk.
+    3. GOOGLE_SHEETS_CREDENTIALS env var or sheets_credentials.json — service
+       account key. Works for uploads once the target Drive folder has Editor
+       access granted to the service account email (one-time step in Drive UI).
+    4. drive_credentials.json — interactive OAuth flow, first-run only.
     """
+    import base64
     import pickle
     from googleapiclient.discovery import build
 
@@ -52,23 +53,46 @@ def _get_service():
         or str(Path.home() / ".bookkeeping" / "clients")
     )
     token_path = clients_dir / "drive_token.pickle"
-    oauth_creds_path = clients_dir / "drive_credentials.json"
 
     creds = None
+    from_b64 = False
 
-    # Try OAuth2 flow (required for uploads to personal Drive)
-    if token_path.exists():
+    # ── 1. Injected base64 token (sandboxed / CI sessions) ─────────────────
+    token_b64 = os.environ.get("DRIVE_TOKEN_B64", "").strip()
+    if token_b64:
+        creds = pickle.loads(base64.b64decode(token_b64))
+        from_b64 = True
+
+    # ── 2. Token pickle file (standard local session) ───────────────────────
+    if not creds and token_path.exists():
         with open(token_path, "rb") as f:
             creds = pickle.load(f)
 
-    if creds and not creds.valid:
-        if creds.expired and creds.refresh_token:
-            from google.auth.transport.requests import Request
-            creds.refresh(Request())
+    # Auto-refresh expired OAuth tokens (sources 1 and 2)
+    if creds and not creds.valid and getattr(creds, "expired", False) and getattr(creds, "refresh_token", None):
+        from google.auth.transport.requests import Request
+        creds.refresh(Request())
+        if not from_b64:
             with open(token_path, "wb") as f:
                 pickle.dump(creds, f)
 
+    # ── 3. Service account (no expiry; works if Drive folder shared with SA) ─
     if not creds or not creds.valid:
+        creds_json = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
+        if not creds_json:
+            sa_path = clients_dir / "sheets_credentials.json"
+            if sa_path.exists():
+                creds_json = sa_path.read_text()
+        if creds_json:
+            from google.oauth2 import service_account
+            info = json.loads(creds_json)
+            creds = service_account.Credentials.from_service_account_info(
+                info, scopes=SCOPES
+            )
+
+    # ── 4. Interactive OAuth flow (first run) ───────────────────────────────
+    if not creds or not creds.valid:
+        oauth_creds_path = clients_dir / "drive_credentials.json"
         if oauth_creds_path.exists():
             from google_auth_oauthlib.flow import InstalledAppFlow
             flow = InstalledAppFlow.from_client_secrets_file(
@@ -78,23 +102,11 @@ def _get_service():
             with open(token_path, "wb") as f:
                 pickle.dump(creds, f)
         else:
-            # Fall back to service account (read-only operations)
-            from google.oauth2 import service_account
-
-            creds_json = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
-            if not creds_json:
-                sa_path = clients_dir / "sheets_credentials.json"
-                if sa_path.exists():
-                    creds_json = sa_path.read_text()
-            if not creds_json:
-                raise EnvironmentError(
-                    "No Drive credentials found. Place drive_credentials.json "
-                    "in BOOKKEEPING_CLIENTS_DIR and run once interactively to "
-                    "authorize, or set GOOGLE_SHEETS_CREDENTIALS."
-                )
-            info = json.loads(creds_json)
-            creds = service_account.Credentials.from_service_account_info(
-                info, scopes=SCOPES
+            raise EnvironmentError(
+                "No Drive credentials found. Options:\n"
+                "  • Set DRIVE_TOKEN_B64 (base64 OAuth token — run tools/export_drive_token.py)\n"
+                "  • Set GOOGLE_SHEETS_CREDENTIALS (service account; share Drive folder with SA email)\n"
+                "  • Place drive_credentials.json in BOOKKEEPING_CLIENTS_DIR for interactive auth"
             )
 
     return build("drive", "v3", credentials=creds)
