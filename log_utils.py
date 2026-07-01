@@ -73,11 +73,12 @@ def entry_status(client: str, account_type: str, statement_end_date: str) -> str
 
 
 def _assert_known_account_type(client: str, account_type: str) -> None:
-    """Warn or prompt if account_type is not in the client's statement_types config.
+    """Abort if account_type is not in the client's statement_types config.
 
     Allows "payroll" and empty string unconditionally (payroll isn't in
     statement_types; manual entries have no account_type). For everything
-    else, checks the client's config and prompts if the type is unrecognized.
+    else, checks the client's config and raises if the type is unrecognized —
+    both interactively (after declining the prompt) and in no-prompt mode.
     """
     if not account_type or account_type == "payroll":
         return
@@ -96,8 +97,7 @@ def _assert_known_account_type(client: str, account_type: str) -> None:
     msg = (f"⚠️  account_type '{account_type}' is not in {client}'s statement_types config. "
            f"Known types: {sorted(known)}")
     if os.environ.get("BOOKKEEPING_NO_PROMPT") == "1":
-        print(msg + " Writing anyway (no-prompt mode).")
-        return
+        raise ValueError(f"{msg} Refusing to write unrecognized account_type in no-prompt mode.")
 
     print(msg)
     resp = input("Write to log anyway? [y/N] ").strip().lower()
@@ -106,10 +106,11 @@ def _assert_known_account_type(client: str, account_type: str) -> None:
 
 
 def _assert_known_client(client: str) -> None:
-    """Raise or prompt if client is not in the registry.
+    """Abort if client is not in the registry.
 
-    In no-prompt mode (BOOKKEEPING_NO_PROMPT=1) prints a warning and
-    continues. Interactively, asks the user to confirm before writing.
+    Raises in both no-prompt mode (BOOKKEEPING_NO_PROMPT=1) and when the
+    user declines interactively. Unknown clients must never be written to any
+    log file regardless of invocation mode.
     Importing parsers.base lazily to avoid circular imports.
     """
     import os
@@ -130,8 +131,7 @@ def _assert_known_client(client: str) -> None:
 
     msg = f"⚠️  Unrecognized client '{client}' — not found in any client JSON config."
     if os.environ.get("BOOKKEEPING_NO_PROMPT") == "1":
-        print(msg + " Writing anyway (no-prompt mode).")
-        return
+        raise ValueError(f"{msg} Refusing to write unrecognized client in no-prompt mode.")
 
     print(msg)
     resp = input("Write to log anyway? This will introduce a new client name. [y/N] ").strip().lower()
