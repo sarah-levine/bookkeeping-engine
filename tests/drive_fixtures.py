@@ -32,7 +32,10 @@ class DriveUnavailable(Exception):
 def _load_credentials_info():
     creds_json = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
     if creds_json:
-        return json.loads(creds_json)
+        try:
+            return json.loads(creds_json)
+        except json.JSONDecodeError:
+            pass  # malformed env var — fall back to file-based credentials
     # Check GOOGLE_SERVICE_ACCOUNT_FILE (file path) — same env var used by
     # reconcile_comprehensive.py --from-drive
     sa_file = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "")

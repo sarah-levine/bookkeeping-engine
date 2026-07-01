@@ -79,14 +79,19 @@ def _get_service():
 
     # ── 3. Service account (no expiry; works if Drive folder shared with SA) ─
     if not creds or not creds.valid:
+        info = None
         creds_json = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
-        if not creds_json:
+        if creds_json:
+            try:
+                info = json.loads(creds_json)
+            except json.JSONDecodeError:
+                info = None  # malformed env var — fall back to file-based credentials
+        if info is None:
             sa_path = clients_dir / "sheets_credentials.json"
             if sa_path.exists():
-                creds_json = sa_path.read_text()
-        if creds_json:
+                info = json.loads(sa_path.read_text())
+        if info is not None:
             from google.oauth2 import service_account
-            info = json.loads(creds_json)
             creds = service_account.Credentials.from_service_account_info(
                 info, scopes=SCOPES
             )

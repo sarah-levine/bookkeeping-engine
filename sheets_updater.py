@@ -46,20 +46,26 @@ def _get_service():
     from googleapiclient.discovery import build
     from pathlib import Path
 
+    info = None
     creds_json = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
-    if not creds_json:
+    if creds_json:
+        try:
+            info = json.loads(creds_json)
+        except json.JSONDecodeError:
+            info = None  # malformed env var — fall back to file-based credentials
+
+    if info is None:
         # Auto-load from Bookkeeping-clients if available
         clients_dir = os.environ.get("BOOKKEEPING_CLIENTS_DIR") or str(Path.home() / ".bookkeeping" / "clients")
         clients_creds = Path(clients_dir) / "sheets_credentials.json"
         if clients_creds.exists():
-            creds_json = clients_creds.read_text()
-    if creds_json:
-        info = json.loads(creds_json)
-    else:
+            info = json.loads(clients_creds.read_text())
+
+    if info is None:
         creds_file = Path(__file__).parent / "credentials.json"
         if not creds_file.exists():
             raise EnvironmentError(
-                "GOOGLE_SHEETS_CREDENTIALS env var not set and credentials.json not found in repo root"
+                "GOOGLE_SHEETS_CREDENTIALS env var not set/invalid and credentials.json not found in repo root"
             )
         with open(creds_file) as f:
             info = json.load(f)
