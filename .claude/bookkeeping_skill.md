@@ -357,8 +357,11 @@ for name, cfg in _registry._configs.items():
 
 ### Run payroll.py
 
+**Always pass `--no-prompt`** in this environment — payroll.py will hang waiting
+for keyboard input if it is omitted and stdin is not a terminal.
+
 ```bash
-python /tmp/engine/payroll.py <client_key> "$UPLOADS/<payroll_details>.pdf"
+python /tmp/engine/payroll.py <client_key> "$UPLOADS/<payroll_details>.pdf" --no-prompt
 ```
 
 Client-specific flags (check client config for `payroll_format`):

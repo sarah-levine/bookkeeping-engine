@@ -366,14 +366,15 @@ def load_config(filename: str) -> dict:
 
 def _qb_confirm(label: str) -> bool:
     """Prompt user to confirm QB entry. Returns True if done, False if later.
-    
-    If BOOKKEEPING_NO_PROMPT env var is set (via --no-prompt flag), auto-answers
-    'later' so the script can run non-interactively from Claude's environment.
+
+    Auto-answers 'later' when BOOKKEEPING_NO_PROMPT is set (via --no-prompt)
+    OR when stdin is not a tty, so non-interactive runs degrade safely instead
+    of hanging waiting for input that will never come.
     """
-    import os
+    import os, sys
     print()
     print('─' * 80)
-    if os.environ.get('BOOKKEEPING_NO_PROMPT'):
+    if os.environ.get('BOOKKEEPING_NO_PROMPT') or not sys.stdin.isatty():
         print(f'  [--no-prompt] Auto-answered: later — log written, sheet update deferred.')
         print('─' * 80)
         print()
