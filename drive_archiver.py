@@ -40,8 +40,9 @@ def _get_service():
     2. drive_token.pickle file in BOOKKEEPING_CLIENTS_DIR — standard local
        OAuth token; auto-refreshed when expired and written back to disk.
     3. GOOGLE_SHEETS_CREDENTIALS env var or sheets_credentials.json — service
-       account key. Works for uploads once the target Drive folder has Editor
-       access granted to the service account email (one-time step in Drive UI).
+       account key. Read/list only — Google blocks SA uploads to personal Drive
+       (no storage quota). Included as a last-resort fallback for dry-run/read
+       operations; upload calls will 403.
     4. drive_credentials.json — interactive OAuth flow, first-run only.
     """
     import base64
