@@ -21,7 +21,7 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
 
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, _classify_cc_transaction
+from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, _classify_cc_transaction
 from parsers.report import *
 from parsers.report import (
     _safe_date_key, _report_header, _summary_block, _balance_check,
@@ -249,7 +249,7 @@ class BankOfAmericaCheckingParser(StatementParser):
                 potential = line.strip().rstrip('.,')
                 if 'BANK OF AMERICA' not in potential and 'PREFERRED REWARDS' not in potential:
                     if potential in KNOWN_CLIENTS:
-                        return potential
+                        return CLIENT_CANONICAL.get(potential, potential)
         return super()._detect_client()
 
     def parse(self):

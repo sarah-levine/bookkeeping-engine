@@ -23,7 +23,7 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
 
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CARDHOLDERS, _classify_cc_transaction
+from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, CLIENT_CARDHOLDERS, _classify_cc_transaction
 from parsers.report import *
 from parsers.report import (
     _report_header, _summary_block, _balance_check,
@@ -92,7 +92,7 @@ class AmexStatementParser(StatementParser):
         text_upper = self.text.upper()
         for name in KNOWN_CLIENTS:
             if name in text_upper:
-                return name
+                return CLIENT_CANONICAL.get(name, name)
         return None
 
     def parse(self):
@@ -162,17 +162,20 @@ class AmexStatementParser(StatementParser):
             # Handle multiple formats:
             # 1. Simple: DATE DESCRIPTION -$AMOUNT
             # 2. With cardholder: DATE CARDHOLDER DESCRIPTION -$AMOUNT
-            # Match if it has CREDIT/REFUND/RETURN/WIRELESS keyword OR is preceded by cardholder
+            # The -$ requirement already scopes this to genuine negative-amount
+            # lines (real charges are always positive), so any match here is a
+            # real credit — no extra keyword/cardholder heuristic needed. That
+            # heuristic used to silently drop legitimate vendor refunds (e.g. a
+            # merchant credit with no CREDIT/REFUND/RETURN/WIRELESS wording and
+            # no configured cardholder prefix).
             mc = _credit_re.match(line)
             if mc and not m:
                 desc = mc.group(3).strip()
-                # Only add if it looks like a credit
-                if any(keyword in desc.upper() for keyword in ['CREDIT', 'REFUND', 'RETURN', 'WIRELESS']) or mc.group(2):
-                    self.credits.append({
-                        'date': mc.group(1),
-                        'description': desc,
-                        'amount': Decimal(mc.group(4).replace(',', ''))
-                    })
+                self.credits.append({
+                    'date': mc.group(1),
+                    'description': desc,
+                    'amount': Decimal(mc.group(4).replace(',', ''))
+                })
 
         # Charges — multi-line: date+desc line, then optional phone/ref lines, then $amount line
         cardholders = CLIENT_CARDHOLDERS.get(self.client_name, [])
@@ -200,7 +203,20 @@ class AmexStatementParser(StatementParser):
         pending_date = None
         pending_vendor = None
 
-        for line in lines:
+        # Scope this loop to the actual Charges Detail section (starting at
+        # the standalone "New Charges" section header). Otherwise it also
+        # walks the earlier Payments/Credits Detail block, where each row has
+        # an inline "CARDHOLDER   VENDOR" prefix (not a standalone cardholder
+        # header line like the Charges section uses) — the trailing-junk
+        # stripper below mis-splits those at the cardholder/vendor gap,
+        # producing spurious duplicate credits under the cardholder's name.
+        charges_start = 0
+        for _i, _line in enumerate(lines):
+            if _line.strip() == 'New Charges':
+                charges_start = _i
+                break
+
+        for line in lines[charges_start:]:
             stripped = line.strip()
             if not stripped:
                 continue

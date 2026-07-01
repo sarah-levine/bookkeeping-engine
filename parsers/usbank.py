@@ -21,7 +21,7 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
 
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS
+from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL
 from parsers.report import *
 from parsers.report import (
     _safe_date_key, _report_header, _summary_block, _balance_check,
@@ -65,7 +65,7 @@ class USBankCheckingParser(StatementParser):
         header = self.text[:2500].upper()
         for name in KNOWN_CLIENTS:
             if name.upper() in header:
-                return name
+                return CLIENT_CANONICAL.get(name, name)
         return None
 
     def normalize_vendor(self, description):
