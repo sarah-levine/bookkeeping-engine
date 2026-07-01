@@ -25,6 +25,14 @@ Before doing anything else, call the **`client_list`** MCP tool.
 | Open manual issues | `open_issues()` |
 | Look up a client key | `client_list()` |
 
+### File paths in MCP Mode
+
+**Do not use chat-attached file paths** (e.g. `/mnt/user-data/uploads/...`). Those are cloud paths the local MCP server cannot reach.
+
+Ask Sarah for the **local Mac path** to the file (e.g. `/Users/sarahlevine/Downloads/PayrollDetail.pdf`). The MCP tools read directly from the Mac filesystem.
+
+If Sarah has already attached a PDF to the chat, ask: "What's the local path to that file on your Mac?"
+
 ### Rules
 
 **Output:** Show the full tool output verbatim in a fenced code block. Never summarize, truncate, or reformat.
