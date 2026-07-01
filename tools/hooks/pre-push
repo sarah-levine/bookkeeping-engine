@@ -4,4 +4,4 @@
 #
 # Install once:   git config core.hooksPath tools/hooks
 # Bypass (use sparingly):  git push --no-verify
-python3 "$(git rev-parse --show-toplevel)/tests/check_all.py" --quick
+python3 "$(git rev-parse --show-toplevel)/tests/check_all.py"

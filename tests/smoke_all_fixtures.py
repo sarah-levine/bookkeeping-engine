@@ -96,6 +96,7 @@ def main():
     # Filter to bank statement formats only (skip payroll)
     bank_formats = {
         "amex", "amex_checking", "bofa_checking", "bofa_credit", "bofa_savings",
+        "capital_one",
         "chase_ink", "chase_sapphire", "chase_united",
         "citi_checking", "citi_savings", "citi_visa_costco",
         "bmo_checking", "bmo_credit",
