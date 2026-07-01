@@ -21,7 +21,7 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
 
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS
+from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL
 from parsers.report import *
 
 class NorthernTrustCheckingParser(StatementParser):
@@ -72,12 +72,12 @@ class NorthernTrustCheckingParser(StatementParser):
         header = self.text[:2500].upper()
         for name in KNOWN_CLIENTS:
             if name.upper() in header:
-                return name
+                return CLIENT_CANONICAL.get(name, name)
         # Fallback: full text search
         text = self.text.upper()
         for name in KNOWN_CLIENTS:
             if name.upper() in text:
-                return name
+                return CLIENT_CANONICAL.get(name, name)
         return None
 
     def normalize_vendor(self, description):

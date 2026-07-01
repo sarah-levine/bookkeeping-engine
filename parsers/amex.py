@@ -23,7 +23,7 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
 
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CARDHOLDERS, _classify_cc_transaction
+from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, CLIENT_CARDHOLDERS, _classify_cc_transaction
 from parsers.report import *
 from parsers.report import (
     _report_header, _summary_block, _balance_check,
@@ -92,7 +92,7 @@ class AmexStatementParser(StatementParser):
         text_upper = self.text.upper()
         for name in KNOWN_CLIENTS:
             if name in text_upper:
-                return name
+                return CLIENT_CANONICAL.get(name, name)
         return None
 
     def parse(self):

@@ -21,7 +21,7 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
 
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS
+from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL
 from parsers.report import *
 from parsers.report import (
     _report_header, _summary_block, _balance_check,
@@ -68,7 +68,7 @@ class CitiCheckingParser(StatementParser):
             line_upper = line.upper()
             for name in KNOWN_CLIENTS:
                 if name in line_upper:
-                    return name
+                    return CLIENT_CANONICAL.get(name, name)
         return super()._detect_client()
 
     def parse(self):
@@ -613,7 +613,7 @@ class CitiSavingsParser(StatementParser):
             line_upper = line.upper()
             for name in KNOWN_CLIENTS:
                 if name in line_upper:
-                    return name
+                    return CLIENT_CANONICAL.get(name, name)
         return super()._detect_client()
 
     def parse(self):
