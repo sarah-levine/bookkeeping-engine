@@ -57,10 +57,10 @@ instead of requiring a human to trigger it.
 Each client config's `cc_keywords` list is hand-maintained ad hoc; any credit
 card vendor not explicitly listed silently lands in generic "Withdrawals and
 Debits" instead of "Credit Card Payments" — no warning, no failure, just a
-mis-bucketed report. Hit 2026-07-02: Paintbox pays a recurring ~$3,900/mo
-American Express bill from checking, but `cc_keywords` only listed
-`"BANK OF AMERICA CREDIT CARD"`; fixed for Paintbox by adding `"AMERICAN
-EXPRESS"`, but the same gap exists for every other client's untracked card
+mis-bucketed report. Hit 2026-07-02: a client pays a recurring ~$3,900/mo
+American Express bill from checking, but `cc_keywords` only listed their one
+already-known card issuer; fixed for that client by adding the missing
+keyword, but the same gap exists for every other client's untracked card
 vendors and will recur the next time any client starts paying a new card.
 
 **Root cause fix:** classify by a shared, global pattern (e.g. `<KNOWN CARD
@@ -104,38 +104,37 @@ validate. Alternatively, auto-derive the enum from registered parser
 ## Open: Needs Product/Data Decision
 
 Not code bugs — need a human decision before any code or config changes.
+Which specific clients these apply to is tracked in the private
+`Bookkeeping-clients` repo, not here.
 
-### Does Paintbox have an Amex card that should be reconciled on its own?
-`recon_log.json` has never had an `amex` entry for Paintbox — only
-`bofa_checking`, `bofa_credit`, `bofa_savings`, `payroll` — but their checking
-account pays a recurring ~$3,900/mo "AMERICAN EXPRESS Bill Payment" (seen
-2026-06-29). Worth asking whether there's an Amex statement that should be
-reconciled as its own account, the way `bofa_credit` already is, rather than
-only ever showing up as an outbound payment on the checking statement. Per
-CLAUDE.md client-name governance, don't add a new `amex` account type for
-Paintbox without confirming with the user first.
+### A client's checking account regularly pays a card-network bill with no corresponding reconciled account
+Seen 2026-07-02: a client's `recon_log.json` has never had an entry for the
+card network they pay ~$3,900/mo to from checking — only their existing
+checking/credit/savings/payroll account types. Worth periodically auditing
+recurring outbound card-network payments against the set of account types
+actually being reconciled for that client, in case there's a statement that
+should be reconciled on its own rather than only ever showing up as an
+outbound payment elsewhere. Per CLAUDE.md client-name governance, never add
+a new account type for a client without confirming with the user first.
 
-### 3 payroll clients still missing `payroll_key`/`payroll_format`
-`fcba_academy`, `paintbox_hair_studio`, and `mp_cheng` all have
-`has_payroll: true` but no `payroll_key`/`payroll_format` set (fixed for
-`jojo_hair_studio` 2026-07-02; see `ADDING_NEW_CLIENT.md` step 2, added the
-same day). Not a code fix — each needs its correct `payroll_format` verified
-against a real ADP report for that client before setting it (guessing wrong
-would silently misroute the payroll parse). `silicon_valley_west`,
-`needles_studio`, and `estudillo_realty` are fine as-is — `has_payroll: false`.
+### Some payroll clients still missing `payroll_key`/`payroll_format`
+Several clients with `has_payroll: true` have no `payroll_key`/
+`payroll_format` set (fixed for one client 2026-07-02; see
+`ADDING_NEW_CLIENT.md` step 2, added the same day). Not a code fix — each
+needs its correct `payroll_format` verified against a real ADP report for
+that client before setting it (guessing wrong would silently misroute the
+payroll parse).
 
 ---
 
 ## Closed: Fixed
 
 - `mark_clean.py`'s `find_pending()` required an exact match against the full
-  tracker key (e.g. `PAINTBOX_HAIR_STUDIO_LLC`) — fixed 2026-07-02. 5 of 9
-  client keys documented in `Bookkeeping-clients/CLAUDE.md`'s client table
-  (`de_anza`, `estudillo_realty`, `jojo_hair_studio`, `mp_cheng`,
-  `paintbox_hair_studio`) drop the legal suffix the tracker key keeps, so
-  `mark_clean.py` reported "no entry found" while listing the exact matching
-  entry in the same error output. Now accepts the tracker key or an
-  underscore-boundary prefix of it.
+  tracker key (e.g. `ACME_SALON_LLC`) — fixed 2026-07-02. Several client keys
+  documented in `Bookkeeping-clients/CLAUDE.md`'s client table drop the legal
+  suffix the tracker key keeps, so `mark_clean.py` reported "no entry found"
+  while listing the exact matching entry in the same error output. Now
+  accepts the tracker key or an underscore-boundary prefix of it.
 
 - `WellsFargoCheckingParser` and `NorthernTrustCheckingParser` never set
   `closing_date`/`statement_date` — fixed 2026-07-02, same bug/fix pattern as
