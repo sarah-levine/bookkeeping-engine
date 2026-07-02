@@ -5,6 +5,21 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
+### `test_payroll_end_to_end.py` doesn't cover `adp_payroll_departments`/`adp_labor_distribution`
+Real fixtures for both now exist (`fixture_adp_payroll_detail/liability_deanza.pdf`,
+`fixture_adp_labor_distribution_duran.pdf`, added 2026-07-02, both verified
+balanced via `payroll.py` directly) but aren't wired into the test. Unlike
+the other four formats, `run_adp_payroll_departments()` and
+`run_adp_labor_distribution()` build their journal rows inline — there's no
+separate `_build_journal()` to import and call directly the way the test
+does for the other formats.
+
+**Fix:** add a harness that calls the real `run_adp_payroll_departments`/
+`run_adp_labor_distribution` functions with `_qb_confirm` monkeypatched to
+return `True` and `append_payroll_log`/`archive_payroll_pdf` monkeypatched
+to capture args instead of writing/uploading, rather than reimplementing
+their row-building logic in the test.
+
 ### BMO checking/credit card parsers never set `closing_date`/`statement_date`
 `BMOCheckingParser` and `BMOCreditCardParser` never assign `self.closing_date`
 or `self.statement_date` during `parse()`, same failure mode as the BofA/Wells
