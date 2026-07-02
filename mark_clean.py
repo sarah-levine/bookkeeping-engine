@@ -73,7 +73,13 @@ def find_pending(client_key: str, account_type: str, statement_date: str | None)
         if e.get("type") != "recon":
             continue
         ck = _normalize_client_key(e.get("client", ""))
-        if ck.upper() != client_key.upper():
+        ck_upper, key_upper = ck.upper(), client_key.upper()
+        # Accept the full tracker key (exact match) or the shorter
+        # human-friendly key documented in CLAUDE.md's client table, which
+        # drops the legal suffix the tracker key keeps (e.g. "paintbox_hair_studio"
+        # vs. tracker key "PAINTBOX_HAIR_STUDIO_LLC"). Boundary on '_' so a
+        # short key can't accidentally prefix-match an unrelated client.
+        if ck_upper != key_upper and not ck_upper.startswith(key_upper + '_'):
             continue
         if e.get("account_type", "").lower() != account_type.lower():
             continue
