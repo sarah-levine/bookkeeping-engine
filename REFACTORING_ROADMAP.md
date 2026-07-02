@@ -8,6 +8,27 @@ Fix in Claude Code where noted — these require proper branching and testing.
 
 ## Open: Needs Root Cause Fix
 
+### BMO and Northern Trust checking parsers never set `closing_date`/`statement_date`
+`BMOCheckingParser`, `BMOCreditCardParser`, and `NorthernTrustCheckingParser`
+never assign `self.closing_date` or `self.statement_date` during `parse()`,
+unlike every other parser. `reconcile_comprehensive.py` reads that attribute
+via `getattr(parser, 'closing_date', getattr(parser, 'statement_date', ''))`
+to populate `statement_end_date` in `recon_log.json`/`reconciliation_log.csv`
+— so any real reconciliation run through these three parsers silently logs a
+blank statement date, same failure mode as the BofA checking/savings bug
+fixed 2026-07-02 in `parsers/bofa.py`.
+
+Found by inspection while auditing for that fix, not yet fixed here (out of
+scope for that session). `tests/test_parsers.py::check_fixture` now asserts
+`closing_date` or `statement_date` is set, so this will surface as a real
+test failure once Drive fixture credentials are configured and BMO/Northern
+Trust fixtures are in the manifest.
+
+**Root cause fix:** add closing-date extraction to `parse()` in
+`parsers/bmo.py` (`BMOCheckingParser`, `BMOCreditCardParser`) and
+`parsers/northern_trust.py` (`NorthernTrustCheckingParser`), following the
+pattern in `parsers/bofa.py`'s `_extract_closing_date()`.
+
 ### Schema `statement_types` enum drifts from actual parsers
 The `clients/_schema.json` enum for `statement_types` is a manually maintained
 list. Any new parser or cardholder-specific subtype (e.g. `bmo_credit_roger`)

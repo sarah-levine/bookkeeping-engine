@@ -92,6 +92,16 @@ def check_fixture(entry) -> str:
             raise DriveUnavailable(f"{entry['name']}: OCR unavailable (tesseract not installed?)")
         assert False, f"{entry['name']}: parser produced no balances and no line items"
 
+    # Mirror reconcile_comprehensive.py's own date lookup — statement_end_date
+    # in recon_log.json comes from whichever of these two attributes is set.
+    # A parser that leaves both unset silently logs a blank date instead of
+    # failing (this is how the BofA checking/savings bug went unnoticed).
+    stmt_date = getattr(parser, "closing_date", None) or getattr(parser, "statement_date", None)
+    assert stmt_date, (
+        f"{entry['name']}: parser set neither closing_date nor statement_date — "
+        f"reconcile_comprehensive.py would log a blank statement_end_date"
+    )
+
     expect = entry.get("expect_client")
     if expect:
         assert parser.client_name == expect, \
