@@ -99,6 +99,15 @@ only ever showing up as an outbound payment on the checking statement. Per
 CLAUDE.md client-name governance, don't add a new `amex` account type for
 Paintbox without confirming with the user first.
 
+### 3 payroll clients still missing `payroll_key`/`payroll_format`
+`fcba_academy`, `paintbox_hair_studio`, and `mp_cheng` all have
+`has_payroll: true` but no `payroll_key`/`payroll_format` set (fixed for
+`jojo_hair_studio` 2026-07-02; see `ADDING_NEW_CLIENT.md` step 2, added the
+same day). Not a code fix — each needs its correct `payroll_format` verified
+against a real ADP report for that client before setting it (guessing wrong
+would silently misroute the payroll parse). `silicon_valley_west`,
+`needles_studio`, and `estudillo_realty` are fine as-is — `has_payroll: false`.
+
 ---
 
 ## Closed: Fixed

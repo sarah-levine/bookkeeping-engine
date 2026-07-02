@@ -29,7 +29,36 @@ git add your_client.json && git commit -m "Add <client> config" && git push
 
 ---
 
-## 2. Add cell map entries to `sheets_config.json`
+## 2. If the client has payroll, add `payroll_key` + `payroll_format`
+
+`payroll.py <client_key> <pdf> [pdf2]` only works as a shortcut if the client's
+JSON declares **both** fields — `payroll_dispatch()` skips any client missing
+either one, with no warning. Skipping this step doesn't break anything, it
+just means every payroll run for this client requires the verbose generic
+form (`payroll.py <format> <pdf> [pdf2] --config <client.json>`) forever,
+which is easy to forget and easy to get wrong (5 of 9 clients were missing
+this as of 2026-07-02, not because onboarding skipped it deliberately — this
+step simply didn't exist in this checklist until now).
+
+```json
+{
+  "payroll_key": "my_client",
+  "payroll_format": "adp_payroll_details"
+}
+```
+
+`payroll_key` is the short, human-friendly key documented in
+`Bookkeeping-clients/CLAUDE.md`'s client table (same convention as the
+`client_key` used with `mark_clean.py`). `payroll_format` must be one of the
+formats in `payroll.py`'s `FORMATS` dict — match it to the client's actual
+ADP report layout (see the docstring at the top of `payroll.py` for what each
+format covers).
+
+**Verify:** `python3 -c "from parsers.base import _registry; print(_registry.payroll_dispatch().get('my_client'))"` — should print `('adp_payroll_details', 'my_client.json')`, not `None`.
+
+---
+
+## 3. Add cell map entries to `sheets_config.json`
 
 Open `/tmp/Bookkeeping-clients/sheets_config.json`. Add one entry to `cell_map`
 for each account type the client has, plus payroll:
@@ -56,7 +85,7 @@ sync log):
 
 ---
 
-## 3. Add `client_key_map` alias if needed
+## 4. Add `client_key_map` alias if needed
 
 If the client's `canonical_name` differs from what the reconciliation log
 writes (e.g. the parser detects `"DELTA DENTAL INC"` but the tracker key is
@@ -73,7 +102,7 @@ Include both the raw and normalized forms to be safe.
 
 ---
 
-## 4. Add `acct_type_map` entries for non-standard account types
+## 5. Add `acct_type_map` entries for non-standard account types
 
 If any account type key from the reconciliation doesn't match the `cell_map`
 key exactly (e.g. `chase_sapphire_preferred` vs `chase_sapphire`), add a
@@ -88,7 +117,7 @@ normalization in `sheets_config.json`:
 
 ---
 
-## 5. Add the client to `digest_config.json`
+## 6. Add the client to `digest_config.json`
 
 Open `/tmp/Bookkeeping-clients/digest_config.json`.
 
@@ -138,7 +167,7 @@ Commit and push `sheets_config.json` and `digest_config.json` to
 
 ---
 
-## 6. Run a test reconciliation with `--no-prompt`
+## 7. Run a test reconciliation with `--no-prompt`
 
 ```bash
 python /tmp/engine/reconcile_comprehensive.py <statement.pdf>
@@ -152,7 +181,7 @@ Check that:
 
 ---
 
-## 7. Verify the tracker sheet updates
+## 8. Verify the tracker sheet updates
 
 ```bash
 python3 -c "
@@ -162,11 +191,11 @@ update_sheet('MY_CLIENT_LLC', 'bofa_checking', 'MM/DD/YY')
 ```
 
 Open the spreadsheet and confirm the cell updated. If it says "No sheet cell
-mapped", recheck step 2 — the `cell_map` key format or the cell reference.
+mapped", recheck step 3 — the `cell_map` key format or the cell reference.
 
 ---
 
-## 8. Verify the morning digest
+## 9. Verify the morning digest
 
 ```bash
 python3 send_morning_digest.py --date YYYY-MM-DD
@@ -176,11 +205,11 @@ Check that the client appears in the tracker grid with the correct dates and
 that recon run cards display the friendly name (not the raw canonical key).
 
 If the name shows as the raw key, add the lowercase variant to
-`client_display_names` in `digest_config.json` (step 5a).
+`client_display_names` in `digest_config.json` (step 6a).
 
 ---
 
-## 9. Run `repair_logs.py`
+## 10. Run `repair_logs.py`
 
 ```bash
 python3 repair_logs.py
@@ -221,6 +250,8 @@ and mirrors missing payroll entries. Safe to run any time — it's idempotent.
 | `statement_types` | | Which parsers apply (see list below) |
 | `cardholders` | | For multi-cardholder AmEx — list of cardholder names |
 | `payroll_vendors` | | Keywords that route transactions to the Payroll section |
+| `payroll_key` | if payroll | Short key for `payroll.py <key> <pdf>` (needs `payroll_format` too — step 2) |
+| `payroll_format` | if payroll | One of `payroll.py`'s `FORMATS` — needs `payroll_key` too (step 2) |
 | `cc_keywords` | | Keywords that identify credit card payment transactions |
 | `vendor_rules` | | List of normalization rules (see below) |
 
