@@ -22,6 +22,26 @@ Always maintain exactly one active feature branch alongside `main`. Rules:
 3. Never let two feature branches exist simultaneously
 4. Keep the working branch rebased on `main`; resolve conflicts before they accumulate
 
+## Always paste the raw report/journal output — never paraphrase it
+This has been forgotten repeatedly (recurring user complaint, not a one-off):
+after running `reconcile_comprehensive.py` or `payroll.py`, the reply to the
+user replaced the tool's own printed report with a hand-written bullet-point
+summary instead.
+
+The rule: whenever `reconcile_comprehensive.py` or `payroll.py` produces a
+report/journal-entry table relevant to what the user asked for, that exact
+text — the `====`-delimited STATEMENT SUMMARY / CREDITS / WITHDRAWALS /
+CHECKS / PAYROLL / CREDIT CARD PAYMENTS sections, or the full payroll journal
+entry table — goes into the reply **verbatim**, in a code block, not
+re-derived into prose or a hand-built table. A short summary sentence may
+accompany it, but must never *replace* it. If a run happened and its output
+isn't in the reply, that's the bug this rule exists to catch — go back and
+paste it before sending the reply.
+
+This is not "when the user asks to see it" — it's the default for every run
+whose result the user needs to review or act on (i.e. essentially every
+reconcile/payroll run in this workflow).
+
 ## Public-repo hygiene (no real client data in code)
 This repo is published (or will be); real client data lives only in the private
 `Bookkeeping-clients` repo. Code, comments, docstrings, and example/JSON files
