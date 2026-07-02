@@ -68,6 +68,22 @@ NETWORK> ... Bill Payment` / `... Credit Card ... Payment`) as a fallback
 when no client-specific `cc_keywords` match, instead of relying entirely on
 each client's list staying complete.
 
+### `adp_payroll_details.py`'s earnings-category list is a hardcoded allowlist with no fallback
+Fixed the specific instance ("Sick" silently dropped from Associates gross
+wages, 2026-07-02), but the pattern itself is unchanged: `parse_payroll_details()`
+only sums earnings labels it explicitly regex-matches (`Regular`, `Overtime`,
+`RestTime`, `Commission`, now `Sick`). Any future ADP earnings category
+(`Holiday`, `Bonus`, `Vacation`, etc.) will silently vanish from `assoc_gross`
+the same way, throwing the journal entry out of balance with no indication of
+why. The balance check catches it (as it did here), but only after a human
+has to re-derive the cause by hand.
+
+**Root cause fix:** sum every line in the Department Totals block
+generically (parse label + amount pairs, exclude only known non-wage rows
+like tax/deduction columns) instead of matching an explicit allowlist of
+earning-type labels, so a new ADP category degrades to "included but
+unlabeled" rather than "silently missing."
+
 ### Schema `statement_types` enum drifts from actual parsers
 The `clients/_schema.json` enum for `statement_types` is a manually maintained
 list. Any new parser or cardholder-specific subtype (e.g. `bmo_credit_roger`)
