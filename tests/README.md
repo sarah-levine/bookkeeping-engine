@@ -5,10 +5,11 @@
 | `test_log_pipeline.py`     | no  | `payroll_log → reconciliation_log → tracker` write/read/render (synthetic) |
 | `test_config_and_logs.py`  | no  | `get_logs_dir()` resolution, schema validation, registry skips non-dict JSON, payroll dispatch |
 | `test_parsers.py`          | yes | each bank parser extracts balances/line items from a real statement |
-| `test_payroll.py`          | yes | each ADP payroll format parses with a balance tie-out |
-| `test_end_to_end.py`       | yes | full pipeline: PDF → `detect_statement_type` → parser → report → `write_both_logs` → digest read |
+| `test_payroll.py`          | yes | each ADP payroll format parses with a balance tie-out (parse only — no `_build_journal`, no log writes) |
+| `test_end_to_end.py`       | yes | bank pipeline: PDF → `detect_statement_type` → parser → report → `write_both_logs` → digest read |
+| `test_payroll_end_to_end.py` | yes | payroll pipeline: PDF → real parse chain → real `_build_journal()` → balance check → `append_payroll_log()` → read back, plus a check that `update_sheet()` is actually called |
 
-The first two run anywhere (including CI). The fixture-backed three **skip**
+The first two run anywhere (including CI). The fixture-backed ones **skip**
 when fixtures/credentials are absent, so a fresh public checkout stays green.
 
 Run everything:
