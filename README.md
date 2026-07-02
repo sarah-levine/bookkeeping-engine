@@ -95,18 +95,24 @@ Every run passes through the same gate — how it responds to that gate depends 
 ```
 Statement PDF ──Parse + Verify──▶ Reconciliation Engine ──Mode──▶ Outcome
 
-                                    │
-            ┌───────────────────────┼───────────────────────┐
-            ▼                       ▼                       ▼
-        ADVISORY                BLOCKING               ESCALATING
-      (--dry-run)            (interactive)          (balance FAILED)
-            │                       │                       │
-            ▼                       ▼                       ▼
-      Print Report            Queue for QB           Re-extract via
-                                Confirm              Claude Vision
-                                    │
-                                    ▼
-                              Done / Later
+                                       │
+             ┌─────────────────────────┼─────────────────────────┐
+             ▼                         ▼                         ▼
+         ADVISORY                  BLOCKING                 ESCALATING
+       (--dry-run)              (interactive)            (balance FAILED)
+             │                         │                         │
+             ▼                         ▼                         ▼
+       Print Report            "done" / "later"           Re-extract via
+                                    prompt                Claude Vision
+
+     (balances shown,         done ──▶ Log DONE         Balance re-checked
+     nothing written,      later ─▶ Log IN_PROGRESS
+       no Drive, no                                        ties now ──▶
+       sheet update)                                    continue pipeline
+                              (only if "done":)
+                               Archive to Drive          still fails ──▶
+                                 Update Sheet            halt, don't log
+                                 Trigger Sync                bad data
 ```
 
 `--no-prompt` auto-answers `later` at the BLOCKING gate — for unattended/scripted runs. An unrecognized client or account type is its own hard stop (see `_assert_known_client` / `_assert_known_account_type`): it refuses to write in `--no-prompt` mode and asks for explicit confirmation interactively, rather than falling through any of the three gates above.
