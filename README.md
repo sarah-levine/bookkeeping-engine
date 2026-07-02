@@ -93,28 +93,20 @@ Exposes tools to Claude chat via the Model Context Protocol: `reconcile`, `recon
 Every run passes through the same gate — how it responds to that gate depends on the mode you invoke it in:
 
 ```
-Statement PDF ──Parse + Verify──▶ Gate ──Mode──▶ Outcome
+Statement PDF ──Parse + Verify──▶ Reconciliation Engine ──Mode──▶ Outcome
 
                                     │
-                ┌───────────────────┼───────────────────┐
-                ▼                   ▼                   ▼
-            ADVISORY            BLOCKING            ESCALATING
-           (--dry-run)         (interactive)      (balance FAILED)
-                │                   │                   │
-                ▼                   ▼                   ▼
-          Print report      "done / later"       Re-extract via
-          only — no log,    prompt — waits        Claude Vision
-          no Drive, no       for a human                │
-          sheet update             │                    ▼
-                                    ▼             Balance re-checked
-                             ┌──────┴──────┐             │
-                             ▼             ▼        still fails
-                         done          later              │
-                             │             │              ▼
-                             ▼             ▼          Halt — do
-                      Log DONE +    Log IN_PROGRESS   not log
-                      archive to    skip sheet         bad data
-                      Drive + sheet  for now
+            ┌───────────────────────┼───────────────────────┐
+            ▼                       ▼                       ▼
+        ADVISORY                BLOCKING               ESCALATING
+      (--dry-run)            (interactive)          (balance FAILED)
+            │                       │                       │
+            ▼                       ▼                       ▼
+      Print Report            Queue for QB           Re-extract via
+                                Confirm              Claude Vision
+                                    │
+                                    ▼
+                              Done / Later
 ```
 
 `--no-prompt` auto-answers `later` at the BLOCKING gate — for unattended/scripted runs. An unrecognized client or account type is its own hard stop (see `_assert_known_client` / `_assert_known_account_type`): it refuses to write in `--no-prompt` mode and asks for explicit confirmation interactively, rather than falling through any of the three gates above.
