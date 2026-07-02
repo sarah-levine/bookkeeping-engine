@@ -8,6 +8,22 @@ Fix in Claude Code where noted — these require proper branching and testing.
 
 ## Open: Needs Root Cause Fix
 
+### Payroll runs entered in QuickBooks outside a session get re-derived next time
+`recon_log.json`/`payroll_log.csv` only get a payroll entry when a session
+both parses the ADP PDFs *and* the user confirms "done" in the same run
+(`_qb_confirm` → `append_payroll_log`). If a client's payroll was entered
+into QuickBooks between sessions (or the log write was skipped/missed), there's
+no record signaling "already done" — the next session recomputes the full
+journal entry from the PDFs before finding out it was unnecessary (e.g. MP
+Cheng DDS Inc 6/5/2026, entered previously but never logged).
+
+**Root cause to investigate:** there's no lightweight way to mark a payroll
+run as done retroactively without regenerating its journal entry first —
+unlike reconciliation, which has `mark_clean.py` for exactly this. Consider
+a parallel `mark_payroll_done.py <client_key> <check_date> <bank_credit>`
+(or extending `mark_clean.py`) so an already-entered payroll run can be
+logged in one step.
+
 ### Schema `statement_types` enum drifts from actual parsers
 The `clients/_schema.json` enum for `statement_types` is a manually maintained
 list. Any new parser or cardholder-specific subtype (e.g. `bmo_credit_roger`)
