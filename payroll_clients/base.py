@@ -245,7 +245,6 @@ def append_payroll_log(client: str, client_name: str, check_date: str, rows: lis
     print(f"  📋 {verb} → payroll_log.csv  ({check_date}  ${float(entry['bank_credit']):,.2f})")
 
     # Always write to reconciliation_log.csv — regardless of QB confirmation status.
-    # The tracker reads from reconciliation_log only, so payroll dates must always land here.
     # Use _normalize_client_key so the key matches the cell_map regardless of config naming.
     from log_utils import _normalize_client_key
     normalized_key = _normalize_client_key(recon_client if recon_client else client)
@@ -264,6 +263,21 @@ def append_payroll_log(client: str, client_name: str, check_date: str, rows: lis
     _upsert_csv(RECON_LOG_PATH, RECON_LOG_FIELDS,
                 ["client", "account_type"], recon_entry)
     print(f"  📋 {verb} → reconciliation_log.csv  (payroll  {check_date})")
+
+    # The Google Sheet tracker is a separate destination from
+    # reconciliation_log.csv — writing the CSV row above does not, by
+    # itself, update the sheet cell. mark_clean.py and reconcile_comprehensive.py
+    # both call update_sheet() explicitly; this path never did, so the
+    # tracker's Payroll column silently went stale on every payroll run.
+    try:
+        from sheets_updater import update_sheet
+        ok = update_sheet(normalized_key, "payroll", check_date)
+        if ok:
+            print(f"  📊 Google Sheet updated  ({normalized_key} | payroll | {check_date})")
+        else:
+            print(f"  ⚠️  Sheet update failed or cell not mapped for {normalized_key} / payroll")
+    except Exception as _e:
+        print(f"  ⚠️  sheets_updater not available: {_e} — skipping sheet update")
 
 
 def _git_push_logs(label: str):
