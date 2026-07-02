@@ -117,17 +117,22 @@ should be reconciled on its own rather than only ever showing up as an
 outbound payment elsewhere. Per CLAUDE.md client-name governance, never add
 a new account type for a client without confirming with the user first.
 
-### Some payroll clients still missing `payroll_key`/`payroll_format`
-Several clients with `has_payroll: true` have no `payroll_key`/
-`payroll_format` set (fixed for one client 2026-07-02; see
-`ADDING_NEW_CLIENT.md` step 2, added the same day). Not a code fix — each
-needs its correct `payroll_format` verified against a real ADP report for
-that client before setting it (guessing wrong would silently misroute the
-payroll parse).
-
 ---
 
 ## Closed: Fixed
+
+- Every payroll client now has `payroll_key`/`payroll_format` set — fixed
+  2026-07-02. `fcba_academy` → `adp_payroll_1099` and `mp_cheng` →
+  `adp_payroll_professional` verified by running the real fixtures
+  (`fixture_adp_payroll_detail_fcba.pdf`, `fixture_adp_payroll_detail.pdf`)
+  through the parser and confirming a balanced journal entry.
+  `paintbox_hair_studio` → `adp_payroll_tipped` verified by confirming every
+  config field `adp_payroll_tipped.py` reads (`workers_comp_credit`,
+  `contractor_display_name`, `departments`, etc.) was already present in
+  `paintbox_hair_studio.json` — clearly written for that runner, no fixture
+  needed. All three also match the legacy format-name-as-client-key mapping
+  in `Bookkeeping-clients/repair_logs.py`'s `CLIENT_KEY_MAP`, an independent
+  corroborating signal.
 
 - `mark_clean.py`'s `find_pending()` required an exact match against the full
   tracker key (e.g. `ACME_SALON_LLC`) — fixed 2026-07-02. Several client keys
