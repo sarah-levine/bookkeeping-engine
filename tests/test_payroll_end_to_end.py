@@ -88,10 +88,29 @@ def _run_adp_payroll_details(pdf_path, cfg, liability_path=None):
     return rows, data["check_date"]
 
 
+def _run_adp_payroll_tipped(pdf_path, cfg, liability_path=None):
+    from payroll_clients.adp_payroll_tipped import (
+        parse_header, parse_officers, parse_support, parse_company_totals,
+        parse_1099, _build_journal,
+    )
+    from payroll_clients.base import extract_text
+
+    text = extract_text(pdf_path)
+    lines = text.split("\n")
+    check_date = parse_header(text).get("check_date", "")
+    officers = parse_officers(lines)
+    support = parse_support(lines)
+    company = parse_company_totals(text)
+    total_1099 = parse_1099(lines)
+    rows = _build_journal(cfg, officers, support, company, total_1099, check_date)
+    return rows, check_date
+
+
 # format -> (pdf fixture filename, client config filename, runner)
 # Add an entry here whenever a new format gets a real local fixture.
 # "liability" is optional — only adp_payroll_details reads a separate
-# Liability PDF (for workers comp).
+# Liability PDF (for workers comp); adp_payroll_tipped's WC figures come
+# from fixed config values instead (workers_comp_credit/_refund).
 PAYROLL_FIXTURES = [
     {
         "name":    "adp_payroll_1099_fcba",
@@ -114,6 +133,13 @@ PAYROLL_FIXTURES = [
         "config":     "jojo_hair_studio.json",
         "format":     "adp_payroll_details",
         "runner":     _run_adp_payroll_details,
+    },
+    {
+        "name":    "adp_payroll_tipped_paintbox",
+        "pdf":     "fixture_adp_payroll_detail_paintbox.pdf",
+        "config":  "paintbox_hair_studio.json",
+        "format":  "adp_payroll_tipped",
+        "runner":  _run_adp_payroll_tipped,
     },
 ]
 
