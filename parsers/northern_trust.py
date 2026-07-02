@@ -40,6 +40,7 @@ class NorthernTrustCheckingParser(StatementParser):
         self.debits = []
         self.checks = []
         self.service_fees = Decimal('0')
+        self.closing_date = None
         self._ocr_text = None
         self.text = self._extract_text()
         if not self.client_name:
@@ -88,6 +89,14 @@ class NorthernTrustCheckingParser(StatementParser):
 
     def parse(self):
         lines = self.text.split('\n')
+
+        # reconcile_comprehensive.py reads self.closing_date (MM/DD/YY) to
+        # populate statement_end_date in recon_log.json — without this every
+        # run would log a blank date (same bug fixed in parsers/bofa.py,
+        # 2026-07-02). "Statement Period\n12/01/25 through 12/31/25".
+        m = re.search(r'Statement Period\s*\n?\s*\d{2}/\d{2}/\d{2}\s+through\s+(\d{2}/\d{2}/\d{2})', self.text)
+        if m:
+            self.closing_date = m.group(1)
 
         for line in lines:
             if 'Beginning Balance on' in line and self.beginning_balance is None:
