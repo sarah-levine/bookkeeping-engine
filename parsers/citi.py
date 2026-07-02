@@ -94,18 +94,20 @@ class CitiCheckingParser(StatementParser):
                 m = re.search(r'(\w+ \d+ - \w+ \d+, \d{4})', line)
                 if m:
                     self.statement_date = m.group(1)
-                    # Extract closing year and month from "January 1 - January 31, 2026"
-                    ym = re.search(r'(\w+)\s+\d+,\s+(\d{4})$', m.group(1))
-                    if ym:
+                    # Extract closing month/day/year from the closing half, e.g.
+                    # "January 1 - January 31, 2026" -> month=January, day=31, year=2026.
+                    ymd = re.search(r'(\w+)\s+(\d+),\s+(\d{4})$', m.group(1))
+                    if ymd:
                         month_names = {'january':1,'february':2,'march':3,'april':4,
                                        'may':5,'june':6,'july':7,'august':8,
                                        'september':9,'october':10,'november':11,'december':12,
                                        'jan':1,'feb':2,'mar':3,'apr':4,
                                        'jun':6,'jul':7,'aug':8,
                                        'sep':9,'oct':10,'nov':11,'dec':12}
-                        close_mm = month_names.get(ym.group(1).lower(), 1)
-                        close_yy = str(int(ym.group(2)) % 100).zfill(2)
-                        self.closing_date = f"{close_mm:02d}/28/{close_yy}"
+                        close_mm = month_names.get(ymd.group(1).lower(), 1)
+                        close_dd = int(ymd.group(2))
+                        close_yy = str(int(ymd.group(3)) % 100).zfill(2)
+                        self.closing_date = f"{close_mm:02d}/{close_dd:02d}/{close_yy}"
 
         i = 0
         while i < len(lines):
@@ -643,16 +645,22 @@ class CitiSavingsParser(StatementParser):
                 m = re.search(r'(\w+ \d+ - \w+ \d+, \d{4})', line)
                 if m:
                     self.statement_date = m.group(1)
-                    ym = re.search(r'(\w+)\s+\d+,\s+(\d{4})$', m.group(1))
-                    if ym:
+                    # Extract month/day/year from the closing half, e.g.
+                    # "Jun 1 - Jun 30, 2026" -> month=Jun, day=30, year=2026.
+                    ymd = re.search(r'(\w+)\s+(\d+),\s+(\d{4})$', m.group(1))
+                    if ymd:
                         month_names = {
                             'january':1,'february':2,'march':3,'april':4,
                             'may':5,'june':6,'july':7,'august':8,
                             'september':9,'october':10,'november':11,'december':12,
+                            'jan':1,'feb':2,'mar':3,'apr':4,
+                            'jun':6,'jul':7,'aug':8,
+                            'sep':9,'oct':10,'nov':11,'dec':12,
                         }
-                        close_mm = month_names.get(ym.group(1).lower(), 1)
-                        close_yy = str(int(ym.group(2)) % 100).zfill(2)
-                        self.closing_date = f"{close_mm:02d}/28/{close_yy}"
+                        close_mm = month_names.get(ymd.group(1).lower(), 1)
+                        close_dd = int(ymd.group(2))
+                        close_yy = str(int(ymd.group(3)) % 100).zfill(2)
+                        self.closing_date = f"{close_mm:02d}/{close_dd:02d}/{close_yy}"
 
         found_beginning = False
         found_ending = False
