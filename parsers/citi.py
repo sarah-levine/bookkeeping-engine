@@ -617,21 +617,28 @@ class CitiSavingsParser(StatementParser):
         return super()._detect_client()
 
     def parse(self):
-        lines = self.text.split('\n')
+        all_lines = self.text.split('\n')
 
-        found_beginning = False
-        found_ending = False
-        for line in lines:
-            if 'Beginning Balance:' in line and not found_beginning:
-                bm = re.search(r'\$([\d,]+\.\d{2})', line)
-                if bm:
-                    self.beginning_balance = Decimal(bm.group(1).replace(',', ''))
-                    found_beginning = True
-            if 'Ending Balance:' in line and not found_ending:
-                bm = re.search(r'\$([\d,]+\.\d{2})', line)
-                if bm:
-                    self.ending_balance = Decimal(bm.group(1).replace(',', ''))
-                    found_ending = True
+        # A savings statement can arrive bundled inside a combined
+        # checking+savings PDF (same account, one file). The checking
+        # section's own "Beginning Balance:"/"Ending Balance:" and
+        # transaction lines appear BEFORE the "SAVINGS ACTIVITY" section
+        # header in that case — scope everything below to start there so
+        # this parser never picks up the checking account's numbers as its
+        # own. Falls back to the full text (savings_start=0) for a
+        # standalone savings-only statement with no such header.
+        savings_start = 0
+        for idx, line in enumerate(all_lines):
+            if re.match(r'\s*SAVINGS ACTIVITY\s*$', line):
+                savings_start = idx
+                break
+        lines = all_lines[savings_start:]
+
+        # Statement Period is a document-level property (same value on every
+        # page, including pages before SAVINGS ACTIVITY) — search the full,
+        # unscoped text for it. Some statements only print it on earlier
+        # pages and don't repeat it after the savings section.
+        for line in all_lines:
             if 'Statement Period' in line and not self.statement_date:
                 m = re.search(r'(\w+ \d+ - \w+ \d+, \d{4})', line)
                 if m:
@@ -647,6 +654,20 @@ class CitiSavingsParser(StatementParser):
                         close_yy = str(int(ym.group(2)) % 100).zfill(2)
                         self.closing_date = f"{close_mm:02d}/28/{close_yy}"
 
+        found_beginning = False
+        found_ending = False
+        for line in lines:
+            if 'Beginning Balance:' in line and not found_beginning:
+                bm = re.search(r'\$([\d,]+\.\d{2})', line)
+                if bm:
+                    self.beginning_balance = Decimal(bm.group(1).replace(',', ''))
+                    found_beginning = True
+            if 'Ending Balance:' in line and not found_ending:
+                bm = re.search(r'\$([\d,]+\.\d{2})', line)
+                if bm:
+                    self.ending_balance = Decimal(bm.group(1).replace(',', ''))
+                    found_ending = True
+
         _CREDIT_TYPES = {'ACH CREDIT', 'ELECTRONIC CREDIT', 'INSTANT PAYMENT CREDIT',
                          'DEPOSIT', 'INTEREST'}
         _DEBIT_TYPES  = {'ACH DEBIT', 'WITHDRAWAL', 'TRANSFER OUT'}
@@ -654,10 +675,6 @@ class CitiSavingsParser(StatementParser):
         i = 0
         while i < len(lines):
             line = lines[i]
-            # Stop at SAVINGS ACTIVITY boundary — savings interest belongs to a
-            # different account and must not mix into the checking reconciliation.
-            if re.match(r'\s*SAVINGS ACTIVITY\s*$', line):
-                break
             # Skip summary/total lines that aren't real transactions
             if re.search(r'Total Debits/Credits', line, re.IGNORECASE):
                 i += 1
