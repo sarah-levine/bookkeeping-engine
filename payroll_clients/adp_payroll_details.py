@@ -89,7 +89,13 @@ def parse_payroll_details(pdf_path: str, contractors_1099=None) -> dict:
         totals["net_pay"] = round(sum(amt(x) for x in net_pays), 2)
 
     # ── Associates dept 002 ──
-    assoc = {"regular": 0, "overtime": 0, "tips": 0, "rest": 0, "commission": 0}
+    # Earnings categories recognized here must stay in sync with whatever
+    # ADP labels appear in the "Department Totals: 002 - Associates" block —
+    # any category not listed silently drops out of assoc_gross with no
+    # warning, throwing the journal entry out of balance by exactly that
+    # amount (the "Sick" category was missing this way until 2026-07-02;
+    # found because a JoJo run came up $143.60 out of balance).
+    assoc = {"regular": 0, "overtime": 0, "tips": 0, "rest": 0, "commission": 0, "sick": 0}
     in_assoc = False
     for line in lines:
         if "DepartmentTotals:002-Associates" in line.replace(" ", ""):
@@ -106,8 +112,10 @@ def parse_payroll_details(pdf_path: str, contractors_1099=None) -> dict:
         if m: assoc["rest"] = amt(m.group(1)); continue
         m = re.match(r'Commission\s+[\d.]+\s+\$([\d,]+\.\d+)', line)
         if m: assoc["commission"] = amt(m.group(1)); continue
+        m = re.match(r'Sick\s+[\d.]+\s+\$([\d,]+\.\d+)', line)
+        if m: assoc["sick"] = amt(m.group(1)); continue
 
-    assoc_gross = round(assoc["regular"] + assoc["overtime"] + assoc["rest"] + assoc["commission"], 2)
+    assoc_gross = round(assoc["regular"] + assoc["overtime"] + assoc["rest"] + assoc["commission"] + assoc["sick"], 2)
 
     # ── Officers dept 010 ──
     officers = []
