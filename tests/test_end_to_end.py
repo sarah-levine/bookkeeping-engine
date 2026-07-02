@@ -137,7 +137,11 @@ def test_pdf_to_digest_flow():
 
         client      = parser.client_name or "Example Client Inc"
         bal         = _balance_of(parser)
-        stmt_date   = getattr(parser, "closing_date", None) or "05/31/26"
+        stmt_date   = getattr(parser, "closing_date", None) or getattr(parser, "statement_date", None)
+        assert stmt_date, (
+            f"{stmt_type} parser set neither closing_date nor statement_date — "
+            f"the real pipeline would log a blank statement_end_date for this format"
+        )
 
         # Write through the real reconciliation log writer.
         write_both_logs(

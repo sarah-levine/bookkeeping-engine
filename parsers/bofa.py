@@ -241,6 +241,7 @@ class BankOfAmericaCheckingParser(StatementParser):
         self.debits = []
         self.checks = []
         self.service_fees = Decimal('0')
+        self.closing_date = None
 
     def _detect_client(self):
         lines = self.text.split('\n')
@@ -254,6 +255,8 @@ class BankOfAmericaCheckingParser(StatementParser):
 
     def parse(self):
         lines = self.text.split('\n')
+
+        self.closing_date = self._extract_closing_date()
 
         for line in lines:
             if 'Beginning balance on' in line and self.beginning_balance is None:
@@ -688,6 +691,17 @@ class BankOfAmericaCheckingParser(StatementParser):
         if m:
             return f"{m.group(1)} - {m.group(2)}"
         return 'Unknown Period'
+
+    def _extract_closing_date(self):
+        """Statement period end date as MM/DD/YY, matching other parsers'
+        self.closing_date convention (used to key recon_log.json entries)."""
+        m = re.search(r'for\s+\w+ \d+, \d{4}\s+to\s+(\w+ \d+, \d{4})', self.text)
+        if not m:
+            return None
+        try:
+            return datetime.strptime(m.group(1), '%B %d, %Y').strftime('%m/%d/%y')
+        except ValueError:
+            return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

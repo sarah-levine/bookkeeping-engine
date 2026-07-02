@@ -224,6 +224,7 @@ class WellsFargoCheckingParser(StatementParser):
         self.beginning_balance = None
         self.ending_balance    = None
         self.statement_period  = None
+        self.closing_date      = None
         self.credits    = []
         self.debits     = []
         self.checks     = []
@@ -294,6 +295,17 @@ class WellsFargoCheckingParser(StatementParser):
             m = re.search(r'(\w+ \d+, \d{4})\s+Page', line)
             if m and not self.statement_period:
                 self.statement_period = m.group(1)
+
+        # reconcile_comprehensive.py reads self.closing_date (MM/DD/YY) to
+        # populate statement_end_date in recon_log.json — statement_period
+        # alone isn't checked there, so without this every run would log a
+        # blank date (same bug fixed in parsers/bofa.py, 2026-07-02).
+        if self.statement_period:
+            try:
+                self.closing_date = datetime.strptime(
+                    self.statement_period, '%B %d, %Y').strftime('%m/%d/%y')
+            except ValueError:
+                pass
 
         # Column positions are detected dynamically per-section header, since
         # Wells Fargo uses different column widths on different pages of the same statement.

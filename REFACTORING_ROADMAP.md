@@ -4,25 +4,6 @@ Items here are known issues with root causes identified but not yet fixed.
 Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
----
-
-## Open: Needs Root Cause Fix
-
-### Payroll runs entered in QuickBooks outside a session get re-derived next time
-`recon_log.json`/`payroll_log.csv` only get a payroll entry when a session
-both parses the ADP PDFs *and* the user confirms "done" in the same run
-(`_qb_confirm` → `append_payroll_log`). If a client's payroll was entered
-into QuickBooks between sessions (or the log write was skipped/missed), there's
-no record signaling "already done" — the next session recomputes the full
-journal entry from the PDFs before finding out it was unnecessary (e.g. MP
-Cheng DDS Inc 6/5/2026, entered previously but never logged).
-
-**Root cause to investigate:** there's no lightweight way to mark a payroll
-run as done retroactively without regenerating its journal entry first —
-unlike reconciliation, which has `mark_clean.py` for exactly this. Consider
-a parallel `mark_payroll_done.py <client_key> <check_date> <bank_credit>`
-(or extending `mark_clean.py`) so an already-entered payroll run can be
-logged in one step.
 
 ### Schema `statement_types` enum drifts from actual parsers
 The `clients/_schema.json` enum for `statement_types` is a manually maintained
@@ -43,6 +24,14 @@ validate. Alternatively, auto-derive the enum from registered parser
 
 ## Closed: Fixed
 
+- `WellsFargoCheckingParser` and `NorthernTrustCheckingParser` never set
+  `closing_date`/`statement_date` — fixed 2026-07-02, same bug/fix pattern as
+  `parsers/bofa.py`. Found (along with the still-open BMO and Citi Costco
+  issues above) by wiring `tests/fixtures_manifest.json` to `source: "repo"`
+  entries pointing at real fixtures already in `Bookkeeping-clients/fixtures/`
+  so `test_parsers.py` could actually run instead of skipping for lack of
+  Drive credentials. Verified via `pytest tests/test_parsers.py` against real
+  fixtures, not just direct parser calls.
 - Pay-by-Pay (workers comp) silently dropped from payroll JE — fixed 2026-06-24:
   `adp_payroll_departments` now extracts `DebitforPay-by-Pay` from Liability PDF in
   `parse_cash_splits()`; all three formats (`departments`, `professional`, `1099`) emit
