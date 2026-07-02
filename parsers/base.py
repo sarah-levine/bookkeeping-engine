@@ -96,6 +96,14 @@ class ClientRegistry:
             # Register aliases
             for alias in cfg.get('aliases', []):
                 self._alias_map[alias.upper()] = canonical
+            # Register payroll_key — payroll.py's runners pass this (or
+            # "<payroll_key>_agency"/"_admin") to append_payroll_log() as the
+            # client identifier, and _assert_known_client() resolves through
+            # this same alias map. Without this, every payroll confirmation
+            # trips an "unrecognized client" prompt even for an already
+            # explicitly-configured client — not a new/unknown one.
+            if cfg.get('payroll_key'):
+                self._alias_map[cfg['payroll_key'].upper()] = canonical
 
         if validation_errors:
             raise ValueError(
