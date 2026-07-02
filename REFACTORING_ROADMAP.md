@@ -5,6 +5,69 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
+### BMO checking/credit card parsers never set `closing_date`/`statement_date`
+`BMOCheckingParser` and `BMOCreditCardParser` never assign `self.closing_date`
+or `self.statement_date` during `parse()`, same failure mode as the BofA/Wells
+Fargo/Northern Trust bug fixed 2026-07-02. Any real reconciliation run through
+these two parsers silently logs a blank statement date. Not fixed here — no
+BMO fixture was available locally to verify a fix against. `tests/test_parsers.py`
+now asserts `closing_date`/`statement_date` is set, so this will surface as a
+real failure once BMO fixtures are wired into the manifest.
+
+**Root cause fix:** add closing-date extraction to `parse()` in `parsers/bmo.py`,
+following the pattern in `parsers/bofa.py`'s `_extract_closing_date()`.
+
+### `CitiVisaCostcoParser` closing-date regex isn't OCR-noise-tolerant
+Its closing-date extraction assumes clean text; OCR'd/scanned Costco Visa
+statements can inject stray characters that break the regex, silently
+leaving `closing_date` unset the same way the BofA bug did. Lower priority
+than the BMO item — real production entries logged so far all have valid
+dates, so this hasn't caused visible damage yet, just a latent risk.
+
+**Root cause fix:** loosen the regex or fall back to a secondary date pattern
+when the primary one doesn't match, rather than leaving `closing_date` as `None`.
+
+### Vendor-normalization tests share a process-wide `ClientRegistry` singleton
+`tests/test_aggregations.py` and `tests/test_vendor_normalize.py` pass in
+isolation but can fail when run as part of the full `tests/` suite, depending
+on run order — some other test module mutates process-global registry/config
+state (tied to `BOOKKEEPING_CLIENTS_DIR`) that these tests implicitly depend
+on. Made `pytest tests/` look flaky while verifying the BofA/Wells
+Fargo/Northern Trust fix, though it's unrelated to that fix.
+
+**Root cause fix:** give `ClientRegistry` proper test isolation (fixture-scoped
+instance instead of a module-level singleton) rather than relying on tests
+loading in a particular order.
+
+### Check-image payee extraction is entirely manual
+Nothing in the pipeline automatically reads payee names off scanned check
+images (the "Check images" pages BofA and others append to checking
+statements). `--check-payee`/`--check-date` exist as manual overrides, but a
+human has to notice the check-images section exists, render it, and
+transcribe every payee by hand — easy to miss entirely (happened
+2026-07-02: check payees were reported as unavailable on a statement that
+had a full check-images page later in the same PDF).
+
+**Root cause fix:** extend the existing Vision-fallback pattern (used today
+for balance tie-out recovery) to check images — detect a check-images page,
+crop each check, run OCR or Claude Vision, and pre-fill `check_payee_map`
+instead of requiring a human to trigger it.
+
+### `cc_keywords` is a manually-maintained per-client list with no validation
+Each client config's `cc_keywords` list is hand-maintained ad hoc; any credit
+card vendor not explicitly listed silently lands in generic "Withdrawals and
+Debits" instead of "Credit Card Payments" — no warning, no failure, just a
+mis-bucketed report. Hit 2026-07-02: Paintbox pays a recurring ~$3,900/mo
+American Express bill from checking, but `cc_keywords` only listed
+`"BANK OF AMERICA CREDIT CARD"`; fixed for Paintbox by adding `"AMERICAN
+EXPRESS"`, but the same gap exists for every other client's untracked card
+vendors and will recur the next time any client starts paying a new card.
+
+**Root cause fix:** classify by a shared, global pattern (e.g. `<KNOWN CARD
+NETWORK> ... Bill Payment` / `... Credit Card ... Payment`) as a fallback
+when no client-specific `cc_keywords` match, instead of relying entirely on
+each client's list staying complete.
+
 ### Schema `statement_types` enum drifts from actual parsers
 The `clients/_schema.json` enum for `statement_types` is a manually maintained
 list. Any new parser or cardholder-specific subtype (e.g. `bmo_credit_roger`)
@@ -22,7 +85,32 @@ validate. Alternatively, auto-derive the enum from registered parser
 
 ---
 
+## Open: Needs Product/Data Decision
+
+Not code bugs — need a human decision before any code or config changes.
+
+### Does Paintbox have an Amex card that should be reconciled on its own?
+`recon_log.json` has never had an `amex` entry for Paintbox — only
+`bofa_checking`, `bofa_credit`, `bofa_savings`, `payroll` — but their checking
+account pays a recurring ~$3,900/mo "AMERICAN EXPRESS Bill Payment" (seen
+2026-06-29). Worth asking whether there's an Amex statement that should be
+reconciled as its own account, the way `bofa_credit` already is, rather than
+only ever showing up as an outbound payment on the checking statement. Per
+CLAUDE.md client-name governance, don't add a new `amex` account type for
+Paintbox without confirming with the user first.
+
+---
+
 ## Closed: Fixed
+
+- `mark_clean.py`'s `find_pending()` required an exact match against the full
+  tracker key (e.g. `PAINTBOX_HAIR_STUDIO_LLC`) — fixed 2026-07-02. 5 of 9
+  client keys documented in `Bookkeeping-clients/CLAUDE.md`'s client table
+  (`de_anza`, `estudillo_realty`, `jojo_hair_studio`, `mp_cheng`,
+  `paintbox_hair_studio`) drop the legal suffix the tracker key keeps, so
+  `mark_clean.py` reported "no entry found" while listing the exact matching
+  entry in the same error output. Now accepts the tracker key or an
+  underscore-boundary prefix of it.
 
 - `WellsFargoCheckingParser` and `NorthernTrustCheckingParser` never set
   `closing_date`/`statement_date` — fixed 2026-07-02, same bug/fix pattern as
