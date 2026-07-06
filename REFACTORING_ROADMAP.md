@@ -99,21 +99,6 @@ like tax/deduction columns) instead of matching an explicit allowlist of
 earning-type labels, so a new ADP category degrades to "included but
 unlabeled" rather than "silently missing."
 
-### Schema `statement_types` enum drifts from actual parsers
-The `clients/_schema.json` enum for `statement_types` is a manually maintained
-list. Any new parser or cardholder-specific subtype (e.g. `bmo_credit_roger`)
-requires a manual schema update or jsonschema validation silently skips the
-entire client config, blocking all clients on startup.
-
-**Patched:** added `bmo_savings`, `bmo_credit_roger/nicholas/peter/christopher`
-to the enum on 2026-06-24.
-
-**Root cause to investigate:** Consider removing the `enum` constraint from
-`statement_types` items entirely and letting runtime parser matching handle
-unknown types — the schema doesn't need to gatekeep what the parsers already
-validate. Alternatively, auto-derive the enum from registered parser
-`statement_type` keys at schema generation time.
-
 ---
 
 ## Open: Needs Product/Data Decision
@@ -164,6 +149,18 @@ a new account type for a client without confirming with the user first.
   so `test_parsers.py` could actually run instead of skipping for lack of
   Drive credentials. Verified via `pytest tests/test_parsers.py` against real
   fixtures, not just direct parser calls.
+- Schema `statement_types` enum drift blocking all clients on startup — fixed
+  2026-07-06: a single client config with an unrecognized `statement_type`
+  (e.g. a new parser subtype not yet added to the `clients/_schema.json`
+  enum) caused `ClientRegistry._load()` to raise and abort construction
+  entirely, so *no* clients loaded even though only one config was bad.
+  `parsers/base.py` now warns to stderr and skips just the offending config,
+  same as the existing non-dict-JSON skip path; every other client still
+  loads. The enum itself is unchanged (still catches genuine typos —
+  `tests/test_config_and_logs.py::test_registry_rejects_invalid_config`
+  updated to assert isolation instead of a raised `ValueError`) — a brand
+  new parser subtype still needs the manual enum update to be recognized,
+  it just no longer takes the whole registry down in the meantime.
 - Pay-by-Pay (workers comp) silently dropped from payroll JE — fixed 2026-06-24:
   `adp_payroll_departments` now extracts `DebitforPay-by-Pay` from Liability PDF in
   `parse_cash_splits()`; all three formats (`departments`, `professional`, `1099`) emit
