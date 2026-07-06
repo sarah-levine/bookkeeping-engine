@@ -459,6 +459,38 @@ def _classify_cc_transaction(vendor, amount):
     return 'charge'
 
 
+# Recognizable credit-card-payment descriptors (ACH/bill-pay style, plus bare
+# card-network names), used as a generic fallback when a checking-account
+# parser is deciding whether a debit is a credit card payment vs. an
+# ordinary withdrawal. Deliberately NOT client-specific — a client's own
+# `cc_keywords` config is checked separately and takes priority; this list
+# exists so a brand-new card network is recognized without requiring every
+# client config to list it first. See REFACTORING_ROADMAP.md's `cc_keywords`
+# item: previously each checking parser hand-rolled its own partial, mutually
+# inconsistent list inline, and none of them included bare network names like
+# 'AMERICAN EXPRESS' or 'CAPITAL ONE' — exactly the gap that let a real
+# ~$3,900/mo Amex bill payment land in generic "Withdrawals and Debits"
+# instead of "Credit Card Payments".
+_KNOWN_CC_NETWORK_PATTERNS = (
+    'CREDIT CARD',
+    'AMEX EPAYMENT', 'AMERICAN EXPRESS',
+    'CHASE CREDIT CRD', 'CHASE CARD',
+    'CITI CARD', 'CITICTP', 'CITI AUTOPAY',
+    'CAPITAL ONE', 'CAP ONE',
+    'DISCOVER CARD',
+    'BANK OF AMERICA CREDIT CARD', 'BANKAMERICARD',
+    'WELLS FARGO CARD',
+    'BMO CREDIT CARD',
+)
+
+
+def _is_known_cc_network_payment(description_upper: str) -> bool:
+    """True if a checking-account debit description matches a recognized
+    credit-card-payment pattern, independent of any client's own
+    `cc_keywords` config."""
+    return any(p in description_upper for p in _KNOWN_CC_NETWORK_PATTERNS)
+
+
 # Cardholder names per client (for multi-cardholder AmEx statements)
 # NOTE: Loaded dynamically from clients/*.json via _registry.CLIENT_CARDHOLDERS above.
 # Do not hardcode here — it would overwrite the registry.
