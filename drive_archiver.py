@@ -97,7 +97,13 @@ def _get_service():
             )
 
     # ── 4. Interactive OAuth flow (first run) ───────────────────────────────
-    if not creds or not creds.valid:
+    # Only `not creds` here, not `not creds.valid` — a freshly-built service
+    # account Credentials object (source 3) always reports valid=False until
+    # its first actual API request (google-auth fetches the token lazily), so
+    # checking .valid would treat a perfectly good service-account credential
+    # as missing and fall through to interactive OAuth every time one is used
+    # without a token pickle already present.
+    if not creds:
         oauth_creds_path = clients_dir / "drive_credentials.json"
         if oauth_creds_path.exists():
             from google_auth_oauthlib.flow import InstalledAppFlow

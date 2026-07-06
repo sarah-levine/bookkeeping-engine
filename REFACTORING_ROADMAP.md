@@ -109,6 +109,26 @@ a new account type for a client without confirming with the user first.
 
 ## Closed: Fixed
 
+- `drive_archiver.py`'s `_get_service()` never actually used service-account
+  credentials — fixed 2026-07-06. Found while browsing Drive fixtures: after
+  successfully building `service_account.Credentials` from
+  `GOOGLE_SHEETS_CREDENTIALS`/`sheets_credentials.json` (source 3), the next
+  guard was `if not creds or not creds.valid`. A freshly-constructed service-
+  account credential always reports `valid=False` until its first actual API
+  request (google-auth fetches the token lazily), so this always fell
+  through to source 4 (interactive OAuth), found no `drive_credentials.json`,
+  and raised `"No Drive credentials found"` — even with perfectly good
+  credentials already built. Effectively dead code for anyone relying on
+  service-account auth without a `DRIVE_TOKEN_B64`/`drive_token.pickle`
+  already set up. Fixed by changing that guard to `if not creds:` — by that
+  point in the function, a non-`None` `creds` always means an earlier source
+  already succeeded (OAuth expiry/refresh is handled separately, earlier, for
+  sources 1/2). Confirmed live against the real Drive fixtures folder (listed
+  real files via the service-account path with no token pickle present), and
+  added `tests/test_drive_archiver_credentials.py` (mocks
+  `from_service_account_info`/`build`, no real credentials or network
+  needed) — reproduces the original `OSError` against pre-fix code via
+  `git stash`, passes against the fix.
 - Vendor-normalization tests (`tests/test_aggregations.py`,
   `tests/test_vendor_normalize.py`) failed non-deterministically depending on
   the machine running them — fixed 2026-07-06. Actual root cause was
