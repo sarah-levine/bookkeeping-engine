@@ -418,25 +418,38 @@ class BankOfAmericaCheckingParser(StatementParser):
 
         if not OCR_AVAILABLE:
             return
+
+        unmapped = [c for c in self.checks if not c.get('payee')]
+        if not unmapped:
+            return
+
         try:
             pdf = fitz.open(self.pdf_path)
+            # One check image per "Check images" page — the last embedded
+            # image on each such page is the actual check (earlier images on
+            # the page are logos/headers). Checks appear in the same order
+            # as their images across pages.
+            check_image_xrefs = []
             for page_num in range(len(pdf)):
                 page = pdf[page_num]
                 if 'Check images' in page.get_text():
                     images = page.get_images()
                     if images:
-                        for check in self.checks:
-                            if check.get('payee'):  # already set by manual map
-                                continue
-                            try:
-                                xref = images[-1][0]
-                                base_image = pdf.extract_image(xref)
-                                img = Image.open(_io.BytesIO(base_image['image']))
-                                ocr_text = pytesseract.image_to_string(img)
-                                check['payee'] = self._extract_payee_from_ocr(ocr_text)
-                            except Exception:
-                                check['payee'] = ''
-                    break
+                        check_image_xrefs.append(images[-1][0])
+
+            # OCR each check image exactly once and assign it to the next
+            # unmapped check in order. Previously this re-OCR'd the same
+            # single image (from only the first "Check images" page,
+            # further pages were never reached) once per unmapped check,
+            # so every check ended up with an identical, wrong payee.
+            for check, xref in zip(unmapped, check_image_xrefs):
+                try:
+                    base_image = pdf.extract_image(xref)
+                    img = Image.open(_io.BytesIO(base_image['image']))
+                    ocr_text = pytesseract.image_to_string(img)
+                    check['payee'] = self._extract_payee_from_ocr(ocr_text)
+                except Exception:
+                    check['payee'] = ''
             pdf.close()
         except Exception:
             pass
