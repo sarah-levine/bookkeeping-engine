@@ -149,6 +149,21 @@ a new account type for a client without confirming with the user first.
   so `test_parsers.py` could actually run instead of skipping for lack of
   Drive credentials. Verified via `pytest tests/test_parsers.py` against real
   fixtures, not just direct parser calls.
+- Payroll runs entered in QuickBooks outside a session got re-derived next
+  time — fixed 2026-07-06: added `mark_payroll_done.py <client_key>
+  <check_date> <bank_credit>`, parallel to `mark_clean.py` for reconciliation.
+  Writes `payroll_log.csv`, `reconciliation_log.csv`, and `recon_log.json`
+  straight from the check date and known bank-credit total, without
+  reparsing the ADP PDFs. `client_key` accepts either a client's
+  `payroll_key` or its name/canonical key/alias — resolved via the new
+  `ClientRegistry.get_config_by_payroll_key()`. `payroll_log.csv` marks the
+  `balanced` column `"N/A (marked done — not parsed from PDFs)"` since
+  there's no journal-entry breakdown to cross-check without the PDFs.
+  Covered by `tests/test_mark_payroll_done.py` (temp clients/logs dirs, git
+  push monkeypatched out — no real client data touched). The underlying
+  asymmetry (reconciliation always logs an `IN_PROGRESS` entry on parse;
+  payroll logs nothing until confirmed) is unchanged — this only adds the
+  retroactive escape hatch the roadmap called for.
 - Schema `statement_types` enum drift blocking all clients on startup — fixed
   2026-07-06: a single client config with an unrecognized `statement_type`
   (e.g. a new parser subtype not yet added to the `clients/_schema.json`

@@ -238,6 +238,15 @@ class ClientRegistry:
                 return (canonical, endings[last4])
         return None
 
+    def get_config_by_payroll_key(self, payroll_key):
+        """Find a client config by its `payroll_key` field. Returns None if
+        no client declares that key. Used by tools that only know a client's
+        internal payroll key (e.g. mark_payroll_done.py), not its full name."""
+        for cfg in self._configs.values():
+            if cfg.get('payroll_key') == payroll_key:
+                return cfg
+        return None
+
     def payroll_dispatch(self):
         """Build the {client_key: (payroll_format, config_filename)} map from
         client configs that declare both `payroll_key` and `payroll_format`.
