@@ -51,6 +51,17 @@ instead of failing — a fresh public checkout with no secrets stays green.
    ```
    `fixtures_manifest.json` and the download cache are gitignored.
 
+5. **Payroll fixtures (`test_payroll_end_to_end.py`) are local-only** — no
+   Drive download, just files already in the private clients repo. Copy the
+   example and fill in real filenames:
+   ```bash
+   cp tests/payroll_fixtures_manifest.example.json tests/payroll_fixtures_manifest.json
+   # edit tests/payroll_fixtures_manifest.json — real pdf/config filenames from
+   # <clients_dir>/fixtures/ and <clients_dir>/ in the private repo
+   ```
+   `payroll_fixtures_manifest.json` is gitignored — the real client/fixture
+   names it contains must never land in the tracked `.py` file or `.example.json`.
+
 ## Running
 
 ```bash
