@@ -340,3 +340,9 @@ class USBankCheckingParser(StatementParser):
         return report
 
 
+from parsers.registry import register  # noqa: E402
+# STATEMENT_TYPE_LABELS never had an entry for this type before the registry
+# consolidation — previously fell back to printing the raw code 'usbank_checking'.
+register("usbank_checking", "U.S. Bank Business Checking", USBankCheckingParser)
+
+

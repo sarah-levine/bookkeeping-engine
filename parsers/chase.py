@@ -180,4 +180,9 @@ ChaseInkParser      = ChaseParser
 ChaseUnitedParser   = ChaseParser
 ChaseSapphireParser = ChaseParser
 
+from parsers.registry import register  # noqa: E402
+register("chase_ink", "Chase Ink Business Credit Card", ChaseParser, is_credit_card=True)
+register("chase_sapphire", "Chase Sapphire Credit Card", ChaseParser, is_credit_card=True)
+register("chase_united", "Chase United Credit Card", ChaseParser, is_credit_card=True)
+
 

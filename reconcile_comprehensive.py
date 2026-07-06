@@ -51,13 +51,6 @@ import json
 # Import all parsers and report helpers from the parsers package
 from parsers import (
     StatementParser, ClientRegistry, _registry,
-    ChaseParser, AmexStatementParser, AmexCheckingParser,
-    ChaseInkParser, ChaseUnitedParser,
-    WellsFargoCreditCardParser, WellsFargoCheckingParser,
-    BankOfAmericaCreditCardParser, BankOfAmericaCheckingParser, BankOfAmericaSavingsParser,
-    CitiCheckingParser, CitiVisaCostcoParser, CitiSavingsParser,
-    BMOCheckingParser, BMOCreditCardParser, USBankCheckingParser, NorthernTrustCheckingParser,
-    CapitalOneParser,
     _safe_date_key, _report_header, _summary_block, _balance_check,
     _payments_section, _credits_section, _individual_section,
     _deposits_section, _checks_section, _adp_section,
@@ -611,25 +604,11 @@ def split_combined_pdf(pdf_path):
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 
-STATEMENT_TYPE_LABELS = {
-    'chase_ink':               'Chase Ink Business Credit Card',
-    'chase_sapphire':          'Chase Sapphire Credit Card',
-    'chase_united':            'Chase United Credit Card',
-    'amex':                    'American Express Business',
-    'amex_checking':           'American Express Business Checking',
-    'bofa_credit':             'Bank of America Business Credit Card',
-    'bofa_checking':           'Bank of America Business Checking',
-    'bofa_savings':            'Bank of America Business Savings',
-    'citi_checking':           'Citi Business Checking',
-    'citi_savings':            'Citi Business Savings',
-    'citi_visa_costco':        'Citi Costco Anywhere Visa',
-    'bmo_credit':               'BMO Business Platinum Rewards Credit Card',
-    'bmo_checking':             'BMO Premium Business Checking',
-    'northern_trust_checking': 'Northern Trust Business Checking',
-    'wells_fargo_checking':    'Wells Fargo Business Checking',
-    'wells_fargo_credit':      'Wells Fargo Business Credit Card',
-    'capital_one':             'Capital One Business Credit Card',
-}
+# Type key -> label/parser class/credit-card membership all come from the
+# registry each parser module populates itself (parsers/registry.py) instead
+# of being hand-maintained here — see that module's docstring for why.
+from parsers.registry import labels as _registry_labels, credit_card_keys as _cc_keys
+STATEMENT_TYPE_LABELS = _registry_labels()
 
 def _ask(prompt, required=True, default=None):
     """Prompt user for input, return Decimal for amounts or string for text."""
@@ -668,8 +647,7 @@ def manual_entry_for_parser(stmt_type_code, client_name):
     period = _ask("Statement period (e.g. December 15, 2025)", required=False) or ''
 
     print()
-    is_cc = stmt_type_code in ('chase_ink', 'chase_united', 'amex', 'bofa_credit',
-                                'citi_visa_costco', 'wells_fargo_credit', 'capital_one')
+    is_cc = stmt_type_code in _cc_keys()
 
     if is_cc:
         print("Enter amounts from the Account Summary:")
@@ -773,8 +751,7 @@ def manual_entry():
     period = _ask("Statement period (e.g. December 15, 2025 or 12/01/25-12/31/25)", required=False) or ''
 
     print()
-    is_cc = stmt_type_code in ('chase_ink', 'chase_united', 'amex', 'bofa_credit',
-                                'citi_visa_costco', 'wells_fargo_credit', 'capital_one')
+    is_cc = stmt_type_code in _cc_keys()
 
     if is_cc:
         # Credit card fields
@@ -1203,26 +1180,8 @@ def main():
 
     print(f"Processing: {pdf_path}")
 
-    parser_map = {
-        'chase_ink':                ChaseInkParser,
-        'chase_sapphire':           ChaseParser,
-        'chase_united':             ChaseUnitedParser,
-        'amex':                     AmexStatementParser,
-        'amex_checking':            AmexCheckingParser,
-        'bofa_credit':              BankOfAmericaCreditCardParser,
-        'bofa_checking':            BankOfAmericaCheckingParser,
-        'bofa_savings':             BankOfAmericaSavingsParser,
-        'citi_checking':            CitiCheckingParser,
-        'citi_savings':             CitiSavingsParser,
-        'citi_visa_costco':         CitiVisaCostcoParser,
-        'bmo_credit':                BMOCreditCardParser,
-        'bmo_checking':              BMOCheckingParser,
-        'northern_trust_checking':  NorthernTrustCheckingParser,
-        'usbank_checking':          USBankCheckingParser,
-        'wells_fargo_credit':       WellsFargoCreditCardParser,
-        'wells_fargo_checking':     WellsFargoCheckingParser,
-        'capital_one':              CapitalOneParser,
-    }
+    from parsers.registry import parser_by_type as _parser_by_type
+    parser_map = _parser_by_type()
 
     # Split combined PDFs (e.g. files that bundle Meevo + Citi Costco)
     print(f"[Step 2] Splitting PDF into segments...")
@@ -1280,15 +1239,10 @@ def main():
             # Only applies to credit-card statements where the balance equation
             # is well-defined. Checking accounts have a more complex equation
             # involving deposits and would need their own fallback shape.
-            _CC_STATEMENT_TYPES = {
-                'citi_visa_costco', 'chase_ink', 'chase_united',
-                'amex', 'bofa_credit', 'wells_fargo_credit', 'bmo_credit',
-                'capital_one',
-            }
-            if stmt_type in _CC_STATEMENT_TYPES and not dry_run:
+            if stmt_type in _cc_keys() and not dry_run:
                 print(f"[Step 7b] Verifying balance (Vision fallback if needed)...")
                 parser._try_vision_fallback()
-            elif stmt_type in _CC_STATEMENT_TYPES and dry_run:
+            elif stmt_type in _cc_keys() and dry_run:
                 print(f"[Step 7b] --dry-run: skipping Vision fallback")
 
             # Check if parser extracted usable balance data
@@ -1325,9 +1279,7 @@ def main():
                     from log_utils import append_manual_issue as _flag
                     cc_stmts_this_session = {
                         s for s in [t[0] for t in _session_stmt_types]
-                        if s in ('amex', 'bofa_credit', 'chase_ink',
-                                 'chase_united', 'chase_sapphire', 'citi_costco',
-                                 'bmo_credit', 'capital_one')
+                        if s in _cc_keys()
                     }
                     cc_payments = getattr(parser, 'credit_card_payments', [])
                     for pmt in cc_payments:

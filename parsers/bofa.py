@@ -771,8 +771,9 @@ class BankOfAmericaSavingsParser(BankOfAmericaCheckingParser):
         return report
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# NORTHERN TRUST CHECKING PARSER
-# ═══════════════════════════════════════════════════════════════════════════════
-
+from parsers.registry import register  # noqa: E402
+register("bofa_credit", "Bank of America Business Credit Card",
+         BankOfAmericaCreditCardParser, is_credit_card=True)
+register("bofa_checking", "Bank of America Business Checking", BankOfAmericaCheckingParser)
+register("bofa_savings", "Bank of America Business Savings", BankOfAmericaSavingsParser)
 

@@ -245,3 +245,7 @@ class CapitalOneParser(StatementParser):
             report += _credits_section(self.credits, total_credits)
         report += _charges_section(aggregated, total_charges)
         return report
+
+
+from parsers.registry import register  # noqa: E402
+register("capital_one", "Capital One Business Credit Card", CapitalOneParser, is_credit_card=True)

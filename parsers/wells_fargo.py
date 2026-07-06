@@ -590,3 +590,9 @@ class WellsFargoCheckingParser(StatementParser):
     def normalize_vendor(self, description):
         return self._normalize(description)
 
+
+from parsers.registry import register  # noqa: E402
+register("wells_fargo_credit", "Wells Fargo Business Credit Card",
+         WellsFargoCreditCardParser, is_credit_card=True)
+register("wells_fargo_checking", "Wells Fargo Business Checking", WellsFargoCheckingParser)
+

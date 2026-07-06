@@ -754,3 +754,9 @@ class CitiSavingsParser(StatementParser):
         return report
 
 
+from parsers.registry import register  # noqa: E402
+register("citi_checking", "Citi Business Checking", CitiCheckingParser)
+register("citi_savings", "Citi Business Savings", CitiSavingsParser)
+register("citi_visa_costco", "Citi Costco Anywhere Visa", CitiVisaCostcoParser, is_credit_card=True)
+
+
