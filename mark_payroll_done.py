@@ -54,19 +54,16 @@ def _find_client(client_key: str):
     dispatch_key is whatever the normal ADP scripts would pass as `client`
     to append_payroll_log — payroll_key if the config declares one,
     otherwise client_name — so rows key identically either way.
+    ClientRegistry resolves payroll_key, client_name, canonical_name, and
+    aliases through the same alias map, so one lookup covers all of them.
     """
     from parsers.base import _registry
 
-    cfg = _registry.get_config_by_payroll_key(client_key)
-    if cfg:
-        return cfg.get("payroll_key"), cfg.get("client_name")
-
     canonical = _registry.resolve(client_key)
-    if canonical:
-        cfg = _registry.get_config(canonical)
-        return cfg.get("payroll_key") or cfg.get("client_name"), cfg.get("client_name")
-
-    return None, None
+    if not canonical:
+        return None, None
+    cfg = _registry.get_config(canonical)
+    return cfg.get("payroll_key") or cfg.get("client_name"), cfg.get("client_name")
 
 
 def main():

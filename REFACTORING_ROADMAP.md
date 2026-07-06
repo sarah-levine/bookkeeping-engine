@@ -155,9 +155,10 @@ a new account type for a client without confirming with the user first.
   Writes `payroll_log.csv`, `reconciliation_log.csv`, and `recon_log.json`
   straight from the check date and known bank-credit total, without
   reparsing the ADP PDFs. `client_key` accepts either a client's
-  `payroll_key` or its name/canonical key/alias — resolved via the new
-  `ClientRegistry.get_config_by_payroll_key()`. `payroll_log.csv` marks the
-  `balanced` column `"N/A (marked done — not parsed from PDFs)"` since
+  `payroll_key` or its name/canonical key/alias — all resolve through
+  `ClientRegistry`'s alias map, which already registers `payroll_key`
+  (fixed separately in `34262e7`). `payroll_log.csv` marks the `balanced`
+  column `"N/A (marked done — not parsed from PDFs)"` since
   there's no journal-entry breakdown to cross-check without the PDFs.
   Covered by `tests/test_mark_payroll_done.py` (temp clients/logs dirs, git
   push monkeypatched out — no real client data touched). The underlying
