@@ -42,18 +42,6 @@ dates, so this hasn't caused visible damage yet, just a latent risk.
 **Root cause fix:** loosen the regex or fall back to a secondary date pattern
 when the primary one doesn't match, rather than leaving `closing_date` as `None`.
 
-### Vendor-normalization tests share a process-wide `ClientRegistry` singleton
-`tests/test_aggregations.py` and `tests/test_vendor_normalize.py` pass in
-isolation but can fail when run as part of the full `tests/` suite, depending
-on run order — some other test module mutates process-global registry/config
-state (tied to `BOOKKEEPING_CLIENTS_DIR`) that these tests implicitly depend
-on. Made `pytest tests/` look flaky while verifying the BofA/Wells
-Fargo/Northern Trust fix, though it's unrelated to that fix.
-
-**Root cause fix:** give `ClientRegistry` proper test isolation (fixture-scoped
-instance instead of a module-level singleton) rather than relying on tests
-loading in a particular order.
-
 ### Check-image payee extraction is entirely manual
 Nothing in the pipeline automatically reads payee names off scanned check
 images (the "Check images" pages BofA and others append to checking
@@ -121,6 +109,29 @@ a new account type for a client without confirming with the user first.
 
 ## Closed: Fixed
 
+- Vendor-normalization tests (`tests/test_aggregations.py`,
+  `tests/test_vendor_normalize.py`) failed non-deterministically depending on
+  the machine running them — fixed 2026-07-06. Actual root cause was
+  narrower than originally suspected: it wasn't test run order or cross-test
+  mutation — `parsers.base._registry` is a module-level singleton built once
+  from `log_utils.get_clients_dir()`, which prefers a private clients
+  directory (`BOOKKEEPING_CLIENTS_DIR`/`~/.bookkeeping/clients`) over the
+  repo-local `clients/` fallback whenever one exists. On any real
+  bookkeeper's machine that private directory always exists, so the
+  singleton never sees `clients/example_client.json`'s "ACME INC" at all —
+  `AmexAggregation`/`BofaCheckingAggregation`/`ClientRules` deterministically
+  failed there (confirmed reproducible even running each file alone), while
+  passing on a fresh checkout with no private clients dir. Fixed by adding
+  `tests/_registry_test_utils.py` (`install_example_registry()`/
+  `restore_registry()`) — the 3 affected test classes now pin
+  `parsers.base._registry` to a `ClientRegistry` scoped to the repo's own
+  `clients/` dir in `setUp`/`tearDown`, instead of depending on the
+  environment-dependent singleton. `test_vendor_normalize.py` also needed its
+  `from parsers.base import _registry` import changed to `import parsers.base
+  as base_mod` — the old static import bound the name once at module load,
+  so reassigning `parsers.base._registry` in `setUp` wouldn't have been
+  visible to it. Full suite now passes 69/69 (10 skipped for missing private
+  fixtures), verified order-independent and repeatable across multiple runs.
 - Every payroll client now has `payroll_key`/`payroll_format` set — fixed
   2026-07-02. `fcba_academy` → `adp_payroll_1099` and `mp_cheng` →
   `adp_payroll_professional` verified by running the real fixtures

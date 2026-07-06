@@ -10,12 +10,13 @@ These import cleanly without any PDF dependencies.
 import unittest
 
 from parsers import vendor_normalize as vn
+import parsers.base as base_mod
 from parsers.base import (
-    _registry,
     _auto_clean_vendor,
     _collect_unknown_vendors,  # noqa: F401  (presence = no duplicate defs)
 )
 import reconcile_comprehensive as rc
+from tests._registry_test_utils import install_example_registry, restore_registry
 
 
 class StandardCleaner(unittest.TestCase):
@@ -96,6 +97,12 @@ class ClientSuffixesFromConfig(unittest.TestCase):
 
 
 class ClientRules(unittest.TestCase):
+    def setUp(self):
+        self._saved_registry = install_example_registry()
+
+    def tearDown(self):
+        restore_registry(self._saved_registry)
+
     def test_example_client_vendor_rules(self):
         cases = {
             "COMCAST CABLE 1234": "Comcast/Xfinity",
@@ -105,25 +112,25 @@ class ClientRules(unittest.TestCase):
             "INTEREST CHARGE": "Interest Charge (Amex)",
         }
         for raw, expected in cases.items():
-            self.assertEqual(_registry.normalize_vendor("ACME INC", raw),
+            self.assertEqual(base_mod._registry.normalize_vendor("ACME INC", raw),
                              expected, raw)
 
     def test_unmatched_passthrough(self):
         self.assertEqual(
-            _registry.normalize_vendor("ACME INC", "TOTALLY UNMATCHED VENDOR"),
+            base_mod._registry.normalize_vendor("ACME INC", "TOTALLY UNMATCHED VENDOR"),
             "TOTALLY UNMATCHED VENDOR")
 
     def test_starts_with_only_rule_fires(self):
         # Regression: a vendor_rule with starts_with but no contains used to be
         # skipped entirely. example_client has {"starts_with": "USPS", ...}.
         self.assertEqual(
-            _registry.normalize_vendor("ACME INC", "USPS SHIPPING 1234"), "USPS")
+            base_mod._registry.normalize_vendor("ACME INC", "USPS SHIPPING 1234"), "USPS")
 
     def test_clean_and_normalize_pipeline(self):
         # description_strip_suffixes in example_client.json strips "EXAMPLE CITY"
         # before vendor_rules match.
         self.assertEqual(
-            _registry.clean_and_normalize("ACME INC", "AMAZON MKTP EXAMPLE CITY"),
+            base_mod._registry.clean_and_normalize("ACME INC", "AMAZON MKTP EXAMPLE CITY"),
             "Amazon")
 
 
