@@ -56,21 +56,6 @@ for balance tie-out recovery) to check images — detect a check-images page,
 crop each check, run OCR or Claude Vision, and pre-fill `check_payee_map`
 instead of requiring a human to trigger it.
 
-### `cc_keywords` is a manually-maintained per-client list with no validation
-Each client config's `cc_keywords` list is hand-maintained ad hoc; any credit
-card vendor not explicitly listed silently lands in generic "Withdrawals and
-Debits" instead of "Credit Card Payments" — no warning, no failure, just a
-mis-bucketed report. Hit 2026-07-02: a client pays a recurring ~$3,900/mo
-American Express bill from checking, but `cc_keywords` only listed their one
-already-known card issuer; fixed for that client by adding the missing
-keyword, but the same gap exists for every other client's untracked card
-vendors and will recur the next time any client starts paying a new card.
-
-**Root cause fix:** classify by a shared, global pattern (e.g. `<KNOWN CARD
-NETWORK> ... Bill Payment` / `... Credit Card ... Payment`) as a fallback
-when no client-specific `cc_keywords` match, instead of relying entirely on
-each client's list staying complete.
-
 ### `adp_payroll_details.py`'s earnings-category list is a hardcoded allowlist with no fallback
 Fixed the specific instance ("Sick" silently dropped from Associates gross
 wages, 2026-07-02), but the pattern itself is unchanged: `parse_payroll_details()`
@@ -109,6 +94,48 @@ a new account type for a client without confirming with the user first.
 
 ## Closed: Fixed
 
+- `cc_keywords` was a manually-maintained per-client list with no fallback —
+  fixed 2026-07-06. `parsers/bofa.py` and `parsers/amex.py`'s
+  `AmexCheckingParser` each hand-rolled their own partial, mutually
+  inconsistent inline pattern list (`'CITI CARD'`/`'CREDIT CARD'`/`'CITICTP'`
+  in one; `'AMEX EPAYMENT'`/`'CHASE CREDIT CRD'`/`'CREDIT CARD'`/`'AUTOPAY'`
+  in the other) for recognizing a checking-account debit as a credit card
+  payment before falling back to a client's own `cc_keywords`. Neither
+  included bare major network names — exactly the gap that let the real
+  ~$3,900/mo Amex bill payment (2026-07-02) land in generic "Withdrawals and
+  Debits". Consolidated into one shared `_KNOWN_CC_NETWORK_PATTERNS` list +
+  `_is_known_cc_network_payment()` helper in `parsers/base.py`, now including
+  `AMERICAN EXPRESS`, `CAPITAL ONE`, `DISCOVER CARD`, `BANK OF AMERICA CREDIT
+  CARD`, `WELLS FARGO CARD`, and `BMO CREDIT CARD` as bare fallback matches.
+  Wells Fargo/Citi/US Bank/Northern Trust checking parsers still have no
+  `cc_keywords`/CC-payment classification at all — out of scope here, noted
+  for a future pass. Verified live against a real BofA checking fixture:
+  full before/after report diff is byte-identical (this client's existing
+  transactions already matched the old generic `'CREDIT CARD'` substring, so
+  the fix is purely additive — zero regression risk demonstrated on real
+  production data). `tests/test_cc_payment_classification.py` covers the
+  previously-supported patterns (regression), the newly-added networks, and
+  confirms unrelated vendors aren't misclassified.
+- `drive_archiver.py`'s `_get_service()` never actually used service-account
+  credentials — fixed 2026-07-06. Found while browsing Drive fixtures: after
+  successfully building `service_account.Credentials` from
+  `GOOGLE_SHEETS_CREDENTIALS`/`sheets_credentials.json` (source 3), the next
+  guard was `if not creds or not creds.valid`. A freshly-constructed service-
+  account credential always reports `valid=False` until its first actual API
+  request (google-auth fetches the token lazily), so this always fell
+  through to source 4 (interactive OAuth), found no `drive_credentials.json`,
+  and raised `"No Drive credentials found"` — even with perfectly good
+  credentials already built. Effectively dead code for anyone relying on
+  service-account auth without a `DRIVE_TOKEN_B64`/`drive_token.pickle`
+  already set up. Fixed by changing that guard to `if not creds:` — by that
+  point in the function, a non-`None` `creds` always means an earlier source
+  already succeeded (OAuth expiry/refresh is handled separately, earlier, for
+  sources 1/2). Confirmed live against the real Drive fixtures folder (listed
+  real files via the service-account path with no token pickle present), and
+  added `tests/test_drive_archiver_credentials.py` (mocks
+  `from_service_account_info`/`build`, no real credentials or network
+  needed) — reproduces the original `OSError` against pre-fix code via
+  `git stash`, passes against the fix.
 - Vendor-normalization tests (`tests/test_aggregations.py`,
   `tests/test_vendor_normalize.py`) failed non-deterministically depending on
   the machine running them — fixed 2026-07-06. Actual root cause was

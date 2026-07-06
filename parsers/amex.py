@@ -23,7 +23,10 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
 
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, CLIENT_CARDHOLDERS, _classify_cc_transaction
+from parsers.base import (
+    StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, CLIENT_CARDHOLDERS,
+    _classify_cc_transaction, _is_known_cc_network_payment,
+)
 from parsers.report import *
 from parsers.report import (
     _report_header, _summary_block, _balance_check,
@@ -637,8 +640,7 @@ class AmexCheckingParser(StatementParser):
             if 'ADP' in d_upper:
                 adp_transactions.append({'date': t['date'], 'vendor': t['description'],
                                          'amount': t['amount'], 'count': 1})
-            elif ('AMEX EPAYMENT' in d_upper or 'CHASE CREDIT CRD' in d_upper or
-                  'CREDIT CARD' in d_upper or 'AUTOPAY' in d_upper or
+            elif (_is_known_cc_network_payment(d_upper) or 'AUTOPAY' in d_upper or
                   any(k.upper() in d_upper for k in (cfg.get('cc_keywords') or []))):
                 cc_payments.append({'date': t['date'], 'vendor': self.normalize_vendor(t['description']),
                                     'amount': t['amount'], 'count': 1})

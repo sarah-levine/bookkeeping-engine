@@ -21,7 +21,10 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
 
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, _classify_cc_transaction
+from parsers.base import (
+    StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL,
+    _classify_cc_transaction, _is_known_cc_network_payment,
+)
 from parsers.report import *
 from parsers.report import (
     _safe_date_key, _report_header, _summary_block, _balance_check,
@@ -541,7 +544,7 @@ class BankOfAmericaCheckingParser(StatementParser):
                 online_banking_debits.append(
                     {'date': t['date'], 'vendor': t['vendor'],
                      'amount': t['amount'], 'count': 1})
-            elif ('CITI CARD' in d_upper or 'CREDIT CARD' in d_upper or 'CITICTP' in d_upper or
+            elif (_is_known_cc_network_payment(d_upper) or
                   any(kw.upper() in d_upper for kw in
                       (_registry.get_config(self.client_name) or {}).get('cc_keywords', []))):
                 credit_card_payments.append(
