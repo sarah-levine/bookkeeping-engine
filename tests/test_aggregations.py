@@ -13,6 +13,7 @@ from decimal import Decimal
 
 from parsers.amex import AmexCheckingParser
 from parsers.bofa import BankOfAmericaCheckingParser
+from tests._registry_test_utils import install_example_registry, restore_registry
 
 # example_client.json ("ACME INC") configures:
 #   transaction_aggregations: [{match: "ACME SPORTS", label: "Acme Sports",
@@ -25,6 +26,12 @@ def _d(x):
 
 
 class AmexAggregation(unittest.TestCase):
+    def setUp(self):
+        self._saved_registry = install_example_registry()
+
+    def tearDown(self):
+        restore_registry(self._saved_registry)
+
     def _parser(self, credits, debits):
         p = AmexCheckingParser.__new__(AmexCheckingParser)
         p.client_name = CLIENT
@@ -71,6 +78,12 @@ class AmexAggregation(unittest.TestCase):
 
 
 class BofaCheckingAggregation(unittest.TestCase):
+    def setUp(self):
+        self._saved_registry = install_example_registry()
+
+    def tearDown(self):
+        restore_registry(self._saved_registry)
+
     def _parser(self, credits, debits):
         p = BankOfAmericaCheckingParser.__new__(BankOfAmericaCheckingParser)
         p.client_name = CLIENT
