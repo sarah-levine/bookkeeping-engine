@@ -16,6 +16,7 @@ clients/*.json
 # Test fixtures pulled from Google Drive — never commit real PDFs or the
 # manifest that maps them to clients.
 tests/fixtures_manifest.json
+tests/payroll_fixtures_manifest.json
 tests/.fixture_cache/
 
 # Manually-keyed statement data holds real client transactions.

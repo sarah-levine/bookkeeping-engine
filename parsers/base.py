@@ -106,9 +106,14 @@ class ClientRegistry:
                 self._alias_map[cfg['payroll_key'].upper()] = canonical
 
         if validation_errors:
-            raise ValueError(
-                "Client config schema validation failed:\n"
-                + "\n".join(validation_errors)
+            # A schema violation in one client's config (e.g. a new parser's
+            # statement_type not yet added to the _schema.json enum) must not
+            # take every other client down with it — warn and skip just that
+            # config instead of raising.
+            print(
+                "WARNING: skipped invalid client config(s):\n"
+                + "\n".join(validation_errors),
+                file=sys.stderr,
             )
 
     def _validate(self, cfg):

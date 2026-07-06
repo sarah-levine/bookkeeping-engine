@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Maps each ADP payroll format to a real local fixture PDF + client config.",
+    "Copy this file to payroll_fixtures_manifest.json (gitignored) and fill in",
+    "real values — the PDF must exist at <clients_dir>/fixtures/<pdf>, and the",
+    "config must exist at <clients_dir>/<config>, both from the private",
+    "Bookkeeping-clients repo.",
+    "",
+    "Each entry:",
+    "  name       unique label for the test (pytest ID)",
+    "  pdf        fixture PDF filename under <clients_dir>/fixtures/",
+    "  liability  optional: a second fixture PDF for workers-comp figures",
+    "             (only adp_payroll_details reads a separate Liability PDF)",
+    "  config     client config filename under <clients_dir>/",
+    "  format     payroll format key (matches the runner functions below)"
+  ],
+  "fixtures": [
+    { "name": "adp_payroll_1099_sample",       "pdf": "REPLACE_ME.pdf", "config": "REPLACE_ME.json", "format": "adp_payroll_1099" },
+    { "name": "adp_payroll_professional_sample", "pdf": "REPLACE_ME.pdf", "config": "REPLACE_ME.json", "format": "adp_payroll_professional" },
+    { "name": "adp_payroll_details_sample",    "pdf": "REPLACE_ME.pdf", "liability": "REPLACE_ME.pdf", "config": "REPLACE_ME.json", "format": "adp_payroll_details" },
+    { "name": "adp_payroll_tipped_sample",     "pdf": "REPLACE_ME.pdf", "config": "REPLACE_ME.json", "format": "adp_payroll_tipped" }
+  ]
+}

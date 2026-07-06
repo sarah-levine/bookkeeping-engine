@@ -99,21 +99,6 @@ like tax/deduction columns) instead of matching an explicit allowlist of
 earning-type labels, so a new ADP category degrades to "included but
 unlabeled" rather than "silently missing."
 
-### Schema `statement_types` enum drifts from actual parsers
-The `clients/_schema.json` enum for `statement_types` is a manually maintained
-list. Any new parser or cardholder-specific subtype (e.g. `bmo_credit_roger`)
-requires a manual schema update or jsonschema validation silently skips the
-entire client config, blocking all clients on startup.
-
-**Patched:** added `bmo_savings`, `bmo_credit_roger/nicholas/peter/christopher`
-to the enum on 2026-06-24.
-
-**Root cause to investigate:** Consider removing the `enum` constraint from
-`statement_types` items entirely and letting runtime parser matching handle
-unknown types — the schema doesn't need to gatekeep what the parsers already
-validate. Alternatively, auto-derive the enum from registered parser
-`statement_type` keys at schema generation time.
-
 ---
 
 ## Open: Needs Product/Data Decision
@@ -164,6 +149,34 @@ a new account type for a client without confirming with the user first.
   so `test_parsers.py` could actually run instead of skipping for lack of
   Drive credentials. Verified via `pytest tests/test_parsers.py` against real
   fixtures, not just direct parser calls.
+- Payroll runs entered in QuickBooks outside a session got re-derived next
+  time — fixed 2026-07-06: added `mark_payroll_done.py <client_key>
+  <check_date> <bank_credit>`, parallel to `mark_clean.py` for reconciliation.
+  Writes `payroll_log.csv`, `reconciliation_log.csv`, and `recon_log.json`
+  straight from the check date and known bank-credit total, without
+  reparsing the ADP PDFs. `client_key` accepts either a client's
+  `payroll_key` or its name/canonical key/alias — all resolve through
+  `ClientRegistry`'s alias map, which already registers `payroll_key`
+  (fixed separately in `34262e7`). `payroll_log.csv` marks the `balanced`
+  column `"N/A (marked done — not parsed from PDFs)"` since
+  there's no journal-entry breakdown to cross-check without the PDFs.
+  Covered by `tests/test_mark_payroll_done.py` (temp clients/logs dirs, git
+  push monkeypatched out — no real client data touched). The underlying
+  asymmetry (reconciliation always logs an `IN_PROGRESS` entry on parse;
+  payroll logs nothing until confirmed) is unchanged — this only adds the
+  retroactive escape hatch the roadmap called for.
+- Schema `statement_types` enum drift blocking all clients on startup — fixed
+  2026-07-06: a single client config with an unrecognized `statement_type`
+  (e.g. a new parser subtype not yet added to the `clients/_schema.json`
+  enum) caused `ClientRegistry._load()` to raise and abort construction
+  entirely, so *no* clients loaded even though only one config was bad.
+  `parsers/base.py` now warns to stderr and skips just the offending config,
+  same as the existing non-dict-JSON skip path; every other client still
+  loads. The enum itself is unchanged (still catches genuine typos —
+  `tests/test_config_and_logs.py::test_registry_rejects_invalid_config`
+  updated to assert isolation instead of a raised `ValueError`) — a brand
+  new parser subtype still needs the manual enum update to be recognized,
+  it just no longer takes the whole registry down in the meantime.
 - Pay-by-Pay (workers comp) silently dropped from payroll JE — fixed 2026-06-24:
   `adp_payroll_departments` now extracts `DebitforPay-by-Pay` from Liability PDF in
   `parse_cash_splits()`; all three formats (`departments`, `professional`, `1099`) emit

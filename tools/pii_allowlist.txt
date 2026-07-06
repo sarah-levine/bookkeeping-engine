@@ -40,7 +40,7 @@ distribution net gross epayment usa intl na
 acme bravo charlie delta echo foxtrot golf hotel salon studio academy realty
 appliance dental capital partners hcp west contractors jane doe john roe example
 client customer contoso fabrikam landlord contract services outside beta gamma
-t&t fc club surf
+t&t fc club surf test two
 
 # ── Generic business / vendor vocabulary ───────────────────────────
 supply supplies parts hardware wholesale distributor warehouse logistics freight

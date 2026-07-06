@@ -5,7 +5,7 @@ Regression unit tests for the config/registry/logs plumbing that was reworked
 when client data was externalized to the private repo:
 
   - log_utils.get_logs_dir() resolution order
-  - ClientRegistry schema validation (raise on invalid config)
+  - ClientRegistry schema validation (skip invalid config, warn, keep others)
   - ClientRegistry skips non-dict JSON (recon_log.json is a list)
   - ClientRegistry.payroll_dispatch() built from client configs
 
@@ -116,7 +116,8 @@ def test_registry_accepts_valid_config():
 
 
 def test_registry_rejects_invalid_config():
-    """An unknown statement_types value must fail schema validation."""
+    """An unknown statement_types value must fail schema validation — but
+    only that config is skipped (with a warning), not the whole registry."""
     try:
         import jsonschema  # noqa: F401
     except ImportError:
@@ -126,13 +127,12 @@ def test_registry_rejects_invalid_config():
         bad = _valid_cfg()
         bad["statement_types"] = ["not_a_real_format"]
         _write(d, "bad.json", bad)
-        try:
-            ClientRegistry(clients_dir=str(d))
-        except ValueError as e:
-            assert "not_a_real_format" in str(e) or "schema validation" in str(e)
-            print("PASS  test_registry_rejects_invalid_config")
-            return
-        assert False, "expected ValueError for invalid config"
+        _write(d, "good.json", {**_valid_cfg(), "canonical_name": "OTHER INC",
+                                 "client_name": "Other Inc"})
+        reg = ClientRegistry(clients_dir=str(d))
+        assert "ACME INC" not in reg._configs, "invalid config should not be registered"
+        assert "OTHER INC" in reg._configs, "sibling valid config must still load"
+        print("PASS  test_registry_rejects_invalid_config")
     finally:
         shutil.rmtree(d)
 

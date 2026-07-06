@@ -13,9 +13,9 @@ produced two real bugs found 2026-07-02:
   1. adp_payroll_details.py's _build_journal silently dropped a "Sick"
      earnings category from gross wages — invisible to test_payroll.py
      because that test only checks raw parsed totals, never the
-     constructed journal entry. The adp_payroll_details_jojo fixture
-     below is the actual pay period that surfaced this bug (6/30/2026,
-     $143.60 out of balance before the fix).
+     constructed journal entry. One fixture's real pay period is the
+     actual case that surfaced this bug ($143.60 out of balance before
+     the fix).
   2. append_payroll_log() never called update_sheet() at all, so every
      payroll run silently left the Google Sheet tracker stale — also
      invisible to test_payroll.py, which doesn't touch logging at all.
@@ -23,12 +23,14 @@ produced two real bugs found 2026-07-02:
 This test's balance-check assertion would have failed on bug #1, and its
 update_sheet() call-recording assertion would have failed on bug #2.
 
-Every configured fixture in PAYROLL_FIXTURES is checked (not just the
-first one found) — each exercises a different format's _build_journal.
+Every configured fixture in the manifest is checked (not just the first
+one found) — each exercises a different format's _build_journal.
 
-Requires local fixtures (source: 'repo' fixtures already in
-Bookkeeping-clients/fixtures/) and each fixture's client config to have
-payroll_key/payroll_format set. Skips cleanly without either.
+Requires payroll_fixtures_manifest.json (gitignored — copy
+payroll_fixtures_manifest.example.json and fill in real client/fixture
+filenames from the private Bookkeeping-clients repo) and each fixture's
+client config to have payroll_key/payroll_format set. Skips cleanly
+without either.
 
 Run:
     python3 tests/test_payroll_end_to_end.py
@@ -38,6 +40,7 @@ Run:
 import os
 import sys
 import csv
+import json
 import tempfile
 import shutil
 import unittest
@@ -106,42 +109,43 @@ def _run_adp_payroll_tipped(pdf_path, cfg, liability_path=None):
     return rows, check_date
 
 
-# format -> (pdf fixture filename, client config filename, runner)
-# Add an entry here whenever a new format gets a real local fixture.
-# "liability" is optional — only adp_payroll_details reads a separate
-# Liability PDF (for workers comp); adp_payroll_tipped's WC figures come
-# from fixed config values instead (workers_comp_credit/_refund).
-PAYROLL_FIXTURES = [
-    {
-        "name":    "adp_payroll_1099_fcba",
-        "pdf":     "fixture_adp_payroll_detail_fcba.pdf",
-        "config":  "fcba_academy.json",
-        "format":  "adp_payroll_1099",
-        "runner":  _run_adp_payroll_1099,
-    },
-    {
-        "name":    "adp_payroll_professional_mp_cheng",
-        "pdf":     "fixture_adp_payroll_detail.pdf",
-        "config":  "mp_cheng.json",
-        "format":  "adp_payroll_professional",
-        "runner":  _run_adp_payroll_professional,
-    },
-    {
-        "name":       "adp_payroll_details_jojo",
-        "pdf":        "fixture_adp_payroll_detail_jojo.pdf",
-        "liability":  "fixture_adp_payroll_liability_jojo.pdf",
-        "config":     "jojo_hair_studio.json",
-        "format":     "adp_payroll_details",
-        "runner":     _run_adp_payroll_details,
-    },
-    {
-        "name":    "adp_payroll_tipped_paintbox",
-        "pdf":     "fixture_adp_payroll_detail_paintbox.pdf",
-        "config":  "paintbox_hair_studio.json",
-        "format":  "adp_payroll_tipped",
-        "runner":  _run_adp_payroll_tipped,
-    },
-]
+# format -> runner. The actual client/fixture filenames (real client data)
+# live in payroll_fixtures_manifest.json (gitignored), not here — see
+# payroll_fixtures_manifest.example.json for the schema.
+RUNNER_BY_FORMAT = {
+    "adp_payroll_1099":        _run_adp_payroll_1099,
+    "adp_payroll_professional": _run_adp_payroll_professional,
+    "adp_payroll_details":     _run_adp_payroll_details,
+    "adp_payroll_tipped":      _run_adp_payroll_tipped,
+}
+
+_DIR = Path(__file__).parent
+
+
+def load_manifest():
+    """Prefer the real (gitignored) manifest; fall back to the example."""
+    real = _DIR / "payroll_fixtures_manifest.json"
+    path = real if real.exists() else _DIR / "payroll_fixtures_manifest.example.json"
+    with open(path) as f:
+        return json.load(f), path
+
+
+def _payroll_fixtures():
+    """Configured fixtures with a runner for their format, real filenames
+    filled in (skips REPLACE_ME placeholders from the example manifest)."""
+    manifest, path = load_manifest()
+    using_example = path.name.endswith(".example.json")
+    out = []
+    for entry in manifest.get("fixtures", []):
+        if using_example or entry.get("pdf", "REPLACE_ME.pdf").startswith("REPLACE_ME"):
+            continue
+        runner = RUNNER_BY_FORMAT.get(entry["format"])
+        if runner:
+            out.append({**entry, "runner": runner})
+    return out
+
+
+PAYROLL_FIXTURES = _payroll_fixtures()
 
 
 def _clients_dir():
@@ -270,6 +274,8 @@ def check_payroll_fixture(entry) -> str:
 try:
     import pytest
 
+    @pytest.mark.skipif(not PAYROLL_FIXTURES,
+                        reason="no configured fixtures (copy payroll_fixtures_manifest.example.json → payroll_fixtures_manifest.json)")
     @pytest.mark.parametrize("entry", PAYROLL_FIXTURES, ids=lambda e: e["name"])
     def test_payroll_pdf_to_log_flow(entry):
         try:
