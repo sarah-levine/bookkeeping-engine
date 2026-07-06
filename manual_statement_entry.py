@@ -41,16 +41,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from log_utils import load_private_json, write_both_logs  # noqa: E402
-from reconcile_comprehensive import BMOCheckingParser  # noqa: E402
-from parsers.citi import CitiVisaCostcoParser  # noqa: E402
-from parsers.bmo import BMOCreditCardParser  # noqa: E402
+import parsers  # noqa: E402 (import triggers every parser module's register() call)
+from parsers.registry import manual_entry_parser_map  # noqa: E402
 
-# statement_type -> parser class. Add more as manual-entry support is needed.
-PARSER_BY_TYPE = {
-    "bmo_checking":    BMOCheckingParser,
-    "bmo_credit":      BMOCreditCardParser,
-    "citi_visa_costco": CitiVisaCostcoParser,
-}
+# statement_type -> parser class, for whichever parsers support load_from_dict().
+# Comes from the same registry every parser module populates itself
+# (parsers/registry.py) — no longer a separate hand-maintained copy.
+PARSER_BY_TYPE = manual_entry_parser_map()
 
 
 def _to_decimal(value):

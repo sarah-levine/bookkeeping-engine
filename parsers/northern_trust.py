@@ -208,6 +208,10 @@ class NorthernTrustCheckingParser(StatementParser):
         return report
 
 
+from parsers.registry import register  # noqa: E402
+register("northern_trust_checking", "Northern Trust Business Checking", NorthernTrustCheckingParser)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SHARED REPORT HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════

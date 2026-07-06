@@ -726,3 +726,8 @@ class AmexCheckingParser(StatementParser):
         return report
 
 
+from parsers.registry import register  # noqa: E402
+register("amex", "American Express Business", AmexStatementParser, is_credit_card=True)
+register("amex_checking", "American Express Business Checking", AmexCheckingParser)
+
+

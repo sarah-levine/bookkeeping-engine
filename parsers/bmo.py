@@ -613,3 +613,9 @@ class BMOCreditCardParser(StatementParser):
 
         return report
 
+
+from parsers.registry import register  # noqa: E402
+register("bmo_checking", "BMO Premium Business Checking", BMOCheckingParser)
+register("bmo_credit", "BMO Business Platinum Rewards Credit Card",
+         BMOCreditCardParser, is_credit_card=True)
+
