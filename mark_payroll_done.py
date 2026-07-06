@@ -11,14 +11,14 @@ bank credit amount.
 Usage:
     python3 mark_payroll_done.py <client_key> <check_date> <bank_credit>
 
-    <client_key>   payroll_key (e.g. de_anza) or client name/canonical
-                   key/alias (e.g. "MP Cheng DDS Inc")
+    <client_key>   payroll_key (e.g. acme_inc) or client name/canonical
+                   key/alias (e.g. "Acme Inc")
     <check_date>   MM/DD/YY, MM/DD/YYYY, or YYYY-MM-DD
     <bank_credit>  total payroll bank credit amount, e.g. 18234.12
 
 Examples:
-    python3 mark_payroll_done.py de_anza 06/05/26 18234.12
-    python3 mark_payroll_done.py "MP Cheng DDS Inc" 06/05/26 9450.00
+    python3 mark_payroll_done.py acme_inc 06/05/26 18234.12
+    python3 mark_payroll_done.py "Acme Inc" 06/05/26 9450.00
 """
 
 import sys
