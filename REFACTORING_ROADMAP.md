@@ -28,6 +28,74 @@ checking parser now) before the flag mechanism could ever fire for it.
 
 ---
 
+## Open: Architecture Proposal — standardize the parser → report pipeline
+
+Not a bug, not started — captured 2026-07-07 from a design discussion, for
+whenever there's appetite to take this on. Motivation: nearly every
+duplication bug found and fixed this session (`normalize_vendor()` x5,
+`credit_card_payments` classification x4, three local `agg()`
+reimplementations, the balance-tolerance check) has the same root cause —
+each parser owns not just PDF extraction but also its own classification,
+aggregation, and report-assembly logic, hand-rolled per bank. That's a
+structural invitation for the same bug shape to keep recurring.
+
+### Proposed shape: three stages instead of one monolithic parser
+
+1. **Extract** (parser-specific, and *only* this) — PDF text → a list of
+   rows in one common shape, replacing each parser's own differently-named,
+   differently-shaped attributes (`self.credits`/`self.debits`/`self.charges`/
+   `self.payments`/`self.adp_transactions`/`self.credit_card_payments`).
+   Proposed row schema: `{date, vendor, raw_description, amount, type}`
+   where `type` is one of `credit | debit | check | payment | fee`. Amount
+   sign convention needs picking and enforcing consistently — today's
+   parsers disagree (BofA stores debits negative, Citi stores them
+   positive), which is itself a latent source of bugs like the `abs()`
+   normalization already needed in `reconcile_comprehensive.py`'s
+   unrecognized-CC-payment flag.
+2. **Classify + Aggregate** (one shared implementation) — takes the raw
+   rows plus client config (`cc_keywords`/`cc_payment_vendors`,
+   `no_aggregate_vendors`/`never_aggregate_vendors`, `payroll_vendors`,
+   `transaction_aggregations`) and produces the categorized, aggregated
+   buckets (payroll, CC payments, checks, other charges, credits). This is
+   where `_is_known_cc_network_payment()`, `_aggregate_by_vendor()`, and
+   the three duplicated local `agg()` functions all converge into one
+   place.
+3. **Report** (already mostly centralized via `parsers/report.py`'s section
+   helpers) — renders the aggregated buckets into the printed text report.
+
+### Why this is a different scale of change than anything done today
+
+Every fix landed this session was either a pure extraction (behavior-
+preserving by construction) or a small, individually-verifiable behavior
+change. This would be a real rewrite of every parser's `generate_report()`.
+A lot of genuinely parser-specific business logic currently lives *inside*
+those methods, not just "which bucket does this transaction belong to" —
+BofA's config-driven `transaction_aggregations` rollups, Wells Fargo's
+Square/EDD/IRS payroll special-casing, US Bank's check-number-range
+heuristic for payroll checks, Northern Trust's position-based Square
+account mapping, Amex's fee-keyword exclusion from Finance Charges. All of
+that has to be correctly reinterpreted against the new standard table —
+real per-parser design work, not a mechanical move.
+
+### Recommended approach if/when this gets picked up
+
+- Do **not** attempt this as one big rewrite across all 9 parsers.
+- Define the standard row schema first (as its own reviewable step).
+- Prototype the full three-stage pipeline on **one** parser before touching
+  any other — Northern Trust or Citi are likely the simplest starting
+  points (fewer buckets, fewer client-config knobs than BofA/Wells Fargo).
+  Prove the design holds against that parser's real fixtures before
+  generalizing.
+- Migrate the rest one parser at a time after that, each verified
+  independently against its own real fixtures — same before/after-diff
+  discipline used throughout this session.
+- Acceptance bar per parser: **byte-identical printed report output** on
+  every real fixture that parser has, same as every fix landed today. Not
+  "the numbers are right" — the actual rendered text, since that's what
+  gets pasted verbatim into bookkeeping work per `CLAUDE.md`.
+
+---
+
 ## Closed: Fixed
 
 - `normalize_vendor()` was duplicated 5 ways — fixed 2026-07-07, a follow-up
