@@ -221,10 +221,10 @@ class NorthernTrustCCClassificationTest(unittest.TestCase):
     """NorthernTrustCheckingParser previously had zero CC-payment
     classification at all — every debit landed in the generic
     self.debits list, so reconcile_comprehensive.py's unrecognized-payment
-    flag could never fire for this parser (confirmed by the fact its one
-    real fixture, Needles Studio's, has no CC-payment line to test against
-    at all — this parser's real-world usage was simply never exercised
-    against a statement containing one). Fixed 2026-07-07."""
+    flag could never fire for this parser (confirmed by the fact the one
+    real fixture available has no CC-payment line to test against at all —
+    this parser's real-world usage was simply never exercised against a
+    statement containing one). Fixed 2026-07-07."""
 
     _TEXT_TEMPLATE = (
         "Statement Period\n{start} through {end}\n"
