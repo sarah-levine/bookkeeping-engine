@@ -87,12 +87,6 @@ class BMOCheckingParser(StatementParser):
     def _detect_client(self):
         return super()._detect_client()
 
-    def normalize_vendor(self, description):
-        result = _registry.normalize_vendor(self.client_name or '', description)
-        if result != description:
-            return result
-        return description.strip()
-
     # ── parsing ───────────────────────────────────────────────────────────────
 
     def _parse_amount(self, s):
@@ -497,10 +491,6 @@ class BMOCreditCardParser(StatementParser):
         self.credits          = data.get('credits', [])
         self.charges          = data.get('charges', [])
         self._normalize_dates()
-
-    def normalize_vendor(self, description):
-        result = _registry.normalize_vendor(self.client_name or '', description)
-        return result if result != description else description.strip()
 
     def parse(self):
         """Parse from pdftotext output. BMO credit card layout."""

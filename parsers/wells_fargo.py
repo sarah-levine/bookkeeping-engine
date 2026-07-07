@@ -186,9 +186,6 @@ class WellsFargoCreditCardParser(StatementParser):
         report += _charges_section(aggregated, total_charges)
         return report
 
-    def normalize_vendor(self, description):
-        return _registry.normalize_vendor(self.client_name or '', description)
-
 
 
 class WellsFargoCheckingParser(StatementParser):
