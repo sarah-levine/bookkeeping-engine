@@ -34,18 +34,17 @@ class BMOCheckingParser(StatementParser):
     }
 
     def __init__(self, pdf_path, client_name=None):
-        self.pdf_path = pdf_path
-        self.client_name = client_name
+        # _ocr_text must exist before super().__init__() calls self._extract_text()
+        # (this class's override, via normal polymorphism) — test_parsers.py
+        # checks it to distinguish "no OCR available" from a real parse failure.
+        self._ocr_text = None
+        super().__init__(pdf_path, client_name)
         self.beginning_balance = None
         self.ending_balance = None
         self.credits  = []   # deposits
         self.debits   = []   # withdrawals (stored as negative Decimal)
         self.checks   = []   # check items (stored as negative Decimal)
         self.service_fees = Decimal('0')
-        self._ocr_text = None
-        self.text = self._extract_text()
-        if not self.client_name:
-            self.client_name = self._detect_client()
 
     # ── text extraction ──────────────────────────────────────────────────────
 
