@@ -30,6 +30,69 @@ checking parser now) before the flag mechanism could ever fire for it.
 
 ## Closed: Fixed
 
+- General cross-parser boilerplate cleanup — fixed 2026-07-07, requested
+  directly (centralize repeated logic into shared, generic functions rather
+  than copy-pasted per-parser code):
+  - `_now_pst()` was byte-for-byte identical (verified via checksum) and
+    completely unused/dead code, copy-pasted into 8 parser files (bofa,
+    wells_fargo, chase, citi, amex, northern_trust, usbank, bmo). Deleted
+    all 8 local redefinitions — the real one already lives in `parsers/base.py`
+    and is used correctly by `parsers/report.py`.
+  - The OCR-availability import guard (`try: import fitz/pytesseract/PIL/io;
+    OCR_AVAILABLE = True/False except ImportError: ...`) was copy-pasted
+    into 7 files, but only `northern_trust.py` and `bmo.py` actually use
+    fitz/pytesseract/Image anywhere — wells_fargo/usbank/chase/citi/amex had
+    zero calls to any of it (confirmed `OCR_AVAILABLE` itself was never even
+    read in those 5). Deleted the dead copies outright; added
+    `parsers/ocr_support.py` as the one shared definition, imported by the
+    two files that actually need it.
+  - The balance-tolerance check (`ok = abs(calc - actual) < Decimal('0.01')`)
+    was copy-pasted at 13 call sites across 9 files, including the magic
+    number itself. Added `_is_balanced(calc, actual, tolerance=Decimal('0.01'))`
+    to `parsers/report.py`, with `tolerance` as an explicit parameter — BMO
+    uses a deliberately looser `0.05` (real, intentional difference, not a
+    typo), preserved via `_is_balanced(calc, actual, tolerance=Decimal('0.05'))`
+    at its two call sites rather than silently tightened to the default.
+  While doing this, found and fixed two unrelated, pre-existing, real bugs
+  in the same files (not something this cleanup set out to find, but
+  surfaced by touching these exact import lines):
+  - `parsers/northern_trust.py` and `parsers/bmo.py` both did `from
+    parsers.report import *`, but Python's `import *` excludes names
+    starting with underscore unless the source module defines `__all__`
+    (`parsers/report.py` doesn't). Every report-section helper
+    (`_report_header`, `_balance_check`, `_deposits_section`, etc.) is
+    underscore-prefixed, so both modules had **none of them** — a
+    `NameError` on the very first line of `generate_report()` that would
+    fire on any real machine where these parsers' PDF/OCR extraction
+    actually succeeds. Never caught before: Northern Trust needs OCR, which
+    isn't available in this sandbox (so `generate_report()` is never
+    reached here at all), and nobody had exercised BMO's checking report
+    far enough to hit the specific missing calls
+    (`_deposits_section`/`_adp_section`/`_checks_section`/`_individual_section`).
+    Confirmed via `git stash` that this is a real, reproducible crash
+    against the pre-fix code (`NameError: name '_report_header' is not
+    defined`), not theoretical. Fixed both by adding explicit imports for
+    the specific underscore-prefixed helpers each file actually calls,
+    matching the pattern every other parser already uses.
+  - Added `tests/test_report_helper_imports.py`: statically parses every
+    parser file's call sites against `parsers.report`'s real helper names
+    (excluding any name the file defines locally, e.g. a nested function
+    that deliberately shadows a module-level helper of the same name — Wells
+    Fargo does this for `_individual_section`, which is correct as-is) and
+    asserts the module actually resolves each one it calls. Confirmed via
+    `git stash` that this test fails against both pre-fix files and passes
+    post-fix — this is now a general regression guard against the same
+    `import *` gap recurring in any parser, not just the two found live.
+  Verified via before/after diff against all 14 real fixtures this session
+  has touched (BofA, Amex, Chase, Citi, US Bank, Wells Fargo) — every report
+  is byte-identical except the `Generated:` timestamp line. Northern Trust
+  and BMO can't be exercised against real fixtures in this sandbox (OCR
+  unavailable), so verified synthetically instead: constructed minimal
+  parser instances directly and confirmed `generate_report()` now completes
+  without error and both PASSED/FAILED balance-check paths render correctly,
+  including BMO's `0.05` tolerance specifically (a diff of `0.03` passes,
+  matching its looser tolerance; a diff of `0.10` correctly fails).
+
 - Extended the BofA `credit_card_payments` fix (below) to Wells Fargo and US
   Bank checking parsers — fixed 2026-07-07. Both had the same root cause
   (a CC-payment list computed but never exposed as `self.credit_card_payments`,

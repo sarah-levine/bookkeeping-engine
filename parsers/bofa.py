@@ -8,10 +8,6 @@ from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-def _now_pst():
-    """Return current datetime in US/Pacific (PST/PDT)."""
-    return datetime.now(ZoneInfo('America/Los_Angeles'))
-
 try:
     import fitz
     from PIL import Image
@@ -36,7 +32,7 @@ from parsers.base import (
 )
 from parsers.report import *
 from parsers.report import (
-    _safe_date_key, _report_header, _summary_block, _balance_check,
+    _safe_date_key, _report_header, _summary_block, _balance_check, _is_balanced,
     _payments_section, _credits_section, _individual_section,
     _deposits_section, _checks_section, _adp_section,
     _cc_payments_section, _add_missing_row, _charges_section
@@ -215,7 +211,7 @@ class BankOfAmericaCreditCardParser(StatementParser):
         if self.previous_balance is not None and self.new_balance is not None:
             calc = (self.previous_balance - total_payments - total_credits
                     + total_charges + (self.finance_charge or Decimal('0')))
-            ok = abs(calc - self.new_balance) < Decimal('0.01')
+            ok = _is_balanced(calc, self.new_balance)
             report += _balance_check(ok, calc)
 
         if self.payments:
@@ -660,7 +656,7 @@ class BankOfAmericaCheckingParser(StatementParser):
 
         calc = (self.beginning_balance + total_credits + total_debits
                 + total_adp + total_special_debits + total_all_transfers + total_checks - service_fees)
-        ok = abs(calc - self.ending_balance) < Decimal('0.01')
+        ok = _is_balanced(calc, self.ending_balance)
 
         report = _report_header(self.statement_type, self.client_name,
                                 statement_date=self._extract_period())
@@ -808,7 +804,7 @@ class BankOfAmericaSavingsParser(BankOfAmericaCheckingParser):
         ])
 
         calc = self.beginning_balance + total_credits - total_debits
-        ok = abs(calc - self.ending_balance) < Decimal('0.01')
+        ok = _is_balanced(calc, self.ending_balance)
         report += _balance_check(ok, calc)
 
         if not ok:

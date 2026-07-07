@@ -75,6 +75,14 @@ def _summary_block(rows):
     return '\n'.join(lines) + '\n'
 
 
+def _is_balanced(calc, actual, tolerance=Decimal('0.01')):
+    """True if a calculated balance matches the statement's reported balance
+    within tolerance. Every parser's balance-check reimplemented this same
+    `abs(calc - actual) < Decimal('0.01')` comparison inline — centralized
+    so the tolerance is defined once."""
+    return abs(calc - actual) < tolerance
+
+
 def _balance_check(ok, calc=None):
     if ok:
         return "✓ Balance verification: PASSED\n\n"

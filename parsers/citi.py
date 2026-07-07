@@ -8,23 +8,10 @@ from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-def _now_pst():
-    """Return current datetime in US/Pacific (PST/PDT)."""
-    return datetime.now(ZoneInfo('America/Los_Angeles'))
-
-try:
-    import fitz
-    import pytesseract
-    from PIL import Image
-    import io as _io
-    OCR_AVAILABLE = True
-except ImportError:
-    OCR_AVAILABLE = False
-
 from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL
 from parsers.report import *
 from parsers.report import (
-    _report_header, _summary_block, _balance_check,
+    _report_header, _summary_block, _balance_check, _is_balanced,
     _payments_section, _credits_section, _individual_section, _deposits_section,
     _checks_section, _adp_section, _cc_payments_section, _add_missing_row,
     _charges_section, _safe_date_key, _now_pst
@@ -210,7 +197,7 @@ class CitiCheckingParser(StatementParser):
         ])
 
         calc = self.previous_balance + total_credits - total_all_deb
-        ok = abs(calc - self.new_balance) < Decimal('0.01')
+        ok = _is_balanced(calc, self.new_balance)
         report += _balance_check(ok, calc)
 
         if self.credits:
@@ -763,7 +750,7 @@ class CitiSavingsParser(StatementParser):
 
     def generate_report(self, check_payee_map=None, check_date_map=None):
         calc = self.beginning_balance + self.total_deposits - self.total_withdrawals
-        ok   = self.ending_balance != Decimal('0') and abs(calc - self.ending_balance) < Decimal('0.01')
+        ok   = self.ending_balance != Decimal('0') and _is_balanced(calc, self.ending_balance)
 
         report = _report_header(self.statement_type, self.client_name,
                                 statement_date=self.statement_date)

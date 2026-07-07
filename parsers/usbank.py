@@ -8,23 +8,10 @@ from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-def _now_pst():
-    """Return current datetime in US/Pacific (PST/PDT)."""
-    return datetime.now(ZoneInfo('America/Los_Angeles'))
-
-try:
-    import fitz
-    import pytesseract
-    from PIL import Image
-    import io as _io
-    OCR_AVAILABLE = True
-except ImportError:
-    OCR_AVAILABLE = False
-
 from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, _is_known_cc_network_payment
 from parsers.report import *
 from parsers.report import (
-    _safe_date_key, _report_header, _summary_block, _balance_check,
+    _safe_date_key, _report_header, _summary_block, _balance_check, _is_balanced,
     _payments_section, _credits_section, _individual_section,
     _deposits_section, _checks_section, _adp_section,
     _cc_payments_section, _add_missing_row, _charges_section
@@ -332,7 +319,7 @@ class USBankCheckingParser(StatementParser):
 
         if self.beginning_balance is not None and self.ending_balance is not None:
             calc = self.beginning_balance + total_deposits - total_withdrawals
-            ok = abs(calc - self.ending_balance) < Decimal('0.01')
+            ok = _is_balanced(calc, self.ending_balance)
             report += _balance_check(ok, calc)
 
         if dep_rows:

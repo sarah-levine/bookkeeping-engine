@@ -8,21 +8,13 @@ from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-def _now_pst():
-    """Return current datetime in US/Pacific (PST/PDT)."""
-    return datetime.now(ZoneInfo('America/Los_Angeles'))
-
-try:
-    import fitz
-    import pytesseract
-    from PIL import Image
-    import io as _io
-    OCR_AVAILABLE = True
-except ImportError:
-    OCR_AVAILABLE = False
-
+from parsers.ocr_support import fitz, pytesseract, Image, _io, OCR_AVAILABLE
 from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL
 from parsers.report import *
+from parsers.report import (
+    _balance_check, _deposits_section, _individual_section,
+    _report_header, _safe_date_key, _summary_block, _is_balanced,
+)
 
 class NorthernTrustCheckingParser(StatementParser):
     """
@@ -180,7 +172,7 @@ class NorthernTrustCheckingParser(StatementParser):
         total_credits = sum(t['amount'] for t in self.credits)
 
         calc = self.beginning_balance + total_credits + total_debits
-        ok = abs(calc - self.ending_balance) < Decimal('0.01')
+        ok = _is_balanced(calc, self.ending_balance)
 
         period = ''
         m = re.search(r'(\d{2}/\d{2}/\d{2,4})\s+through\s+(\d{2}/\d{2}/\d{2,4})', self.text)
