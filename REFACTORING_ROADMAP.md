@@ -30,6 +30,38 @@ checking parser now) before the flag mechanism could ever fire for it.
 
 ## Closed: Fixed
 
+- Three parser `__init__` methods bypassed `super().__init__()` entirely and
+  silently reimplemented the base class's body inline — fixed 2026-07-07
+  (item #4 from the boilerplate survey, flagged separately from items #1-3
+  as "higher risk, worth doing deliberately" since it's an actual class-
+  hierarchy inconsistency, not pure copy-paste):
+  - `AmexStatementParser` needed a genuinely different fix, not just adding
+    `super().__init__()`: it overrode a *differently-named* method
+    (`_extract_text_amex()`) instead of the base class's `_extract_text()`,
+    so calling `super().__init__()` naively would have run the base class's
+    generic pdftotext extraction instead of Amex's zip-of-pages format.
+    Renamed `_extract_text_amex` → `_extract_text` (no external references
+    existed to the old name) so it properly overrides via normal
+    polymorphism, then switched `__init__` to call `super().__init__()`.
+  - `NorthernTrustCheckingParser` and `BMOCheckingParser` already had
+    correctly-named `_extract_text()` overrides — Python's dynamic dispatch
+    means `super().__init__()` already calls the *subclass's* version via
+    `self._extract_text()`, so no rename was needed for these two, just the
+    `super()` switch. Kept `self._ocr_text = None` set *before* the
+    `super().__init__()` call in both, since `test_parsers.py` reads that
+    attribute to distinguish "OCR unavailable" from a real parse failure,
+    and the base `__init__` triggers `_extract_text()` immediately.
+  - `BMOCreditCardParser` was deliberately left as-is — it has a genuine
+    special case (`pdf_path=None` for the `load_from_dict()` manual-entry
+    path) that the base `__init__` doesn't support at all; not a
+    duplication bug, a real divergence in contract.
+  Verified live against both real Amex fixtures (FCBA, Duran) — reports
+  byte-identical except the timestamp. Northern Trust and BMO have no
+  OCR-capable fixture in this sandbox, so verified by direct construction
+  instead: both classes still build correctly end-to-end (extra attributes
+  present, `_ocr_text` still `None` when extraction can't run), confirmed
+  identical to pre-fix behavior via `git stash` for both.
+
 - General cross-parser boilerplate cleanup — fixed 2026-07-07, requested
   directly (centralize repeated logic into shared, generic functions rather
   than copy-pasted per-parser code):

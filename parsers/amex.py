@@ -40,9 +40,7 @@ class AmexStatementParser(StatementParser):
     statement_type = "American Express Business"
 
     def __init__(self, pdf_path, client_name=None):
-        self.pdf_path = str(pdf_path)
-        self.text = self._extract_text_amex()
-        self.client_name = client_name or self._detect_client()
+        super().__init__(pdf_path, client_name)
         self.closing_date = None
         self.account_number = None
         self.previous_balance = None
@@ -53,7 +51,7 @@ class AmexStatementParser(StatementParser):
         self.fees = Decimal('0')
         self.interest = Decimal('0')
 
-    def _extract_text_amex(self):
+    def _extract_text(self):
         """Try zip-of-pages format first, fall back to pdftotext."""
         try:
             with zipfile.ZipFile(self.pdf_path, 'r') as z:
