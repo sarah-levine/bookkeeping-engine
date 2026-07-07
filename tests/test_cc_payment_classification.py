@@ -24,6 +24,7 @@ from parsers.bofa import BankOfAmericaCheckingParser
 from parsers.amex import AmexCheckingParser
 from parsers.wells_fargo import WellsFargoCheckingParser
 from parsers.usbank import USBankCheckingParser
+from parsers.northern_trust import NorthernTrustCheckingParser
 
 
 def _d(x):
@@ -214,6 +215,67 @@ class USBankCheckingCCClassificationTest(unittest.TestCase):
         ])
         p.generate_report()
         self.assertFalse(p.credit_card_payments)
+
+
+class NorthernTrustCCClassificationTest(unittest.TestCase):
+    """NorthernTrustCheckingParser previously had zero CC-payment
+    classification at all — every debit landed in the generic
+    self.debits list, so reconcile_comprehensive.py's unrecognized-payment
+    flag could never fire for this parser (confirmed by the fact the one
+    real fixture available has no CC-payment line to test against at all —
+    this parser's real-world usage was simply never exercised against a
+    statement containing one). Fixed 2026-07-07."""
+
+    _TEXT_TEMPLATE = (
+        "Statement Period\n{start} through {end}\n"
+        "Beginning Balance on {start}  1,000.00\n"
+        "Other Items Paid\n"
+        "{lines}"
+        "Daily Ledger\n"
+        "Ending Balance on {end}, 2026  {ending}\n"
+    )
+
+    def _parser(self, txn_lines, ending):
+        text = self._TEXT_TEMPLATE.format(
+            start="06/01/26", end="06/30/26",
+            lines="".join(txn_lines), ending=ending,
+        )
+        p = NorthernTrustCheckingParser.__new__(NorthernTrustCheckingParser)
+        p.client_name = None  # no client config -> only the generic fallback applies
+        p.credits = []
+        p.debits = []
+        p.credit_card_payments = []
+        p.checks = []
+        p.beginning_balance = None
+        p.ending_balance = None
+        p.closing_date = None
+        p.text = text
+        return p
+
+    def test_amex_payment_classified_separately_from_debits(self):
+        p = self._parser(
+            txn_lines=[
+                "ACH Debit ACH DEBIT AMERICAN EXPRESS ACH PMT 3900.00\n",
+                "REF123 06/29 8797583 CCD\n",
+            ],
+            ending="6,900.00",  # 1000 - 3900 balances only if AmEx counted
+        )
+        p.parse()
+        self.assertEqual(len(p.credit_card_payments), 1)
+        self.assertFalse(p.debits, "must not also land in generic debits")
+        self.assertIn('AMERICAN EXPRESS', p.credit_card_payments[0]['vendor'].upper())
+
+    def test_generic_vendor_stays_in_debits(self):
+        p = self._parser(
+            txn_lines=[
+                "ACH Debit ACH DEBIT Square Inc SQ250303 T3QXZF 55.00\n",
+                "REF456 06/02 8797584 CCD\n",
+            ],
+            ending="945.00",
+        )
+        p.parse()
+        self.assertFalse(p.credit_card_payments)
+        self.assertEqual(len(p.debits), 1)
 
 
 if __name__ == "__main__":
