@@ -30,6 +30,39 @@ checking parser now) before the flag mechanism could ever fire for it.
 
 ## Closed: Fixed
 
+- `normalize_vendor()` was duplicated 5 ways — fixed 2026-07-07, a follow-up
+  to the boilerplate survey. `parsers/base.py`'s `StatementParser` already
+  had a base `normalize_vendor()`, but 4 subclasses (`usbank`, `northern_trust`,
+  `bmo`'s two classes) each redefined an *upgraded* copy — identical to each
+  other (confirmed via checksum) — adding a `.strip()` fallback the base
+  lacked. A 5th (`WellsFargoCreditCardParser`) had a copy that was pure dead
+  code, byte-identical to the base's un-upgraded version. Upgraded the base
+  class to include the `.strip()` fallback and deleted all 5 duplicates.
+  (`WellsFargoCheckingParser`'s separate override, which delegates to its
+  own `_normalize()` for Wells-specific cleanup, is genuinely different and
+  was left untouched.)
+  Unlike the other boilerplate items, this changes the base class every
+  parser inherits from — including ones with no override at all (BofA,
+  Citi, Chase, Amex, Capital One), so it needed real verification, not just
+  a mechanical-extraction argument. Traced where each of those parsers
+  builds its vendor string before calling `normalize_vendor()`: BofA/Citi/
+  Chase/Capital One already `.strip()` (and often whitespace-collapse) the
+  description upstream, so the base's new fallback is a no-op there by
+  construction; Amex was the one parser with an unstripped code path
+  (`vendor_raw = txn_m.group(2)`, no `.strip()`), making it the only real
+  behavior-change candidate. Verified via before/after diff against all 24
+  real bank/credit-card fixtures (every parser type touched this session,
+  excluding payroll) — zero real differences, only the `Generated:`
+  timestamp line changed anywhere.
+  Found one real test coupling while doing this:
+  `tests/test_bmo_credit.py::test_normalize_vendor_with_config` monkeypatched
+  `parsers.bmo._registry` to inject a test config, which worked while
+  `normalize_vendor()` was defined directly in `bmo.py` (bare names resolve
+  via the *defining* module, not the caller's). Once the method moved to
+  `parsers/base.py`, the same monkeypatch silently stopped taking effect —
+  not a bug in the centralization itself, but a real consequence of it.
+  Fixed by also patching `parsers.base._registry` in the test.
+
 - Three parser `__init__` methods bypassed `super().__init__()` entirely and
   silently reimplemented the base class's body inline — fixed 2026-07-07
   (item #4 from the boilerplate survey, flagged separately from items #1-3

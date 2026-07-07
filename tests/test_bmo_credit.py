@@ -220,15 +220,25 @@ def test_normalize_vendor_with_config():
         (d / "fabrikam.json").write_text(json.dumps(cfg))
         from parsers.base import ClientRegistry
         import parsers.bmo as _bmo_mod
-        old_registry = _bmo_mod._registry
-        _bmo_mod._registry = ClientRegistry(clients_dir=str(d))
+        import parsers.base as _base_mod
+        old_bmo_registry = _bmo_mod._registry
+        old_base_registry = _base_mod._registry
+        new_registry = ClientRegistry(clients_dir=str(d))
+        _bmo_mod._registry = new_registry
+        # normalize_vendor() lives on StatementParser (parsers/base.py) — a
+        # bare `_registry` reference inside it resolves via parsers.base's
+        # own module namespace, not parsers.bmo's, regardless of which
+        # subclass calls it. Must patch both for this test to actually take
+        # effect.
+        _base_mod._registry = new_registry
         try:
             p = BMOCreditCardParser(client_name='FABRIKAM LLC')
             assert p.normalize_vendor('ACME SUPPLY 12345') == 'Acme Supply Co'
             assert p.normalize_vendor('AMAZON MKTPL ORDER') == 'Amazon'
             assert p.normalize_vendor('DELTA STORE INC') == 'DELTA STORE INC'
         finally:
-            _bmo_mod._registry = old_registry
+            _bmo_mod._registry = old_bmo_registry
+            _base_mod._registry = old_base_registry
         print("PASS  test_normalize_vendor_with_config")
     finally:
         shutil.rmtree(d)

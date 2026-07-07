@@ -72,12 +72,6 @@ class NorthernTrustCheckingParser(StatementParser):
                 return CLIENT_CANONICAL.get(name, name)
         return None
 
-    def normalize_vendor(self, description):
-        result = _registry.normalize_vendor(self.client_name or '', description)
-        if result != description:
-            return result
-        return description.strip()
-
     def parse(self):
         lines = self.text.split('\n')
 

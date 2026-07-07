@@ -540,7 +540,10 @@ class StatementParser:
         return None
 
     def normalize_vendor(self, description):
-        return _registry.normalize_vendor(self.client_name or '', description)
+        result = _registry.normalize_vendor(self.client_name or '', description)
+        if result != description:
+            return result
+        return description.strip()
 
     def client_feature(self, name, default=False):
         """Return a feature flag from the client's JSON config: features.<name>.
