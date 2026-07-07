@@ -22,6 +22,8 @@ from decimal import Decimal
 from parsers.base import _is_known_cc_network_payment
 from parsers.bofa import BankOfAmericaCheckingParser
 from parsers.amex import AmexCheckingParser
+from parsers.wells_fargo import WellsFargoCheckingParser
+from parsers.usbank import USBankCheckingParser
 
 
 def _d(x):
@@ -130,6 +132,88 @@ class AmexCheckingCCClassificationTest(unittest.TestCase):
         matching = [w for w in withdrawals if 'CONTOSO' in w['vendor'].upper()]
         self.assertEqual(len(matching), 1, "non-CC same-vendor debits should still aggregate to one line")
         self.assertEqual(matching[0]['count'], 2)
+
+
+class WellsFargoCheckingCCClassificationTest(unittest.TestCase):
+    """WellsFargoCheckingParser previously only classified 'WFB Credit Card'/
+    'Online Transfer to' as a CC payment — a bare 'AMERICAN EXPRESS' debit
+    (this parser normalizes vendor text during parse(), so the stored
+    vendor is already what a client's config would see) fell through to
+    generic Withdrawals, and the resulting list was never exposed on
+    self.credit_card_payments at all, so reconcile_comprehensive.py's flag
+    could never fire for Wells Fargo checking statements. Fixed 2026-07-07."""
+
+    def _parser(self, debits):
+        p = WellsFargoCheckingParser.__new__(WellsFargoCheckingParser)
+        p.client_name = None
+        p.beginning_balance = None
+        p.ending_balance = None
+        p.statement_period = None
+        p.closing_date = None
+        p.credits = []
+        p.debits = debits
+        p.checks = []
+        p.bank_fees = []
+        return p
+
+    def test_amex_bill_payment_classified_and_exposed_on_self(self):
+        p = self._parser(debits=[
+            {'date': '06/29/26', 'vendor': 'American Express ACH Pmt', 'amount': Decimal('3900.00')},
+        ])
+        p.generate_report()
+        self.assertEqual(len(p.credit_card_payments), 1)
+        self.assertEqual(p.credit_card_payments[0]['vendor'], 'American Express ACH Pmt')
+
+    def test_previously_supported_pattern_still_classified(self):
+        p = self._parser(debits=[
+            {'date': '06/29/26', 'vendor': 'WFB Credit Card Payment', 'amount': Decimal('500')},
+        ])
+        p.generate_report()
+        self.assertEqual(len(p.credit_card_payments), 1)
+
+    def test_generic_vendor_not_misclassified(self):
+        p = self._parser(debits=[
+            {'date': '06/29/26', 'vendor': 'Staples Office Supplies', 'amount': Decimal('40')},
+        ])
+        p.generate_report()
+        self.assertFalse(p.credit_card_payments)
+
+
+class USBankCheckingCCClassificationTest(unittest.TestCase):
+    """USBankCheckingParser previously had zero generic CC-payment
+    classification at all — only a client's own manually-curated
+    cc_payment_vendors config matched, and the result was never exposed on
+    self.credit_card_payments. Fixed 2026-07-07: added the shared
+    _is_known_cc_network_payment() fallback alongside the existing config,
+    and exposed the result on self."""
+
+    def _parser(self, withdrawals):
+        p = USBankCheckingParser.__new__(USBankCheckingParser)
+        p.client_name = None
+        p.account_number = ''
+        p.statement_date = ''
+        p.beginning_balance = None
+        p.ending_balance = None
+        p.deposits = []
+        p.withdrawals = withdrawals
+        return p
+
+    def test_amex_payment_classified_with_no_client_config(self):
+        # No cc_payment_vendors configured at all — must still classify via
+        # the generic fallback, unlike before this fix.
+        p = self._parser(withdrawals=[
+            {'date': '04/03/26', 'vendor': 'American Express Payment', 'amount': Decimal('2000.00')},
+        ])
+        p.generate_report()
+        self.assertEqual(len(p.credit_card_payments), 1)
+        self.assertEqual(p.credit_card_payments[0]['vendor'], 'American Express Payment')
+
+    def test_generic_vendor_not_misclassified(self):
+        p = self._parser(withdrawals=[
+            {'date': '04/03/26', 'vendor': 'Staples Office Supplies', 'amount': Decimal('40')},
+        ])
+        p.generate_report()
+        self.assertFalse(p.credit_card_payments)
 
 
 if __name__ == "__main__":
