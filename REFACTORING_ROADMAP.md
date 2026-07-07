@@ -39,6 +39,43 @@ a new account type for a client without confirming with the user first.
 
 ## Closed: Fixed
 
+- Two bugs found via a full regression sweep — downloaded and ran
+  `reconcile_comprehensive.py --dry-run` against all 17 real bank-statement
+  fixtures in the Drive test-fixtures folder (not just the 1-2 pulled per
+  fix earlier), confirming nothing else broke and surfacing these two
+  pre-existing issues, both fixed 2026-07-07:
+  - `parsers/citi.py` stored transaction amounts as `str(amount)` instead
+    of `Decimal` in four places (`CitiCheckingParser.adp_transactions`,
+    `.credit_card_payments`, `.charges` in `parse()`, and
+    `CitiVisaCostcoParser.charges` in both `parse()` and
+    `load_from_dict()`) — inconsistent with sibling fields in the very same
+    functions (`self.checks`/`self.credits`), which already stored
+    `Decimal` directly. This crashed `reconcile_comprehensive.py`'s "flag
+    unrecognized CC payments" check on every real Citi checking/savings
+    statement with an autopay/credit-card-payment line
+    (`f"${pmt['amount']:,.2f}"` raises `Unknown format code 'f' for object
+    of type 'str'` on a `str`), silently swallowing the intended "ASK
+    CLIENT" flag every time (caught by a broad `except`, printed as "CC
+    flag check failed"). Fixed at the source in `citi.py` (drop the
+    unnecessary `str()` casts) and defensively in
+    `reconcile_comprehensive.py` (normalize with `Decimal(str(...))` before
+    formatting, so the shared flag-check code can't crash regardless of
+    which parser's data feeds it). Verified live against the real Citi
+    checking/savings fixtures: the flag now correctly fires
+    (`⚠ Unrecognized Chase payment $1,902.85 on 05/05/26 — no Chase
+    statement on file (ASK CLIENT)`) instead of crashing.
+  - `ChaseParser.generate_report()` (`parsers/chase.py`) imported
+    `_balance_check` but never called it — unlike every other credit-card
+    parser (BofA, Amex, Wells Fargo, Citi, Capital One), Chase
+    Ink/Sapphire/United statements never printed an explicit "Balance
+    verification: PASSED/FAILED" line at all. The underlying numbers
+    already tied out correctly (verified against a real Chase Ink
+    statement); this was a missing confirmation step, not a silent
+    miscalculation. Added the same `calc`/`_balance_check()` pattern used
+    by the other parsers.
+  - `tests/test_citi_amount_types.py` (5 tests) and
+    `tests/test_chase_balance_check.py` (2 tests) cover both regressions;
+    confirmed both fail against pre-fix code.
 - `adp_payroll_details.py`'s Associates (dept 002) earnings-category list
   was a hardcoded allowlist with no fallback — fixed 2026-07-07.
   `parse_payroll_details()` only summed labels it explicitly regex-matched

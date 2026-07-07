@@ -4,13 +4,31 @@
 |------|-----------------|----------------|
 | `test_log_pipeline.py`     | no  | `payroll_log → reconciliation_log → tracker` write/read/render (synthetic) |
 | `test_config_and_logs.py`  | no  | `get_logs_dir()` resolution, schema validation, registry skips non-dict JSON, payroll dispatch |
+| `test_aggregations.py`     | no  | config-driven transaction roll-ups (`parsers.*.aggregate_transactions`), synthetic transactions |
+| `test_vendor_normalize.py` | no  | standard + client-tier vendor normalization, no duplicate copies |
+| `test_bmo_credit.py`       | no  | `BMOCreditCardParser` parsing/report generation against synthetic text |
+| `test_statement_registry.py` | no | `parsers/registry.py`: schema/registry key parity, adding a new format needs only one `register()` call |
+| `test_drive_archiver_credentials.py` | no | `drive_archiver._get_service()`'s credential fallback chain (mocked, no real creds/network) |
+| `test_mark_payroll_done.py` | no | `mark_payroll_done.py` CLI: payroll_key/name resolution, upsert semantics, error handling |
+| `test_bofa_check_payees.py` | no | BofA checking's check-image payee OCR + opt-in Claude Vision extraction (mocked) |
+| `test_vision_helper_check_payees.py` | no | `extractors.vision_helper.extract_check_payees()` in isolation (mocked) |
+| `test_cc_payment_classification.py` | no | shared card-network-payment fallback classifier used by `bofa.py`/`amex.py` |
+| `test_citi_costco_closing_date.py` | no | `CitiVisaCostcoParser` closing-date extraction, including real OCR-garbled statement text |
+| `test_citi_amount_types.py` | no | `CitiCheckingParser`/`CitiVisaCostcoParser` store transaction amounts as `Decimal`, not `str` |
+| `test_chase_balance_check.py` | no | `ChaseParser` prints an explicit balance-verification line |
+| `test_adp_payroll_details_earnings.py` | no | `adp_payroll_details.py`'s generic earnings-category fallback (unknown categories included, not dropped) |
+| `test_adp_multi_journal_wiring.py` | no | `adp_payroll_departments`/`adp_labor_distribution`'s monkeypatch-and-capture test wiring |
 | `test_parsers.py`          | yes | each bank parser extracts balances/line items from a real statement |
 | `test_payroll.py`          | yes | each ADP payroll format parses with a balance tie-out (parse only — no `_build_journal`, no log writes) |
 | `test_end_to_end.py`       | yes | bank pipeline: PDF → `detect_statement_type` → parser → report → `write_both_logs` → digest read |
-| `test_payroll_end_to_end.py` | yes | payroll pipeline: PDF → real parse chain → real `_build_journal()` → balance check → `append_payroll_log()` → read back, plus a check that `update_sheet()` is actually called |
+| `test_payroll_end_to_end.py` | yes | payroll pipeline: PDF → real parse chain → real journal builder → balance check → `append_payroll_log()` → read back, plus a check that `update_sheet()` is actually called |
 
-The first two run anywhere (including CI). The fixture-backed ones **skip**
-when fixtures/credentials are absent, so a fresh public checkout stays green.
+Everything above the fixture-backed group runs anywhere, including CI, with
+no PDFs or credentials — parsers are instantiated via `__new__` (bypassing
+PDF extraction) and fed synthetic or hand-built real-world text, and any
+external call (Vision, Drive, GitHub) is mocked. The fixture-backed ones
+**skip** when fixtures/credentials are absent, so a fresh public checkout
+stays green.
 
 Run everything:
 ```bash

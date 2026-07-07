@@ -144,7 +144,7 @@ class CitiCheckingParser(StatementParser):
                     if trans_type == 'ACH DEBIT':
                         if 'ADP' in vendor.upper():
                             self.adp_transactions.append(
-                                {'date': date, 'vendor': vendor, 'amount': str(amount)})
+                                {'date': date, 'vendor': vendor, 'amount': amount})
                             self.total_charges += amount
                             i += 1
                             continue
@@ -154,7 +154,7 @@ class CitiCheckingParser(StatementParser):
                             vendor = f'{vendor}|{date}'
                         if 'CREDIT CRD' in vendor.upper() or 'AUTOPAY' in vendor.upper():
                             self.credit_card_payments.append(
-                                {'date': date, 'vendor': vendor, 'amount': str(amount)})
+                                {'date': date, 'vendor': vendor, 'amount': amount})
                             self.total_charges += amount
                             i += 1
                             continue
@@ -174,7 +174,7 @@ class CitiCheckingParser(StatementParser):
                     self.credits.append({'date': date, 'vendor': vendor, 'amount': amount})
                     self.total_credits += amount
                 else:
-                    self.charges.append({'date': date, 'vendor': vendor, 'amount': str(amount)})
+                    self.charges.append({'date': date, 'vendor': vendor, 'amount': amount})
                     self.total_charges += amount
 
             i += 1
@@ -554,7 +554,7 @@ class CitiVisaCostcoParser(StatementParser):
             self.charges.append({
                 'date': date_str,
                 'vendor': vendor_raw,
-                'amount': str(abs(amount)),
+                'amount': abs(amount),
             })
 
 
@@ -587,7 +587,7 @@ class CitiVisaCostcoParser(StatementParser):
             for c in data.get('credits', [])
         ]
         self.charges = [
-            {'date': c['date'], 'vendor': c['vendor'], 'amount': str(c['amount'])}
+            {'date': c['date'], 'vendor': c['vendor'], 'amount': Decimal(str(c['amount']))}
             for c in data.get('charges', [])
         ]
         self.client_name = data.get('client_name', self.client_name)

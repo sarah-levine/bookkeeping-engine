@@ -1284,6 +1284,10 @@ def main():
                     cc_payments = getattr(parser, 'credit_card_payments', [])
                     for pmt in cc_payments:
                         vendor = pmt.get('vendor', '').upper()
+                        # Some parsers (e.g. CitiCheckingParser) store amount
+                        # as a str, not Decimal — normalize before formatting
+                        # so this flag check can't crash on a str amount.
+                        pmt_amount = Decimal(str(pmt['amount']))
                         matched = any(
                             kw.upper() in vendor
                             for kw in (cfg.get('cc_keywords', []) if parser.client_name else [])
@@ -1291,14 +1295,14 @@ def main():
                         # Flag if vendor contains a known card issuer but no
                         # statement for that issuer was reconciled this session
                         if 'AMERICAN EXPRESS' in vendor and 'amex' not in cc_stmts_this_session:
-                            issue = f"Unrecognized Amex payment ${pmt['amount']:,.2f} on {pmt['date']} — no Amex statement on file (ASK CLIENT)"
+                            issue = f"Unrecognized Amex payment ${pmt_amount:,.2f} on {pmt['date']} — no Amex statement on file (ASK CLIENT)"
                             print(f"  ⚠ {issue}")
                             if parser.client_name:
                                 _flag(client=parser.client_name, issue=issue)
                         elif 'CHASE' in vendor and not any(
                             s in cc_stmts_this_session for s in ('chase_ink', 'chase_united', 'chase_sapphire')
                         ):
-                            issue = f"Unrecognized Chase payment ${pmt['amount']:,.2f} on {pmt['date']} — no Chase statement on file (ASK CLIENT)"
+                            issue = f"Unrecognized Chase payment ${pmt_amount:,.2f} on {pmt['date']} — no Chase statement on file (ASK CLIENT)"
                             print(f"  ⚠ {issue}")
                             if parser.client_name:
                                 _flag(client=parser.client_name, issue=issue)
