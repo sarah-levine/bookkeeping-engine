@@ -109,14 +109,114 @@ def _run_adp_payroll_tipped(pdf_path, cfg, liability_path=None):
     return rows, check_date
 
 
+def _run_adp_payroll_departments(pdf_path, cfg, liability_path=None):
+    """adp_payroll_departments has no separate _build_journal() (unlike the
+    other formats above) — its rows are built inline in
+    run_adp_payroll_departments(). Rather than reimplementing that logic
+    here, call the real function with _qb_confirm/append_payroll_log/
+    append_digest_log/archive_payroll_pdf/load_config monkeypatched to
+    capture args instead of prompting/writing/uploading."""
+    import payroll_clients.adp_payroll_departments as mod
+
+    captured = {}
+
+    def _fake_append_payroll_log(client, client_name, check_date, rows, **kw):
+        captured["rows"] = rows
+        captured["check_date"] = check_date
+
+    orig = {
+        "_qb_confirm": mod._qb_confirm,
+        "append_payroll_log": mod.append_payroll_log,
+        "append_digest_log": mod.append_digest_log,
+        "archive_payroll_pdf": mod.archive_payroll_pdf,
+        "load_config": mod.load_config,
+    }
+    mod._qb_confirm = lambda label: True
+    mod.append_payroll_log = _fake_append_payroll_log
+    mod.append_digest_log = lambda *a, **k: None
+    mod.archive_payroll_pdf = lambda *a, **k: None
+    mod.load_config = lambda _: cfg
+    try:
+        mod.run_adp_payroll_departments([pdf_path, liability_path], "unused.json")
+    finally:
+        for name, val in orig.items():
+            setattr(mod, name, val)
+
+    if "rows" not in captured:
+        raise AssertionError(
+            "run_adp_payroll_departments did not call append_payroll_log "
+            "(did _qb_confirm return False?)"
+        )
+    return captured["rows"], captured["check_date"]
+
+
+def _run_adp_labor_distribution_calls(pdf_path, cfg):
+    """Calls the real run_adp_labor_distribution() once, capturing BOTH the
+    Agency (Div 50) and Admin (Div 10) append_payroll_log() calls it makes
+    internally — same monkeypatch technique as _run_adp_payroll_departments,
+    for the same reason (no separate _build_journal() to call for each
+    division; row-building is inline)."""
+    import payroll_clients.adp_labor_distribution as mod
+
+    calls = []
+
+    def _fake_append_payroll_log(client, client_name, check_date, rows, **kw):
+        calls.append({"client": client, "check_date": check_date, "rows": rows})
+
+    orig = {
+        "_qb_confirm": mod._qb_confirm,
+        "append_payroll_log": mod.append_payroll_log,
+        "append_digest_log": mod.append_digest_log,
+        "archive_payroll_pdf": mod.archive_payroll_pdf,
+        "load_config": mod.load_config,
+    }
+    mod._qb_confirm = lambda label: True
+    mod.append_payroll_log = _fake_append_payroll_log
+    mod.append_digest_log = lambda *a, **k: None
+    mod.archive_payroll_pdf = lambda *a, **k: None
+    mod.load_config = lambda _: cfg
+    try:
+        mod.run_adp_labor_distribution([pdf_path], "unused.json")
+    finally:
+        for name, val in orig.items():
+            setattr(mod, name, val)
+
+    return calls
+
+
+def _run_adp_labor_distribution_agency(pdf_path, cfg, liability_path=None):
+    calls = _run_adp_labor_distribution_calls(pdf_path, cfg)
+    agency = next((c for c in calls if c["client"].endswith("_agency")), None)
+    if agency is None:
+        raise AssertionError(
+            "run_adp_labor_distribution did not log the Agency (Div 50) journal "
+            "(did _qb_confirm return False for it?)"
+        )
+    return agency["rows"], agency["check_date"]
+
+
+def _run_adp_labor_distribution_admin(pdf_path, cfg, liability_path=None):
+    calls = _run_adp_labor_distribution_calls(pdf_path, cfg)
+    admin = next((c for c in calls if c["client"].endswith("_admin")), None)
+    if admin is None:
+        raise AssertionError(
+            "run_adp_labor_distribution did not log the Admin (Div 10) journal "
+            "(did _qb_confirm return False for it?)"
+        )
+    return admin["rows"], admin["check_date"]
+
+
 # format -> runner. The actual client/fixture filenames (real client data)
 # live in payroll_fixtures_manifest.json (gitignored), not here — see
 # payroll_fixtures_manifest.example.json for the schema.
 RUNNER_BY_FORMAT = {
-    "adp_payroll_1099":        _run_adp_payroll_1099,
-    "adp_payroll_professional": _run_adp_payroll_professional,
-    "adp_payroll_details":     _run_adp_payroll_details,
-    "adp_payroll_tipped":      _run_adp_payroll_tipped,
+    "adp_payroll_1099":            _run_adp_payroll_1099,
+    "adp_payroll_professional":    _run_adp_payroll_professional,
+    "adp_payroll_details":         _run_adp_payroll_details,
+    "adp_payroll_tipped":          _run_adp_payroll_tipped,
+    "adp_payroll_departments":     _run_adp_payroll_departments,
+    "adp_labor_distribution_agency": _run_adp_labor_distribution_agency,
+    "adp_labor_distribution_admin":  _run_adp_labor_distribution_admin,
 }
 
 _DIR = Path(__file__).parent

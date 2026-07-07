@@ -5,21 +5,6 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
-### `test_payroll_end_to_end.py` doesn't cover `adp_payroll_departments`/`adp_labor_distribution`
-Real fixtures for both now exist (`fixture_adp_payroll_detail/liability_deanza.pdf`,
-`fixture_adp_labor_distribution_duran.pdf`, added 2026-07-02, both verified
-balanced via `payroll.py` directly) but aren't wired into the test. Unlike
-the other four formats, `run_adp_payroll_departments()` and
-`run_adp_labor_distribution()` build their journal rows inline — there's no
-separate `_build_journal()` to import and call directly the way the test
-does for the other formats.
-
-**Fix:** add a harness that calls the real `run_adp_payroll_departments`/
-`run_adp_labor_distribution` functions with `_qb_confirm` monkeypatched to
-return `True` and `append_payroll_log`/`archive_payroll_pdf` monkeypatched
-to capture args instead of writing/uploading, rather than reimplementing
-their row-building logic in the test.
-
 ### BMO checking/credit card parsers never set `closing_date`/`statement_date`
 `BMOCheckingParser` and `BMOCreditCardParser` never assign `self.closing_date`
 or `self.statement_date` during `parse()`, same failure mode as the BofA/Wells
@@ -31,16 +16,6 @@ real failure once BMO fixtures are wired into the manifest.
 
 **Root cause fix:** add closing-date extraction to `parse()` in `parsers/bmo.py`,
 following the pattern in `parsers/bofa.py`'s `_extract_closing_date()`.
-
-### `CitiVisaCostcoParser` closing-date regex isn't OCR-noise-tolerant
-Its closing-date extraction assumes clean text; OCR'd/scanned Costco Visa
-statements can inject stray characters that break the regex, silently
-leaving `closing_date` unset the same way the BofA bug did. Lower priority
-than the BMO item — real production entries logged so far all have valid
-dates, so this hasn't caused visible damage yet, just a latent risk.
-
-**Root cause fix:** loosen the regex or fall back to a secondary date pattern
-when the primary one doesn't match, rather than leaving `closing_date` as `None`.
 
 ### Check-image payee extraction is entirely manual
 Nothing in the pipeline automatically reads payee names off scanned check
@@ -94,6 +69,43 @@ a new account type for a client without confirming with the user first.
 
 ## Closed: Fixed
 
+- `CitiVisaCostcoParser`'s closing-date regex wasn't OCR-noise-tolerant —
+  fixed 2026-07-06. Confirmed against a real scanned Citi Costco fixture
+  that this was a live bug, not just a latent risk: the billing-period text
+  OCR'd to `"Billing Period: O3/2O//6-O4/2dt26"` (a dropped digit and stray
+  letters, not just simple O/l digit confusion) — completely unrecoverable
+  even after adding OCR-digit tolerance to the primary regex. Added a
+  fallback: the same closing date OCR'd cleanly a few lines later as
+  `"$209.49 as of 04/20/26"` (from "New balance as of \<date\>"), so
+  `_extract_closing_date()` now tries that when the billing-period pattern
+  fails. Also made the primary pattern search the whole statement with
+  whitespace collapsed (not line-by-line), since OCR can split "Billing
+  Period" and its dates across a line break. Verified live: the real
+  fixture now reports `Statement Period: 04/20/26` in the reconciliation
+  report; full before/after report diff shows only that one line added, no
+  other changes. `tests/test_citi_costco_closing_date.py` covers the clean
+  regression case, whitespace/line-split noise, mild digit confusion, the
+  real severely-garbled fixture text (verbatim), and the "neither pattern
+  matches" case.
+- `test_payroll_end_to_end.py` didn't cover `adp_payroll_departments`/
+  `adp_labor_distribution` — fixed 2026-07-06. Neither format has a separate
+  `_build_journal()` to call directly like the other four (their rows are
+  built inline in `run_adp_payroll_departments()`/`run_adp_labor_distribution()`),
+  so reimplementing that logic in the test would have duplicated it. Instead
+  added runners that call the real functions with `_qb_confirm`/
+  `append_payroll_log`/`append_digest_log`/`archive_payroll_pdf`/
+  `load_config` monkeypatched to capture args instead of prompting/writing/
+  uploading, per the root-cause fix this item called for.
+  `adp_labor_distribution` logs Agency (Div 50) and Admin (Div 10) as two
+  separate `payroll_log.csv` rows, so it gets two manifest entries
+  (`adp_labor_distribution_agency`/`_admin`) pointing at the same PDF,
+  matching production's real two-log-writes-per-run shape. No real fixtures
+  for either format are available in this environment (the ones the
+  original item cited aren't present in the local private-clients
+  checkout), so `tests/test_adp_multi_journal_wiring.py` proves the wiring
+  itself with hand-built synthetic ADP report text verified against the
+  real parsing functions — runs anywhere, including CI, independent of
+  fixture availability.
 - `cc_keywords` was a manually-maintained per-client list with no fallback —
   fixed 2026-07-06. `parsers/bofa.py` and `parsers/amex.py`'s
   `AmexCheckingParser` each hand-rolled their own partial, mutually

@@ -250,16 +250,54 @@ class CitiVisaCostcoParser(StatementParser):
         self.charges = []
         self.closing_date = None  # MM/DD/YY format
 
+    # Tolerate common OCR digit confusions (O/o -> 0, l/I -> 1) inside a
+    # matched date substring only — never applied to the full statement
+    # text, so a clean digital PDF's dates are completely unaffected.
+    _OCR_DIGIT = '[0-9OolI]'
+
+    @staticmethod
+    def _clean_ocr_date(s: str) -> str:
+        return s.translate(str.maketrans({'O': '0', 'o': '0', 'l': '1', 'I': '1'}))
+
+    def _extract_closing_date(self):
+        """Closing date via "Billing Period: MM/DD/YY-MM/DD/YY" (the later
+        of the two dates), falling back to "as of MM/DD/YY" near the new-
+        balance summary if the billing-period line is too OCR-garbled to
+        recover. Returns None if neither is found.
+
+        Searches the whole statement with whitespace collapsed to single
+        spaces, not line-by-line — a scanned/OCR'd statement can split
+        "Billing Period" and its dates across a line break (or introduce
+        irregular spacing), which a per-line, single-space-literal match
+        would silently miss. The billing-period date digits also tolerate
+        common OCR confusions (see _OCR_DIGIT) — but on a real scanned Citi
+        Costco fixture the billing-period text OCR'd to
+        "Billing Period: O3/2O//6-O4/2dt26" (a dropped digit and stray
+        letters, not just O/l confusion) and was unrecoverable even with
+        that tolerance. The same closing date reliably OCR'd cleanly a few
+        lines later as "$209.49 as of 04/20/26" (from "New balance as of
+        <date>: $<amount>"), so that's the fallback source.
+        """
+        normalized_text = re.sub(r'\s+', ' ', self.text)
+
+        date_pat = rf'({self._OCR_DIGIT}{{2}}/{self._OCR_DIGIT}{{2}}/{self._OCR_DIGIT}{{2}})'
+        m = re.search(rf'Billing\s*Period.{{0,20}}?{date_pat}\s*-\s*{date_pat}', normalized_text)
+        if m:
+            return self._clean_ocr_date(m.group(2))  # closing date is the later one
+
+        m = re.search(r'as of\s+(\d{2}/\d{2}/\d{2})', normalized_text)
+        if m:
+            return m.group(1)
+
+        return None
+
     def parse(self):
         raw_lines = self.text.split('\n')
 
         # ── Extract billing period / closing date ────────────────────────────
-        for line in raw_lines:
-            # "Billing Period: 12/19/25-01/20/26"
-            m = re.search(r'Billing Period.*?(\d{2}/\d{2}/\d{2})\s*-\s*(\d{2}/\d{2}/\d{2})', line)
-            if m and not self.closing_date:
-                self.closing_date = m.group(2)  # closing date is the later one
-                break
+        closing_date = self._extract_closing_date()
+        if closing_date:
+            self.closing_date = closing_date
 
         # ── Balances ─────────────────────────────────────────────────────────
         self.statement_new_charges = Decimal('0')
