@@ -254,6 +254,7 @@ class BankOfAmericaCheckingParser(StatementParser):
         self.checks = []
         self.service_fees = Decimal('0')
         self.closing_date = None
+        self.credit_card_payments = []
 
     def _detect_client(self):
         lines = self.text.split('\n')
@@ -624,6 +625,14 @@ class BankOfAmericaCheckingParser(StatementParser):
         for label, txns in agg_debits.items():
             if txns:
                 aggregated_special_debits.append(self._rollup_line(txns, label))
+
+        # Expose on self (not just returned locally) — reconcile_comprehensive.py's
+        # "flag unrecognized CC payments" check reads parser.credit_card_payments
+        # via getattr with a [] default, so a parser that never sets this
+        # attribute silently never gets flagged at all (found 2026-07-07: this
+        # is exactly why a real Amex payment on a BofA checking statement was
+        # never auto-flagged, only caught by a human noticing it by eye).
+        self.credit_card_payments = credit_card_payments
 
         return aggregated_credits, all_debits, credit_card_payments, adp_debits, aggregated_special_debits, online_banking_debits
 
