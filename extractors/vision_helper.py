@@ -236,3 +236,99 @@ def extract(pdf_path: str) -> dict:
         )
 
     return result
+
+
+# ── Check-image payee extraction ────────────────────────────────────────────
+# Separate from the balance-recovery path above: a narrower task (read one
+# name off each check image) with its own prompt/response shape, not the
+# balance-extraction JSON schema. Reuses is_available()/MAX_PAGES_PER_REQUEST/
+# _strip_code_fences — nothing above this section is modified.
+
+CHECK_PAYEE_PROMPT_TEMPLATE = """You are reading {n} images of bank checks, cropped from a "Check images" page in a business checking statement.
+
+For each check image, in the exact order given, find the payee — the name written on the "PAY TO THE ORDER OF" line.
+
+Return a SINGLE valid JSON object — no markdown, no commentary, no code fences. The object must match this schema EXACTLY:
+
+{{
+  "payees": ["<payee name>", "<payee name>", ...]
+}}
+
+The list must have EXACTLY {n} entries, one per image, in the same order as the images were provided. If a payee name is illegible or a check image is blank/unreadable, use an empty string "" for that entry rather than guessing.
+
+Return ONLY the JSON object."""
+
+
+def _call_claude_vision_for_check_payees(image_bytes_list: list[bytes]) -> str:
+    """Send check images to Claude, return raw response text."""
+    import anthropic
+
+    client = anthropic.Anthropic()
+
+    batch = image_bytes_list[:MAX_PAGES_PER_REQUEST]
+    content = []
+    for img in batch:
+        content.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": base64.standard_b64encode(img).decode("ascii"),
+            },
+        })
+    content.append({"type": "text", "text": CHECK_PAYEE_PROMPT_TEMPLATE.format(n=len(batch))})
+
+    response = client.messages.create(
+        model=VISION_MODEL,
+        max_tokens=2000,
+        messages=[{"role": "user", "content": content}],
+    )
+    return "".join(b.text for b in response.content if b.type == "text")
+
+
+def extract_check_payees(image_bytes_list: list[bytes]) -> list[str]:
+    """
+    Extract payee names from a list of check images via Claude Vision, in
+    the same order the images were given.
+
+    Returns a list of payee strings the same length as image_bytes_list
+    (padded with "" if Vision returns fewer than expected, truncated if
+    more) — an illegible individual check just becomes "", never a raised
+    error for that one check.
+
+    Raises RuntimeError if the API is unavailable, no images were given,
+    there are more images than MAX_PAGES_PER_REQUEST, or the response can't
+    be parsed as the expected JSON shape.
+    """
+    ok, reason = is_available()
+    if not ok:
+        raise RuntimeError(f"Vision helper unavailable: {reason}")
+
+    if not image_bytes_list:
+        raise RuntimeError("No check images provided")
+
+    if len(image_bytes_list) > MAX_PAGES_PER_REQUEST:
+        raise RuntimeError(
+            f"{len(image_bytes_list)} check images exceeds the "
+            f"{MAX_PAGES_PER_REQUEST}-image per-request limit — batch into "
+            f"smaller groups before calling."
+        )
+
+    raw = _call_claude_vision_for_check_payees(image_bytes_list)
+    raw = _strip_code_fences(raw)
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"Vision returned non-JSON output: {e}\nFirst 500 chars: {raw[:500]}"
+        )
+
+    payees = data.get("payees")
+    if not isinstance(payees, list):
+        raise RuntimeError(f"Vision response missing/invalid 'payees' list: {data!r}")
+
+    n = len(image_bytes_list)
+    cleaned = [str(p) if p else "" for p in payees[:n]]
+    cleaned += [""] * (n - len(cleaned))
+    return cleaned

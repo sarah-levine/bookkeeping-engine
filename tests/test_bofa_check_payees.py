@@ -13,7 +13,9 @@ Fitz/pytesseract/PIL are faked here — no real PDF or tesseract install
 needed — so this runs anywhere, including CI.
 """
 import io
+import os
 import unittest
+from unittest.mock import patch
 
 import parsers.bofa as bofa_mod
 from parsers.bofa import BankOfAmericaCheckingParser
@@ -88,7 +90,9 @@ class ExtractCheckPayeesTest(unittest.TestCase):
         self._orig_image = getattr(bofa_mod, "Image", _MISSING)
         self._orig_io = getattr(bofa_mod, "_io", _MISSING)
         self._orig_ocr_available = bofa_mod.OCR_AVAILABLE
+        self._orig_check_image_libs = bofa_mod._CHECK_IMAGE_LIBS_AVAILABLE
         bofa_mod.OCR_AVAILABLE = True
+        bofa_mod._CHECK_IMAGE_LIBS_AVAILABLE = True
         bofa_mod.Image = _FakeImageModule
         bofa_mod._io = io
 
@@ -105,6 +109,7 @@ class ExtractCheckPayeesTest(unittest.TestCase):
         self._restore("Image", self._orig_image)
         self._restore("_io", self._orig_io)
         bofa_mod.OCR_AVAILABLE = self._orig_ocr_available
+        bofa_mod._CHECK_IMAGE_LIBS_AVAILABLE = self._orig_check_image_libs
 
     def _parser_with_fake_pdf(self, checks, pages, image_bytes_by_xref):
         p = BankOfAmericaCheckingParser.__new__(BankOfAmericaCheckingParser)
@@ -173,6 +178,126 @@ class ExtractCheckPayeesTest(unittest.TestCase):
 
         self.assertEqual(checks[0]["payee"], "Manually Set")
         self.assertEqual(tess.call_count, 0)
+
+
+class _FakePilImageForVision:
+    """Richer PIL.Image stand-in that supports both code paths a single
+    test may exercise: .convert()/.save() for the Vision image-prep step,
+    and .decode() (delegating to the raw bytes) so a fall-back-to-OCR test
+    can still go through the fake pytesseract's byte-decoding convention."""
+
+    def __init__(self, raw):
+        self._raw = raw
+
+    def convert(self, mode):
+        return self
+
+    def save(self, buf, format=None):
+        buf.write(self._raw)
+
+    def decode(self, *a, **k):
+        return self._raw.decode(*a, **k)
+
+
+class _FakeImageModuleForVision:
+    @staticmethod
+    def open(bio):
+        return _FakePilImageForVision(bio.read())
+
+
+class VisionCheckPayeeGateTest(unittest.TestCase):
+    """The Vision path is opt-in (BOOKKEEPING_VISION_CHECK_PAYEES=1) since it
+    calls the real Anthropic API. Covers: gate off -> Vision never called;
+    gate on + success -> payees assigned in order, pytesseract never called;
+    gate on + Vision raises -> falls back to the pytesseract path."""
+
+    def setUp(self):
+        self._orig_fitz = getattr(bofa_mod, "fitz", _MISSING)
+        self._orig_pytesseract = getattr(bofa_mod, "pytesseract", _MISSING)
+        self._orig_image = getattr(bofa_mod, "Image", _MISSING)
+        self._orig_io = getattr(bofa_mod, "_io", _MISSING)
+        self._orig_ocr_available = bofa_mod.OCR_AVAILABLE
+        self._orig_check_image_libs = bofa_mod._CHECK_IMAGE_LIBS_AVAILABLE
+        self._orig_env = os.environ.get("BOOKKEEPING_VISION_CHECK_PAYEES")
+        bofa_mod.OCR_AVAILABLE = True
+        bofa_mod._CHECK_IMAGE_LIBS_AVAILABLE = True
+        bofa_mod.Image = _FakeImageModuleForVision
+        bofa_mod._io = io
+
+    def tearDown(self):
+        for name, value in (("fitz", self._orig_fitz), ("pytesseract", self._orig_pytesseract),
+                            ("Image", self._orig_image), ("_io", self._orig_io)):
+            if value is _MISSING:
+                if hasattr(bofa_mod, name):
+                    delattr(bofa_mod, name)
+            else:
+                setattr(bofa_mod, name, value)
+        bofa_mod.OCR_AVAILABLE = self._orig_ocr_available
+        bofa_mod._CHECK_IMAGE_LIBS_AVAILABLE = self._orig_check_image_libs
+        if self._orig_env is None:
+            os.environ.pop("BOOKKEEPING_VISION_CHECK_PAYEES", None)
+        else:
+            os.environ["BOOKKEEPING_VISION_CHECK_PAYEES"] = self._orig_env
+
+    def _parser_with_fake_pdf(self, checks, pages, image_bytes_by_xref):
+        p = BankOfAmericaCheckingParser.__new__(BankOfAmericaCheckingParser)
+        p.checks = checks
+        p.pdf_path = "fake.pdf"
+        fake_pdf = _FakePdf(pages, image_bytes_by_xref)
+        bofa_mod.fitz = _FakeFitzModule(fake_pdf)
+        tess = _FakeTesseract()
+        bofa_mod.pytesseract = tess
+        return p, tess
+
+    def _two_check_setup(self):
+        pages = [
+            _FakePage("Check images\n1001", [(101,)]),
+            _FakePage("Check images\n1002", [(202,)]),
+        ]
+        # Vision path ignores these bytes (mocked below); pytesseract-fallback
+        # test relies on the fake tesseract's "TO. <name>" decode convention.
+        image_bytes = {101: b"TO. ACME VENDOR", 202: b"TO. BRAVO VENDOR"}
+        checks = [
+            {"date": "01/01/26", "check_number": "1001"},
+            {"date": "01/02/26", "check_number": "1002"},
+        ]
+        return self._parser_with_fake_pdf(checks, pages, image_bytes), checks
+
+    def test_gate_off_never_calls_vision(self):
+        os.environ.pop("BOOKKEEPING_VISION_CHECK_PAYEES", None)
+        (p, tess), checks = self._two_check_setup()
+
+        with patch("extractors.vision_helper.extract_check_payees") as mock_vision:
+            p.extract_check_payees()
+
+        mock_vision.assert_not_called()
+        self.assertEqual(tess.call_count, 2, "pytesseract path should run when the gate is off")
+
+    def test_gate_on_success_assigns_payees_and_skips_ocr(self):
+        os.environ["BOOKKEEPING_VISION_CHECK_PAYEES"] = "1"
+        (p, tess), checks = self._two_check_setup()
+
+        with patch("extractors.vision_helper.extract_check_payees",
+                   return_value=["Acme Vendor", "Bravo Vendor"]) as mock_vision:
+            p.extract_check_payees()
+
+        mock_vision.assert_called_once()
+        self.assertEqual(checks[0]["payee"], "Acme Vendor")
+        self.assertEqual(checks[1]["payee"], "Bravo Vendor")
+        self.assertEqual(tess.call_count, 0, "pytesseract must not run when Vision succeeds")
+
+    def test_gate_on_vision_failure_falls_back_to_ocr(self):
+        os.environ["BOOKKEEPING_VISION_CHECK_PAYEES"] = "1"
+        (p, tess), checks = self._two_check_setup()
+
+        with patch("extractors.vision_helper.extract_check_payees",
+                   side_effect=RuntimeError("Vision helper unavailable: ANTHROPIC_API_KEY not set")) as mock_vision:
+            p.extract_check_payees()
+
+        mock_vision.assert_called_once()
+        self.assertEqual(checks[0]["payee"], "Acme Vendor")
+        self.assertEqual(checks[1]["payee"], "Bravo Vendor")
+        self.assertEqual(tess.call_count, 2, "should fall back to OCR for both checks")
 
 
 if __name__ == "__main__":

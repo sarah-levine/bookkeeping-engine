@@ -17,20 +17,6 @@ real failure once BMO fixtures are wired into the manifest.
 **Root cause fix:** add closing-date extraction to `parse()` in `parsers/bmo.py`,
 following the pattern in `parsers/bofa.py`'s `_extract_closing_date()`.
 
-### Check-image payee extraction is entirely manual
-Nothing in the pipeline automatically reads payee names off scanned check
-images (the "Check images" pages BofA and others append to checking
-statements). `--check-payee`/`--check-date` exist as manual overrides, but a
-human has to notice the check-images section exists, render it, and
-transcribe every payee by hand — easy to miss entirely (happened
-2026-07-02: check payees were reported as unavailable on a statement that
-had a full check-images page later in the same PDF).
-
-**Root cause fix:** extend the existing Vision-fallback pattern (used today
-for balance tie-out recovery) to check images — detect a check-images page,
-crop each check, run OCR or Claude Vision, and pre-fill `check_payee_map`
-instead of requiring a human to trigger it.
-
 ### `adp_payroll_details.py`'s earnings-category list is a hardcoded allowlist with no fallback
 Fixed the specific instance ("Sick" silently dropped from Associates gross
 wages, 2026-07-02), but the pattern itself is unchanged: `parse_payroll_details()`
@@ -69,6 +55,40 @@ a new account type for a client without confirming with the user first.
 
 ## Closed: Fixed
 
+- Check-image payee extraction was entirely manual — fixed 2026-07-07,
+  **scoped to BofA checking only** (the only checking parser with any
+  check-image mechanism at all; Wells Fargo/Citi/US Bank/Northern Trust
+  collect no check-image data and are out of scope until a real fixture
+  exists for one of them). Added `extractors/vision_helper.extract_check_payees()`
+  — a Claude Vision call reusing the module's existing balance-recovery
+  plumbing (`is_available()`, batching, code-fence stripping) with its own
+  narrower prompt/response shape (a plain payee list, not the balance JSON).
+  Wired into `BankOfAmericaCheckingParser.extract_check_payees()` as an
+  **opt-in** path (`BOOKKEEPING_VISION_CHECK_PAYEES=1` — off by default,
+  since it's a real per-statement Anthropic API cost); falls back to the
+  existing pytesseract path on any failure or when the gate is off, so
+  default behavior is byte-for-byte unchanged (verified against a real
+  fixture: identical report output with the gate off).
+  Also fixed a related gating bug found while live-testing this: the whole
+  check-image mechanism (both old and new) was gated behind a single
+  `OCR_AVAILABLE` flag requiring `fitz` **and** `pytesseract` **and**
+  `PIL` — meaning Vision, which only needs `fitz`/`PIL`, was needlessly
+  blocked in any environment missing `pytesseract` specifically. Split into
+  `_CHECK_IMAGE_LIBS_AVAILABLE` (fitz+PIL, gates the whole function) and
+  `OCR_AVAILABLE` (adds pytesseract, gates only the OCR fallback loop
+  specifically).
+  Live-tested against a real fixture with an actual "Check images" page:
+  confirmed the gate opens, images convert correctly, and a genuine
+  Anthropic API call is attempted and its result plumbed back to the right
+  check — but couldn't confirm a *successful* real extraction, since this
+  sandboxed environment's `ANTHROPIC_API_KEY` returns `401 invalid x-api-key`
+  for direct SDK calls outside the Claude Code harness itself; the observed
+  failure-and-fallback behavior (clear diagnostic printed, graceful
+  degradation to blank payee since pytesseract also isn't installed here)
+  matched the designed error-handling contract exactly. 16 new tests across
+  `tests/test_vision_helper_check_payees.py` (the extraction function in
+  isolation) and `tests/test_bofa_check_payees.py` (gate on/off, success,
+  and Vision-failure-falls-back-to-OCR) cover the mocked contract.
 - `CitiVisaCostcoParser`'s closing-date regex wasn't OCR-noise-tolerant —
   fixed 2026-07-06. Confirmed against a real scanned Citi Costco fixture
   that this was a live bug, not just a latent risk: the billing-period text
