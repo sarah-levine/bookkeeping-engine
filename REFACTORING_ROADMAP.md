@@ -17,27 +17,61 @@ real failure once BMO fixtures are wired into the manifest.
 **Root cause fix:** add closing-date extraction to `parse()` in `parsers/bmo.py`,
 following the pattern in `parsers/bofa.py`'s `_extract_closing_date()`.
 
----
+### `credit_card_payments` only ever exposed on `self` for `CitiCheckingParser` — Wells Fargo/US Bank/Northern Trust still affected
+Found 2026-07-07 alongside the BofA fix below (see Closed section): every
+checking parser's `aggregate_transactions()`-equivalent computes a
+CC-payment list, but only Citi and (as of the fix below) BofA actually set
+`self.credit_card_payments`. `reconcile_comprehensive.py`'s "flag
+unrecognized CC payments" check reads `getattr(parser, 'credit_card_payments',
+[])`, so it silently never fires for Wells Fargo, US Bank, or Northern Trust
+checking statements — same root cause as the BofA case, just not fixed for
+these three yet (out of scope for today's fix, which was scoped to BofA
+specifically since that's the parser involved in the real incident).
 
-## Open: Needs Product/Data Decision
-
-Not code bugs — need a human decision before any code or config changes.
-Which specific clients these apply to is tracked in the private
-`Bookkeeping-clients` repo, not here.
-
-### A client's checking account regularly pays a card-network bill with no corresponding reconciled account
-Seen 2026-07-02: a client's `recon_log.json` has never had an entry for the
-card network they pay ~$3,900/mo to from checking — only their existing
-checking/credit/savings/payroll account types. Worth periodically auditing
-recurring outbound card-network payments against the set of account types
-actually being reconciled for that client, in case there's a statement that
-should be reconciled on its own rather than only ever showing up as an
-outbound payment elsewhere. Per CLAUDE.md client-name governance, never add
-a new account type for a client without confirming with the user first.
+**Root cause fix:** same pattern as `parsers/bofa.py`'s fix — set
+`self.credit_card_payments = <the computed list>` at the end of whatever
+method builds it in `parsers/wells_fargo.py` and `parsers/usbank.py`
+(Northern Trust has no CC-payment classification logic at all yet, per the
+`cc_keywords` item already closed below — would need that first).
 
 ---
 
 ## Closed: Fixed
+
+- Product decision made 2026-07-07 on the "checking account regularly pays a
+  card-network bill with no corresponding reconciled account" item below:
+  decided NOT to add a new tracked account for the client involved (Paintbox
+  Hair Studio's recurring $3,900/mo Amex bill payment from `bofa_checking`)
+  — instead, strengthen the existing unrecognized-payment flag so it keeps
+  catching this every month without needing a full Amex statement/account
+  setup. While implementing that, found the flag mechanism had a real gap:
+  `reconcile_comprehensive.py`'s "flag unrecognized CC payments" check reads
+  `getattr(parser, 'credit_card_payments', [])`, but `CitiCheckingParser` was
+  the *only* parser that ever set `self.credit_card_payments` — BofA's
+  checking parser computed the equivalent list purely as a local variable
+  inside `aggregate_transactions()`, returned but never assigned to `self`.
+  This meant the flag could never have fired for the exact Paintbox case
+  that prompted this item — that `recon_log.json` entry was added manually
+  by a human noticing it by eye, not by the automated check. Fixed in
+  `parsers/bofa.py`: `aggregate_transactions()` now also sets
+  `self.credit_card_payments` (both `BankOfAmericaCheckingParser` and
+  `BankOfAmericaSavingsParser`, which inherits the same method). Also added
+  `abs()` before formatting the payment amount in the flag message
+  (`reconcile_comprehensive.py`) — BofA stores checking debits as negative,
+  Citi as positive, and the message only needs the magnitude. Also appended
+  "— Not Recognized Account" to both the Amex and Chase flag messages, per
+  explicit request, so these are easy to spot/filter in `recon_log.json`
+  going forward. Verified live against the real Paintbox `bofa_checking`
+  statement (`PAINTBOX HAIR STUDIO LLC_bofa_checking_2026-06-30.pdf`): the
+  flag now correctly fires — `⚠ Unrecognized Amex payment $3,900.00 on
+  06/29/26 — no Amex statement on file (ASK CLIENT) — Not Recognized
+  Account` — where it silently never had before. Confirmed no regression
+  against other real BofA checking/savings fixtures (JoJo, Paintbox
+  savings) — balances and reports unchanged. Wells Fargo/US Bank/Northern
+  Trust have the same underlying gap, noted as a new open item above (out
+  of scope here — today's incident was specifically a BofA case).
+  `tests/test_cc_payment_classification.py::test_credit_card_payments_exposed_on_self`
+  covers the regression.
 
 - `payroll_clients/adp_payroll_details.py`'s Associates (dept 002) earnings
   regex (`_ASSOC_EARNINGS_LINE_RE`) was end-anchored (required the line to

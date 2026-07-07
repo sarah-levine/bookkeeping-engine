@@ -80,6 +80,21 @@ class BofaCheckingCCClassificationTest(unittest.TestCase):
         self.assertFalse(cc_payments)
         self.assertEqual(len(all_debits), 1)
 
+    def test_credit_card_payments_exposed_on_self(self):
+        # Regression: reconcile_comprehensive.py's "flag unrecognized CC
+        # payments" check reads getattr(parser, 'credit_card_payments', [])
+        # — before this fix, BofA's checking parser only ever returned this
+        # list locally from aggregate_transactions(), never set it on self,
+        # so the flag silently never fired for any BofA checking statement
+        # (found 2026-07-07: this is exactly why a real $3,900 Amex payment
+        # on a BofA checking statement was never auto-flagged).
+        p = self._parser(debits=[
+            {'date': '06/29/26', 'vendor': 'AMERICAN EXPRESS ACH PMT', 'amount': _d(-3900)},
+        ])
+        p.aggregate_transactions()
+        self.assertEqual(len(p.credit_card_payments), 1)
+        self.assertEqual(p.credit_card_payments[0]['vendor'], 'AMERICAN EXPRESS ACH PMT')
+
 
 class AmexCheckingCCClassificationTest(unittest.TestCase):
     """AmexCheckingParser.aggregate_transactions() folds CC payments back
