@@ -164,6 +164,13 @@ class ChaseParser(StatementParser):
             ('Finance Charges',   total_interest if total_interest else None),
             ('New Balance',       self.new_balance),
         ])
+
+        if self.previous_balance is not None and self.new_balance is not None:
+            calc = (self.previous_balance + total_purchases + total_interest
+                    - self.total_payments - total_credits)
+            ok = abs(calc - self.new_balance) < Decimal('0.01')
+            report += _balance_check(ok, calc)
+
         if self.payments:
             report += _payments_section(self.payments, self.total_payments)
         if normalized_credits:
