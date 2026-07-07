@@ -21,7 +21,7 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
 
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL
+from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, _is_known_cc_network_payment
 from parsers.report import *
 from parsers.report import (
     _safe_date_key, _report_header, _summary_block, _balance_check,
@@ -57,6 +57,7 @@ class USBankCheckingParser(StatementParser):
         self.withdrawals = []
         self.service_charge = Decimal('0')
         self.statement_year = None
+        self.credit_card_payments = []
 
     def _detect_client(self):
         # For bank statements, match the account holder name from the header only
@@ -254,8 +255,20 @@ class USBankCheckingParser(StatementParser):
         payroll_txns   = [w for w in self.withdrawals
                           if any(kw in w['vendor'].upper() for kw in payroll_kws)]
         cc_txns        = [w for w in self.withdrawals
-                          if any(kw in w['vendor'].upper() for kw in cc_kws)
+                          if (any(kw in w['vendor'].upper() for kw in cc_kws)
+                              or _is_known_cc_network_payment(w['vendor'].upper()))
                           and w not in payroll_txns]
+        # Expose on self — reconcile_comprehensive.py's "flag unrecognized CC
+        # payments" check reads getattr(parser, 'credit_card_payments', []),
+        # same root-cause fix as parsers/bofa.py (2026-07-07). USBank
+        # previously had zero generic fallback at all — cc_txns only ever
+        # matched a client's own manually-curated cc_payment_vendors list,
+        # so a bare "AMERICAN EXPRESS"/"CAPITAL ONE" payment for a client
+        # without that config populated would silently land in Withdrawals.
+        self.credit_card_payments = [
+            {'date': t['date'], 'vendor': t['vendor'], 'amount': t['amount']}
+            for t in cc_txns
+        ]
         check_txns     = [w for w in self.withdrawals
                           if w['vendor'].startswith('Check #')
                           and not is_payroll_check(w['vendor'].replace('Check #','').strip())]

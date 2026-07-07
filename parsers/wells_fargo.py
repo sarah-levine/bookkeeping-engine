@@ -21,7 +21,7 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
 
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS
+from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, _is_known_cc_network_payment
 from parsers.vendor_normalize import strip_client_suffixes
 from parsers.report import *
 from parsers.report import (
@@ -229,6 +229,7 @@ class WellsFargoCheckingParser(StatementParser):
         self.debits     = []
         self.checks     = []
         self.bank_fees  = []
+        self.credit_card_payments = []
 
     def _detect_client(self):
         return super()._detect_client()
@@ -503,10 +504,22 @@ class WellsFargoCheckingParser(StatementParser):
                            'IRS Usataxpymt'}
         IRS_VENDORS     = set()  # IRS now grouped under payroll
 
-        cc_payments = [d for d in self.debits if 'WFB Credit Card' in d['vendor'] or 'Online Transfer to' in d['vendor']]
+        cfg = _registry.get_config(self.client_name) or {}
+        cc_kws = cfg.get('cc_keywords', [])
+        cc_payments = [
+            d for d in self.debits
+            if 'WFB Credit Card' in d['vendor'] or 'Online Transfer to' in d['vendor']
+            or _is_known_cc_network_payment(d['vendor'].upper())
+            or any(kw.upper() in d['vendor'].upper() for kw in cc_kws)
+        ]
         payroll     = [d for d in self.debits if d['vendor'] in PAYROLL_VENDORS]
         irs_deb     = []
         other_deb   = [d for d in self.debits if d not in cc_payments and d not in payroll]
+
+        # Expose on self — reconcile_comprehensive.py's "flag unrecognized CC
+        # payments" check reads getattr(parser, 'credit_card_payments', []),
+        # same root-cause fix as parsers/bofa.py (2026-07-07).
+        self.credit_card_payments = cc_payments
 
         agg_dep  = agg(self.credits)
         agg_deb  = agg(other_deb)

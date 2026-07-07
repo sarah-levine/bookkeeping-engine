@@ -17,26 +17,47 @@ real failure once BMO fixtures are wired into the manifest.
 **Root cause fix:** add closing-date extraction to `parse()` in `parsers/bmo.py`,
 following the pattern in `parsers/bofa.py`'s `_extract_closing_date()`.
 
-### `credit_card_payments` only ever exposed on `self` for `CitiCheckingParser` — Wells Fargo/US Bank/Northern Trust still affected
-Found 2026-07-07 alongside the BofA fix below (see Closed section): every
-checking parser's `aggregate_transactions()`-equivalent computes a
-CC-payment list, but only Citi and (as of the fix below) BofA actually set
-`self.credit_card_payments`. `reconcile_comprehensive.py`'s "flag
-unrecognized CC payments" check reads `getattr(parser, 'credit_card_payments',
-[])`, so it silently never fires for Wells Fargo, US Bank, or Northern Trust
-checking statements — same root cause as the BofA case, just not fixed for
-these three yet (out of scope for today's fix, which was scoped to BofA
-specifically since that's the parser involved in the real incident).
-
-**Root cause fix:** same pattern as `parsers/bofa.py`'s fix — set
-`self.credit_card_payments = <the computed list>` at the end of whatever
-method builds it in `parsers/wells_fargo.py` and `parsers/usbank.py`
-(Northern Trust has no CC-payment classification logic at all yet, per the
-`cc_keywords` item already closed below — would need that first).
+### Northern Trust has no CC-payment classification at all
+Per the `cc_keywords` item already closed below, `NorthernTrustCheckingParser`
+never classifies any debit as a credit-card payment in the first place —
+there's no local list to expose on `self.credit_card_payments` yet (unlike
+Wells Fargo/US Bank, fixed 2026-07-07 — see Closed section). Would need
+classification logic added first (matching the `_is_known_cc_network_payment()`
++ client `cc_keywords`/`cc_payment_vendors` pattern used by every other
+checking parser now) before the flag mechanism could ever fire for it.
 
 ---
 
 ## Closed: Fixed
+
+- Extended the BofA `credit_card_payments` fix (below) to Wells Fargo and US
+  Bank checking parsers — fixed 2026-07-07. Both had the same root cause
+  (a CC-payment list computed but never exposed as `self.credit_card_payments`,
+  so `reconcile_comprehensive.py`'s unrecognized-payment flag could never
+  fire), plus their own narrower classification gaps on top:
+  - `WellsFargoCheckingParser` only matched two hardcoded literal patterns
+    (`'WFB Credit Card'`, `'Online Transfer to'`) — no generic fallback and
+    no per-client `cc_keywords`. Widened to also check
+    `_is_known_cc_network_payment()` and the client's `cc_keywords` config,
+    matching BofA/Amex.
+  - `USBankCheckingParser` had **zero** generic fallback at all — only a
+    client's own manually-curated `cc_payment_vendors` list matched, so a
+    bare "AMERICAN EXPRESS"/"CAPITAL ONE" payment for any client without
+    that config populated would silently land in generic Withdrawals.
+    Added `_is_known_cc_network_payment()` as an additional fallback
+    alongside the existing `cc_payment_vendors` config (kept, not renamed —
+    backward compatible with clients already using it, e.g. Duran HCP).
+  Verified live: Duran HCP's real `usbank_checking` fixture now correctly
+  flags `⚠ Unrecognized Amex payment $2,000.00 on 04/03/26 — no Amex
+  statement on file (ASK CLIENT) — Not Recognized Account`, where it
+  silently never had before. Confirmed zero regression via before/after
+  diff against both real fixtures (Needles Studio's `wells_fargo_checking`,
+  Duran HCP's `usbank_checking`) — Wells Fargo's report is byte-identical
+  (no bare-network debit in that particular statement to reclassify); US
+  Bank's diff shows only the new flag line, nothing else changed. Northern
+  Trust has no CC-payment classification logic at all yet (separate, larger
+  gap, noted as a new open item above). 6 new tests in
+  `tests/test_cc_payment_classification.py` cover both parsers.
 
 - Product decision made 2026-07-07 on the "checking account regularly pays a
   card-network bill with no corresponding reconciled account" item below:
