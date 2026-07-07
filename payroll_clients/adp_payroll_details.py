@@ -28,7 +28,7 @@ _ASSOC_KNOWN_LABELS = {
     'RestTime': 'rest', 'Commission': 'commission', 'Sick': 'sick',
 }
 _ASSOC_TIPS_RE = re.compile(r'^(?:QualifiedTipPaid\*|NonqualifiedCredit)\s+[\d.]+\s+\$([\d,]+\.\d+)')
-_ASSOC_EARNINGS_LINE_RE = re.compile(r'^([A-Za-z]+)\s+[\d.]+\s+\$([\d,]+\.\d+)\s*$')
+_ASSOC_EARNINGS_LINE_RE = re.compile(r'^([A-Za-z]+)\s+[\d.]+\s+\$([\d,]+\.\d+)')
 
 
 def parse_associates_earnings(lines: list) -> tuple:
@@ -51,6 +51,16 @@ def parse_associates_earnings(lines: list) -> tuple:
     excluded from this sum — tracked in assoc["tips"] but not part of
     assoc_gross; tips flow through totals["all_tips"] (company-level,
     parsed separately) into their own pair of journal rows.
+
+    The earnings-line regex matches a prefix only (no end-of-line anchor):
+    pdfplumber flattens ADP's multi-column table into one text line per
+    row, so a real earnings line looks like
+    "Regular 130.43 $2,382.75 FEDFIT $435.38 ..." — tax/deduction columns
+    for that row trail on the same line. An end-anchored regex matches
+    zero real lines (found 2026-07-07 against real fixtures: every
+    Associates category came back $0, understating gross wages by
+    thousands of dollars per run — invisible to hand-built synthetic
+    tests that didn't reproduce the trailing columns).
     """
     assoc = {"regular": 0, "overtime": 0, "tips": 0, "rest": 0, "commission": 0, "sick": 0, "other": 0}
     in_assoc = False

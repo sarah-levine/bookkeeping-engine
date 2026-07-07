@@ -39,6 +39,27 @@ a new account type for a client without confirming with the user first.
 
 ## Closed: Fixed
 
+- `payroll_clients/adp_payroll_details.py`'s Associates (dept 002) earnings
+  regex (`_ASSOC_EARNINGS_LINE_RE`) was end-anchored (required the line to
+  end right after the dollar amount) — introduced 2026-07-06 while fixing
+  the "Sick" category drop, and merged without catching this because the
+  fix's own regression test used clean, hand-built text lines. Found
+  2026-07-07 running `payroll.py` end-to-end against real Drive fixtures
+  (JoJo Hair Studio's 6/15/2026 and 6/30/2026 payroll PDFs, pulled fresh
+  from Drive — not the older cached test fixture): pdfplumber flattens
+  ADP's multi-column table into one text line per row, so a real earnings
+  line has tax/deduction columns trailing on the same line (e.g. `"Regular
+  130.43 $2,382.75 FEDFIT $435.38 ..."`), which an end-anchored regex never
+  matches. Every Associates category came back $0, understating real
+  payroll by $4,753.23 and $1,556.37 on the two runs (all of it silently
+  misattributed to "out of balance" rather than a parsing failure). No
+  historical `payroll_log.csv` entries existed yet for either check date,
+  so no backfill was needed. Fixed by dropping the end anchor (matching
+  how `_ASSOC_TIPS_RE` already worked, and how the pre-2026-07-06 code
+  worked via unanchored `re.match`). Verified both real fixtures now
+  balance exactly; added a regression test reproducing the real
+  trailing-column line shape (`test_real_shaped_lines_with_trailing_tax_columns_still_match`).
+
 - Two bugs found via a full regression sweep — downloaded and ran
   `reconcile_comprehensive.py --dry-run` against all 17 real bank-statement
   fixtures in the Drive test-fixtures folder (not just the 1-2 pulled per
