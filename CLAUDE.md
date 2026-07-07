@@ -42,6 +42,24 @@ This is not "when the user asks to see it" — it's the default for every run
 whose result the user needs to review or act on (i.e. essentially every
 reconcile/payroll run in this workflow).
 
+## Testing policy: real fixtures over synthetic data
+Synthetic/hand-built test data has repeatedly passed while the real-world
+equivalent broke — e.g. a payroll regex that only failed on the trailing
+tax-column text `pdftotext` produces from a real ADP export, never
+reproduced by a clean hand-built test line; two parsers where
+`generate_report()` raised `NameError` on real OCR output but no synthetic
+test ever exercised that code path. A green synthetic-only test suite is
+not proof a fix works.
+
+Rule: whenever a change touches a parser (or anything that consumes its
+output), verify it against **every real fixture that parser has** — Drive
+or the private `Bookkeeping-clients` repo — with a before/after diff of the
+full printed report, not just 1–2 samples and not synthetic data alone.
+Synthetic tests still matter (they're what keeps CI green without secrets,
+and they're the only option when no real fixture exists yet) — but treat
+them as coverage-for-when-real-data-is-unavailable, not a substitute for
+real-fixture verification when a fixture does exist.
+
 ## Public-repo hygiene (no real client data in code)
 This repo is published (or will be); real client data lives only in the private
 `Bookkeeping-clients` repo. Code, comments, docstrings, and example/JSON files
