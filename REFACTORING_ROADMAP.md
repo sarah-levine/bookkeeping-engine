@@ -17,15 +17,6 @@ real failure once BMO fixtures are wired into the manifest.
 **Root cause fix:** add closing-date extraction to `parse()` in `parsers/bmo.py`,
 following the pattern in `parsers/bofa.py`'s `_extract_closing_date()`.
 
-### Northern Trust has no CC-payment classification at all
-Per the `cc_keywords` item already closed below, `NorthernTrustCheckingParser`
-never classifies any debit as a credit-card payment in the first place —
-there's no local list to expose on `self.credit_card_payments` yet (unlike
-Wells Fargo/US Bank, fixed 2026-07-07 — see Closed section). Would need
-classification logic added first (matching the `_is_known_cc_network_payment()`
-+ client `cc_keywords`/`cc_payment_vendors` pattern used by every other
-checking parser now) before the flag mechanism could ever fire for it.
-
 ---
 
 ## Open: Architecture Proposal — standardize the parser → report pipeline
@@ -97,6 +88,29 @@ real per-parser design work, not a mechanical move.
 ---
 
 ## Closed: Fixed
+
+- `NorthernTrustCheckingParser` had zero CC-payment classification at all —
+  fixed 2026-07-07. Added the same `_is_known_cc_network_payment()` +
+  client `cc_keywords`/`cc_payment_vendors` fallback pattern used by every
+  other checking parser (BofA/Amex/Wells Fargo/US Bank), splitting matched
+  debits into a new `self.credit_card_payments` list (excluded from the
+  generic debits bucket, matching every other parser's convention) and
+  rendering them in their own "CREDIT CARD PAYMENTS" report section via the
+  already-shared `_cc_payments_section()` helper. Also installed
+  `pytesseract` in this sandbox (the `tesseract` binary was already
+  present, just not its Python wrapper) — Northern Trust genuinely
+  requires OCR with no pdftotext fallback, so this was previously
+  completely untestable here; `tests/test_parsers.py`'s Northern Trust
+  case now runs instead of skipping (158 → previously 157 passed/1
+  skipped). Verified live against the one real Northern Trust fixture that
+  exists anywhere (Needles Studio's, checked both the Drive test-fixtures
+  folder and the real statement archive — nothing else exists): report is
+  byte-identical except the timestamp, since that statement happens to
+  contain zero CC-payment lines — confirms no regression but can't itself
+  prove the new classification fires on real data. Added a synthetic test
+  (`tests/test_cc_payment_classification.py::NorthernTrustCCClassificationTest`)
+  reproducing the parser's real transaction-block text shape to prove the
+  classification and section-separation actually work.
 
 - `normalize_vendor()` was duplicated 5 ways — fixed 2026-07-07, a follow-up
   to the boilerplate survey. `parsers/base.py`'s `StatementParser` already

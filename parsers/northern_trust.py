@@ -9,11 +9,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from parsers.ocr_support import fitz, pytesseract, Image, _io, OCR_AVAILABLE
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL
+from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, _is_known_cc_network_payment
 from parsers.report import *
 from parsers.report import (
     _balance_check, _deposits_section, _individual_section,
     _report_header, _safe_date_key, _summary_block, _is_balanced,
+    _cc_payments_section,
 )
 
 class NorthernTrustCheckingParser(StatementParser):
@@ -36,6 +37,7 @@ class NorthernTrustCheckingParser(StatementParser):
         self.checks = []
         self.service_fees = Decimal('0')
         self.closing_date = None
+        self.credit_card_payments = []
 
     def _extract_text(self):
         """OCR the scanned PDF pages."""
@@ -104,6 +106,7 @@ class NorthernTrustCheckingParser(StatementParser):
         config = _registry.get_config(self.client_name) or {}
         square_order = {entry['position']: entry for entry in config.get('square_line_order', [])}
         square_counter = 0  # tracks which Square transaction we're on
+        cc_kws = config.get('cc_keywords', []) or config.get('cc_payment_vendors', [])
 
         for line in lines:
             stripped = line.strip()
@@ -146,6 +149,10 @@ class NorthernTrustCheckingParser(StatementParser):
                             memo = mapping.get('memo', '')
                     if pending['is_credit']:
                         self.credits.append({'date': date_str, 'vendor': vendor, 'amount': pending['amount'], 'memo': memo})
+                    elif (_is_known_cc_network_payment(vendor.upper())
+                          or any(kw.upper() in vendor.upper() for kw in cc_kws)):
+                        self.credit_card_payments.append(
+                            {'date': date_str, 'vendor': vendor, 'amount': -pending['amount'], 'memo': memo})
                     else:
                         self.debits.append({'date': date_str, 'vendor': vendor, 'amount': -pending['amount'], 'memo': memo})
                     pending = None
@@ -162,9 +169,11 @@ class NorthernTrustCheckingParser(StatementParser):
 
     def generate_report(self, check_payee_map=None, check_date_map=None):
         total_debits  = sum(t['amount'] for t in self.debits)
+        total_cc      = sum(t['amount'] for t in self.credit_card_payments)
         total_credits = sum(t['amount'] for t in self.credits)
+        total_withdrawals = total_debits + total_cc
 
-        calc = self.beginning_balance + total_credits + total_debits
+        calc = self.beginning_balance + total_credits + total_withdrawals
         ok = _is_balanced(calc, self.ending_balance)
 
         period = ''
@@ -174,10 +183,11 @@ class NorthernTrustCheckingParser(StatementParser):
 
         report = _report_header(self.statement_type, self.client_name, statement_date=period)
         report += _summary_block([
-            ('Beginning Balance',      self.beginning_balance),
-            ('Deposits and Credits',   total_credits),
-            ('Withdrawals and Debits', total_debits),
-            ('Ending Balance',         self.ending_balance),
+            ('Beginning Balance',        self.beginning_balance),
+            ('Deposits and Credits',     total_credits),
+            ('Withdrawals and Debits',   total_withdrawals),
+            ('  Credit Card Payments',   total_cc if total_cc else None, 'indent'),
+            ('Ending Balance',           self.ending_balance),
         ])
         report += _balance_check(ok, calc)
 
@@ -185,6 +195,11 @@ class NorthernTrustCheckingParser(StatementParser):
             credit_rows = [{'vendor': c['vendor'], 'date': c['date'], 'amount': c['amount'], 'count': 1}
                            for c in self.credits]
             report += _deposits_section(credit_rows, total_credits)
+
+        if self.credit_card_payments:
+            cc_rows = [{'vendor': c['vendor'], 'date': c['date'], 'amount': c['amount']}
+                       for c in sorted(self.credit_card_payments, key=lambda x: _safe_date_key(x['date']))]
+            report += _cc_payments_section(cc_rows, total_cc)
 
         debit_rows = [{'vendor': t['vendor'], 'date': t['date'], 'amount': t['amount'], 'count': 1}
                       for t in sorted(self.debits, key=lambda x: _safe_date_key(x['date']))]
