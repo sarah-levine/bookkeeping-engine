@@ -9,23 +9,12 @@ from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-def _now_pst():
-    """Return current datetime in US/Pacific (PST/PDT)."""
-    return datetime.now(ZoneInfo('America/Los_Angeles'))
-
-try:
-    import fitz
-    import pytesseract
-    from PIL import Image
-    import io as _io
-    OCR_AVAILABLE = True
-except ImportError:
-    OCR_AVAILABLE = False
-
+from parsers.ocr_support import fitz, pytesseract, Image, _io, OCR_AVAILABLE
 from parsers.base import StatementParser, _registry, KNOWN_CLIENTS
 from parsers.report import *
 from parsers.report import _safe_date_key, _report_header, _summary_block, _balance_check, \
-    _payments_section, _credits_section, _charges_section
+    _payments_section, _credits_section, _charges_section, _is_balanced, \
+    _adp_section, _checks_section, _deposits_section, _individual_section
 
 class BMOCheckingParser(StatementParser):
     """
@@ -362,7 +351,7 @@ class BMOCheckingParser(StatementParser):
 
         if self.beginning_balance and self.ending_balance:
             calc = self.beginning_balance + total_dep - total_all_deb
-            ok   = abs(calc - self.ending_balance) < Decimal('0.05')
+            ok   = _is_balanced(calc, self.ending_balance, tolerance=Decimal('0.05'))
             report += _balance_check(ok, calc)
 
         report += _deposits_section(agg_credits, total_dep)
@@ -593,7 +582,7 @@ class BMOCreditCardParser(StatementParser):
 
         if self.previous_balance is not None and self.new_balance is not None:
             calc = self.previous_balance - total_payments - total_credits + total_charges
-            ok   = abs(calc - self.new_balance) < Decimal('0.05')
+            ok   = _is_balanced(calc, self.new_balance, tolerance=Decimal('0.05'))
             report += _balance_check(ok, calc)
 
         if self.payments:

@@ -5,7 +5,7 @@ from datetime import datetime
 
 from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, _classify_cc_transaction
 from parsers.report import (
-    _report_header, _summary_block, _balance_check,
+    _report_header, _summary_block, _balance_check, _is_balanced,
     _payments_section, _credits_section,
     _add_missing_row, _charges_section,
 )
@@ -236,7 +236,7 @@ class CapitalOneParser(StatementParser):
         if self.previous_balance is not None and self.new_balance is not None:
             calc = (self.previous_balance + total_charges + self.fees + self.interest
                     - total_payments - total_credits)
-            ok = abs(calc - self.new_balance) < Decimal('0.01')
+            ok = _is_balanced(calc, self.new_balance)
             report += _balance_check(ok, calc)
 
         if self.payments:

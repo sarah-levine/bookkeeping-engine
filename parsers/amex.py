@@ -10,26 +10,13 @@ from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-def _now_pst():
-    """Return current datetime in US/Pacific (PST/PDT)."""
-    return datetime.now(ZoneInfo('America/Los_Angeles'))
-
-try:
-    import fitz
-    import pytesseract
-    from PIL import Image
-    import io as _io
-    OCR_AVAILABLE = True
-except ImportError:
-    OCR_AVAILABLE = False
-
 from parsers.base import (
     StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, CLIENT_CARDHOLDERS,
     _classify_cc_transaction, _is_known_cc_network_payment,
 )
 from parsers.report import *
 from parsers.report import (
-    _report_header, _summary_block, _balance_check,
+    _report_header, _summary_block, _balance_check, _is_balanced,
     _deposits_section, _charges_section, _checks_section,
     _adp_section, _payments_section, _credits_section,
     _cc_payments_section, _add_missing_row, _individual_section,
@@ -372,7 +359,7 @@ class AmexStatementParser(StatementParser):
 
         if self.previous_balance is not None and self.new_balance is not None:
             calc = self.previous_balance + total_charges - total_payments - total_credits + self.fees + self.interest
-            ok = abs(calc - self.new_balance) < Decimal('0.01')
+            ok = _is_balanced(calc, self.new_balance)
             report += _balance_check(ok, calc)
 
         if self.payments:
@@ -716,7 +703,7 @@ class AmexCheckingParser(StatementParser):
 
         if self.beginning_balance is not None and self.ending_balance is not None:
             calc = self.beginning_balance + total_deposits + self.interest_earned - total_all_deb
-            ok = abs(calc - self.ending_balance) < Decimal('0.01')
+            ok = _is_balanced(calc, self.ending_balance)
             report += _balance_check(ok, calc)
 
         report += _deposits_section(deposits, total_deposits, title='CREDITS / DEPOSITS')
