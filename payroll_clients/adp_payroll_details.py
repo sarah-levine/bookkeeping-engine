@@ -22,6 +22,68 @@ from payroll_clients.base import (
     REPO_DIR, PAYROLL_LOG_PATH, RECON_LOG_PATH, PAYROLL_LOG_FIELDS, RECON_LOG_FIELDS,
 )
 
+# Known Associates (dept 002) earnings-category labels -> assoc dict key.
+_ASSOC_KNOWN_LABELS = {
+    'Regular': 'regular', 'Overtime': 'overtime',
+    'RestTime': 'rest', 'Commission': 'commission', 'Sick': 'sick',
+}
+_ASSOC_TIPS_RE = re.compile(r'^(?:QualifiedTipPaid\*|NonqualifiedCredit)\s+[\d.]+\s+\$([\d,]+\.\d+)')
+_ASSOC_EARNINGS_LINE_RE = re.compile(r'^([A-Za-z]+)\s+[\d.]+\s+\$([\d,]+\.\d+)\s*$')
+
+
+def parse_associates_earnings(lines: list) -> tuple:
+    """Parse the "Department Totals: 002 - Associates" block. Returns
+    (assoc dict, assoc_gross).
+
+    Earnings lines ("Label  <hours>  $<amount>") are summed generically
+    rather than matched against an explicit label allowlist — a hardcoded
+    list silently dropped any unrecognized category out of assoc_gross with
+    no warning, throwing the journal entry out of balance by exactly that
+    amount (the "Sick" category went missing this way until 2026-07-02;
+    found because a client's run came up $143.60 out of balance). Known
+    labels still populate their own assoc[...] field in case other code
+    inspects them individually; an unrecognized label is still summed into
+    assoc_gross (via assoc["other"]), just with a printed note so a human
+    notices a new category appeared — "included but unlabeled" instead of
+    "silently missing."
+
+    Tips ("QualifiedTipPaid*"/"NonqualifiedCredit") are deliberately
+    excluded from this sum — tracked in assoc["tips"] but not part of
+    assoc_gross; tips flow through totals["all_tips"] (company-level,
+    parsed separately) into their own pair of journal rows.
+    """
+    assoc = {"regular": 0, "overtime": 0, "tips": 0, "rest": 0, "commission": 0, "sick": 0, "other": 0}
+    in_assoc = False
+    for line in lines:
+        if "DepartmentTotals:002-Associates" in line.replace(" ", ""):
+            in_assoc = True; continue
+        if not in_assoc: continue
+        if "TotalEmployees-002" in line.replace(" ", ""): break
+
+        m = _ASSOC_TIPS_RE.match(line)
+        if m:
+            assoc["tips"] = amt(m.group(1))
+            continue
+
+        m = _ASSOC_EARNINGS_LINE_RE.match(line)
+        if m:
+            label, amount_str = m.group(1), m.group(2)
+            amount = amt(amount_str)
+            key = _ASSOC_KNOWN_LABELS.get(label)
+            if key:
+                assoc[key] = amount
+            else:
+                assoc["other"] += amount
+                print(f"  ℹ️  New Associates earnings category '{label}' "
+                      f"(${amount:,.2f}) included in gross wages — not previously "
+                      f"seen, verify this is correct.")
+
+    assoc_gross = round(
+        assoc["regular"] + assoc["overtime"] + assoc["rest"]
+        + assoc["commission"] + assoc["sick"] + assoc["other"], 2)
+    return assoc, assoc_gross
+
+
 def parse_payroll_details(pdf_path: str, contractors_1099=None) -> dict:
     """Parse ADP Payroll Details PDF. Returns all data needed to build the journal."""
     text  = extract_text(pdf_path)
@@ -89,33 +151,7 @@ def parse_payroll_details(pdf_path: str, contractors_1099=None) -> dict:
         totals["net_pay"] = round(sum(amt(x) for x in net_pays), 2)
 
     # ── Associates dept 002 ──
-    # Earnings categories recognized here must stay in sync with whatever
-    # ADP labels appear in the "Department Totals: 002 - Associates" block —
-    # any category not listed silently drops out of assoc_gross with no
-    # warning, throwing the journal entry out of balance by exactly that
-    # amount (the "Sick" category was missing this way until 2026-07-02;
-    # found because a client's run came up $143.60 out of balance).
-    assoc = {"regular": 0, "overtime": 0, "tips": 0, "rest": 0, "commission": 0, "sick": 0}
-    in_assoc = False
-    for line in lines:
-        if "DepartmentTotals:002-Associates" in line.replace(" ", ""):
-            in_assoc = True; continue
-        if not in_assoc: continue
-        if "TotalEmployees-002" in line.replace(" ", ""): break
-        m = re.match(r'Regular\s+[\d.]+\s+\$([\d,]+\.\d+)', line)
-        if m: assoc["regular"] = amt(m.group(1)); continue
-        m = re.match(r'Overtime\s+[\d.]+\s+\$([\d,]+\.\d+)', line)
-        if m: assoc["overtime"] = amt(m.group(1)); continue
-        m = re.match(r'(?:QualifiedTipPaid\*|NonqualifiedCredit)\s+[\d.]+\s+\$([\d,]+\.\d+)', line)
-        if m: assoc["tips"] = amt(m.group(1)); continue
-        m = re.match(r'RestTime\s+[\d.]+\s+\$([\d,]+\.\d+)', line)
-        if m: assoc["rest"] = amt(m.group(1)); continue
-        m = re.match(r'Commission\s+[\d.]+\s+\$([\d,]+\.\d+)', line)
-        if m: assoc["commission"] = amt(m.group(1)); continue
-        m = re.match(r'Sick\s+[\d.]+\s+\$([\d,]+\.\d+)', line)
-        if m: assoc["sick"] = amt(m.group(1)); continue
-
-    assoc_gross = round(assoc["regular"] + assoc["overtime"] + assoc["rest"] + assoc["commission"] + assoc["sick"], 2)
+    assoc, assoc_gross = parse_associates_earnings(lines)
 
     # ── Officers dept 010 ──
     officers = []

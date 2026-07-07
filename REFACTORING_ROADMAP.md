@@ -17,22 +17,6 @@ real failure once BMO fixtures are wired into the manifest.
 **Root cause fix:** add closing-date extraction to `parse()` in `parsers/bmo.py`,
 following the pattern in `parsers/bofa.py`'s `_extract_closing_date()`.
 
-### `adp_payroll_details.py`'s earnings-category list is a hardcoded allowlist with no fallback
-Fixed the specific instance ("Sick" silently dropped from Associates gross
-wages, 2026-07-02), but the pattern itself is unchanged: `parse_payroll_details()`
-only sums earnings labels it explicitly regex-matches (`Regular`, `Overtime`,
-`RestTime`, `Commission`, now `Sick`). Any future ADP earnings category
-(`Holiday`, `Bonus`, `Vacation`, etc.) will silently vanish from `assoc_gross`
-the same way, throwing the journal entry out of balance with no indication of
-why. The balance check catches it (as it did here), but only after a human
-has to re-derive the cause by hand.
-
-**Root cause fix:** sum every line in the Department Totals block
-generically (parse label + amount pairs, exclude only known non-wage rows
-like tax/deduction columns) instead of matching an explicit allowlist of
-earning-type labels, so a new ADP category degrades to "included but
-unlabeled" rather than "silently missing."
-
 ---
 
 ## Open: Needs Product/Data Decision
@@ -55,6 +39,31 @@ a new account type for a client without confirming with the user first.
 
 ## Closed: Fixed
 
+- `adp_payroll_details.py`'s Associates (dept 002) earnings-category list
+  was a hardcoded allowlist with no fallback — fixed 2026-07-07.
+  `parse_payroll_details()` only summed labels it explicitly regex-matched
+  (`Regular`, `Overtime`, `RestTime`, `Commission`, `Sick`), so any other
+  ADP earnings category (`Holiday`, `Bonus`, `Vacation`, etc.) would
+  silently vanish from `assoc_gross` the same way `Sick` did until
+  2026-07-02 (a client's run came up $143.60 out of balance). Extracted the
+  block into its own `parse_associates_earnings()` function and replaced
+  the allowlist with a generic "Label &lt;hours&gt; $&lt;amount&gt;" line
+  matcher: known labels still populate their own field, but an
+  unrecognized label is now summed into `assoc["other"]` (still included in
+  `assoc_gross`) with a printed note, instead of silently dropping out —
+  "included but unlabeled" rather than "silently missing," per the
+  root-cause fix this item called for. Tips
+  (`QualifiedTipPaid*`/`NonqualifiedCredit`) stay deliberately excluded
+  from the generic sum, unchanged from before — they're tracked separately
+  via `totals["all_tips"]` into their own pair of journal rows. No real
+  fixture exists locally for this format (`jojo_hair_studio.json` has no
+  `payroll_format` set, and its manifest-listed fixture PDF isn't present
+  in this checkout), so `tests/test_adp_payroll_details_earnings.py`
+  verifies the extracted function directly against hand-built text
+  matching the existing regexes' exact shape — 6 tests covering the known-
+  category regression, an unrecognized category being included instead of
+  dropped, multiple unrecognized categories, tips exclusion, and boundary
+  handling.
 - Check-image payee extraction was entirely manual — fixed 2026-07-07,
   **scoped to BofA checking only** (the only checking parser with any
   check-image mechanism at all; Wells Fargo/Citi/US Bank/Northern Trust
