@@ -18,6 +18,7 @@
 | `test_chase_balance_check.py` | no | `ChaseParser` prints an explicit balance-verification line |
 | `test_adp_payroll_details_earnings.py` | no | `adp_payroll_details.py`'s generic earnings-category fallback (unknown categories included, not dropped) |
 | `test_adp_multi_journal_wiring.py` | no | `adp_payroll_departments`/`adp_labor_distribution`'s monkeypatch-and-capture test wiring |
+| `test_report_helper_imports.py` | no | every parser actually resolves the `parsers.report` helpers it calls — guards against `from parsers.report import *` silently dropping underscore-prefixed names (see note below) |
 | `test_parsers.py`          | yes | each bank parser extracts balances/line items from a real statement |
 | `test_payroll.py`          | yes | each ADP payroll format parses with a balance tie-out (parse only — no `_build_journal`, no log writes) |
 | `test_end_to_end.py`       | yes | bank pipeline: PDF → `detect_statement_type` → parser → report → `write_both_logs` → digest read |
@@ -34,6 +35,29 @@ Run everything:
 ```bash
 python3 -m pytest tests/ -v
 ```
+
+**`from parsers.report import *` gotcha:** `parsers/report.py` defines no
+`__all__`, and every one of its section helpers (`_report_header`,
+`_balance_check`, `_deposits_section`, etc.) is underscore-prefixed —
+Python's `import *` silently excludes underscore names in that case. A
+parser that relies on `import *` alone for these gets none of them, and
+`generate_report()` raises `NameError` the first time it actually runs
+(found live in `northern_trust.py` and `bmo.py` — both had zero test
+coverage of that code path until a missing dependency, see below, was
+installed). If you add a new parser, either import the specific helpers
+you need explicitly (`from parsers.report import _report_header, ...`,
+the pattern most parsers already use) or rely on
+`test_report_helper_imports.py` to catch the gap.
+
+**OCR/`pytesseract` can be silently missing.** Northern Trust and BMO
+statements require `fitz` + `pytesseract` (no `pdftotext` fallback for
+Northern Trust) — if `pytesseract` isn't installed, their tests just
+**skip**, with no error and no obvious signal that a whole parser's test
+coverage has quietly dropped to zero. Check
+`python3 -c "import pytesseract"` before trusting a green test run covers
+these two parsers; installing it (the `tesseract` binary is often already
+present via Homebrew — only the Python wrapper is usually missing) is what
+surfaced two real bugs in this codebase that had gone undetected.
 
 ## Parser/payroll/e2e fixtures (Google Drive or local)
 
