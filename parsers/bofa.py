@@ -14,10 +14,19 @@ def _now_pst():
 
 try:
     import fitz
-    import pytesseract
     from PIL import Image
     import io as _io
-    OCR_AVAILABLE = True
+    _CHECK_IMAGE_LIBS_AVAILABLE = True
+except ImportError:
+    _CHECK_IMAGE_LIBS_AVAILABLE = False
+
+# OCR_AVAILABLE additionally requires pytesseract — kept as its own try/except
+# (rather than folded into the block above) so the Vision check-payee path
+# can run without pytesseract installed at all: it only needs fitz/PIL to
+# open the PDF and convert check images, never pytesseract.
+try:
+    import pytesseract
+    OCR_AVAILABLE = _CHECK_IMAGE_LIBS_AVAILABLE
 except ImportError:
     OCR_AVAILABLE = False
 
@@ -419,7 +428,7 @@ class BankOfAmericaCheckingParser(StatementParser):
             elif post_date in check_date_map:
                 check['check_date'] = check_date_map[post_date]
 
-        if not OCR_AVAILABLE:
+        if not _CHECK_IMAGE_LIBS_AVAILABLE:
             return
 
         unmapped = [c for c in self.checks if not c.get('payee')]
@@ -440,19 +449,52 @@ class BankOfAmericaCheckingParser(StatementParser):
                     if images:
                         check_image_xrefs.append(images[-1][0])
 
+            pairs = list(zip(unmapped, check_image_xrefs))
+
+            # Opt-in Vision extraction — calls the real Anthropic API, which
+            # costs money per statement with check images, so this is off
+            # by default. Set BOOKKEEPING_VISION_CHECK_PAYEES=1 to enable.
+            # Falls through to the pytesseract path below on any failure or
+            # unavailability (missing API key/SDK, API error, etc.) — never
+            # a hard failure.
+            if pairs and os.environ.get('BOOKKEEPING_VISION_CHECK_PAYEES') == '1':
+                try:
+                    from extractors import vision_helper
+                    png_images = []
+                    for _check, xref in pairs:
+                        base_image = pdf.extract_image(xref)
+                        img = Image.open(_io.BytesIO(base_image['image']))
+                        buf = _io.BytesIO()
+                        img.convert('RGB').save(buf, format='PNG')
+                        png_images.append(buf.getvalue())
+                    payees = vision_helper.extract_check_payees(png_images)
+                    for (check, _xref), payee in zip(pairs, payees):
+                        if payee:
+                            check['payee'] = payee
+                    pdf.close()
+                    return
+                except Exception as e:
+                    print(f"  ⚠ Vision check-payee extraction failed, "
+                          f"falling back to OCR: {e}", file=sys.stderr)
+                    # fall through to the pytesseract path below
+
             # OCR each check image exactly once and assign it to the next
             # unmapped check in order. Previously this re-OCR'd the same
             # single image (from only the first "Check images" page,
             # further pages were never reached) once per unmapped check,
             # so every check ended up with an identical, wrong payee.
-            for check, xref in zip(unmapped, check_image_xrefs):
-                try:
-                    base_image = pdf.extract_image(xref)
-                    img = Image.open(_io.BytesIO(base_image['image']))
-                    ocr_text = pytesseract.image_to_string(img)
-                    check['payee'] = self._extract_payee_from_ocr(ocr_text)
-                except Exception:
-                    check['payee'] = ''
+            # Requires pytesseract specifically (unlike the Vision path
+            # above, which only needs fitz/PIL) — skip gracefully, leaving
+            # checks unmapped, if it isn't installed.
+            if OCR_AVAILABLE:
+                for check, xref in pairs:
+                    try:
+                        base_image = pdf.extract_image(xref)
+                        img = Image.open(_io.BytesIO(base_image['image']))
+                        ocr_text = pytesseract.image_to_string(img)
+                        check['payee'] = self._extract_payee_from_ocr(ocr_text)
+                    except Exception:
+                        check['payee'] = ''
             pdf.close()
         except Exception:
             pass
