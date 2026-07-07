@@ -444,6 +444,18 @@ real per-parser design work, not a mechanical move.
   itself with hand-built synthetic ADP report text verified against the
   real parsing functions — runs anywhere, including CI, independent of
   fixture availability.
+
+  **Update 2026-07-07:** real fixtures for both formats are now committed
+  to `Bookkeeping-clients/fixtures/` (`fixture_adp_payroll_detail_deanza.pdf`
+  + `fixture_adp_payroll_liability_deanza.pdf` for De Anza;
+  `fixture_adp_labor_distribution_duran.pdf` for Duran HCP) and wired into
+  the local, gitignored `tests/payroll_fixtures_manifest.json`. The
+  synthetic-only limitation above no longer applies —
+  `test_payroll_end_to_end.py` now runs all three against real data:
+  `adp_payroll_departments_sample` (De Anza, 14-row journal, BALANCED
+  $26,691.94), `adp_labor_distribution_agency_sample` (Duran Div 50,
+  BALANCED $30,274.20), `adp_labor_distribution_admin_sample` (Duran Div
+  10, BALANCED $4,140.38) — 7/7 payroll fixtures passing, 0 skipped.
 - `cc_keywords` was a manually-maintained per-client list with no fallback —
   fixed 2026-07-06. `parsers/bofa.py` and `parsers/amex.py`'s
   `AmexCheckingParser` each hand-rolled their own partial, mutually
