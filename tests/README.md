@@ -18,6 +18,7 @@
 | `test_chase_balance_check.py` | no | `ChaseParser` prints an explicit balance-verification line |
 | `test_adp_payroll_details_earnings.py` | no | `adp_payroll_details.py`'s generic earnings-category fallback (unknown categories included, not dropped) |
 | `test_adp_multi_journal_wiring.py` | no | `adp_payroll_departments`/`adp_labor_distribution`'s monkeypatch-and-capture test wiring |
+| `test_square_payroll.py`   | no | `square_payroll.py`'s Company Totals xlsx parsing (aggregate-block-only, tax-category bucketing, multi-day-range/unhandled-deduction guards) and journal balance |
 | `test_report_helper_imports.py` | no | every parser actually resolves the `parsers.report` helpers it calls — guards against `from parsers.report import *` silently dropping underscore-prefixed names (see note below) |
 | `test_parsers.py`          | yes | each bank parser extracts balances/line items from a real statement |
 | `test_payroll.py`          | yes | each ADP payroll format parses with a balance tie-out (parse only — no `_build_journal`, no log writes) |

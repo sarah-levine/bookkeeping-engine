@@ -8,7 +8,8 @@
     "",
     "Each entry:",
     "  name       unique label for the test (pytest ID)",
-    "  pdf        fixture PDF filename under <clients_dir>/fixtures/",
+    "  pdf        fixture filename under <clients_dir>/fixtures/ (PDF for ADP",
+    "             formats; xlsx for square_payroll — key name is historical)",
     "  liability  optional: a second fixture PDF for workers-comp figures",
     "             (adp_payroll_details and adp_payroll_departments read a",
     "             separate Liability PDF)",
@@ -27,6 +28,7 @@
     { "name": "adp_payroll_tipped_sample",     "pdf": "REPLACE_ME.pdf", "config": "REPLACE_ME.json", "format": "adp_payroll_tipped" },
     { "name": "adp_payroll_departments_sample", "pdf": "REPLACE_ME.pdf", "liability": "REPLACE_ME.pdf", "config": "REPLACE_ME.json", "format": "adp_payroll_departments" },
     { "name": "adp_labor_distribution_agency_sample", "pdf": "REPLACE_ME.pdf", "config": "REPLACE_ME.json", "format": "adp_labor_distribution_agency" },
-    { "name": "adp_labor_distribution_admin_sample",  "pdf": "REPLACE_ME.pdf", "config": "REPLACE_ME.json", "format": "adp_labor_distribution_admin" }
+    { "name": "adp_labor_distribution_admin_sample",  "pdf": "REPLACE_ME.pdf", "config": "REPLACE_ME.json", "format": "adp_labor_distribution_admin" },
+    { "name": "square_payroll_sample",          "pdf": "REPLACE_ME.xlsx", "config": "REPLACE_ME.json", "format": "square_payroll" }
   ]
 }

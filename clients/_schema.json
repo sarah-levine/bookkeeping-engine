@@ -304,7 +304,8 @@
         "adp_payroll_details",
         "adp_payroll_tipped",
         "adp_payroll_departments",
-        "adp_labor_distribution"
+        "adp_labor_distribution",
+        "square_payroll"
       ],
       "description": "Which payroll journal format this client uses. When set, payroll.py can dispatch by client key without a hardcoded map entry."
     },

@@ -12,6 +12,7 @@ Payroll formats (generic — use with --config <client.json>):
     adp_payroll_tipped        — ADP Payroll Details: multi-dept, tipped employees
     adp_payroll_departments   — ADP Payroll Details: department-level gross/net
     adp_labor_distribution    — ADP Labor Distribution report
+    square_payroll            — Square Payroll "Company Totals Report" (xlsx)
 
 Client keys (convenience aliases — config resolved automatically):
     See _CLIENT_DISPATCH below for the current alias → format mapping.
@@ -27,6 +28,7 @@ from payroll_clients import (
     run_adp_payroll_tipped,
     run_adp_payroll_departments,
     run_adp_labor_distribution,
+    run_square_payroll,
 )
 
 # Format name → runner function (generic, client-agnostic)
@@ -37,6 +39,7 @@ FORMATS = {
     "adp_payroll_tipped":       run_adp_payroll_tipped,
     "adp_payroll_departments":  run_adp_payroll_departments,
     "adp_labor_distribution":   run_adp_labor_distribution,
+    "square_payroll":           run_square_payroll,
 }
 
 # Client key → (format, config_filename), built from client configs.

@@ -1,4 +1,5 @@
 pdfplumber
+openpyxl
 pyyaml
 jsonschema
 google-auth

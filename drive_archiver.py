@@ -192,12 +192,12 @@ def _prune_old_statements(service, folder_id: str, keep: int = 2, dry_run: bool 
             print(f"  🗑  Drive: deleted old statement — {old['name']}")
 
 
-def _build_target_name(client_name: str, account_type: str, statement_date: str) -> str:
-    """Build a clean filename for the archived PDF."""
+def _build_target_name(client_name: str, account_type: str, statement_date: str, extension: str = ".pdf") -> str:
+    """Build a clean filename for the archived statement, preserving its source extension."""
     if statement_date:
         from log_utils import _normalize_date_iso
         date_clean = _normalize_date_iso(statement_date)
-        return f"{client_name}_{account_type}_{date_clean}.pdf"
+        return f"{client_name}_{account_type}_{date_clean}{extension}"
     return ""
 
 
@@ -224,7 +224,7 @@ def archive_statement(
         print(f"  ⚠ Drive archive: file not found: {pdf_path}")
         return None
 
-    target_name = _build_target_name(client_name, account_type, statement_date) or pdf.name
+    target_name = _build_target_name(client_name, account_type, statement_date, pdf.suffix) or pdf.name
 
     # Sanitize folder names
     client_folder = client_name.strip().title()
@@ -248,8 +248,10 @@ def archive_statement(
 
     # Upload
     from googleapiclient.http import MediaFileUpload
+    import mimetypes
+    mimetype = mimetypes.guess_type(str(pdf))[0] or "application/pdf"
     metadata = {"name": target_name, "parents": [account_id]}
-    media = MediaFileUpload(str(pdf), mimetype="application/pdf", resumable=True)
+    media = MediaFileUpload(str(pdf), mimetype=mimetype, resumable=True)
     uploaded = service.files().create(
         body=metadata, media_body=media, fields="id"
     ).execute()

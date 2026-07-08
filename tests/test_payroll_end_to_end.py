@@ -195,6 +195,14 @@ def _run_adp_labor_distribution_agency(pdf_path, cfg, liability_path=None):
     return agency["rows"], agency["check_date"]
 
 
+def _run_square_payroll(pdf_path, cfg, liability_path=None):
+    from payroll_clients.square_payroll import parse_workbook, _build_journal
+
+    parsed = parse_workbook(pdf_path)
+    rows = _build_journal(cfg, parsed, parsed["check_date"])
+    return rows, parsed["check_date"]
+
+
 def _run_adp_labor_distribution_admin(pdf_path, cfg, liability_path=None):
     calls = _run_adp_labor_distribution_calls(pdf_path, cfg)
     admin = next((c for c in calls if c["client"].endswith("_admin")), None)
@@ -217,6 +225,7 @@ RUNNER_BY_FORMAT = {
     "adp_payroll_departments":     _run_adp_payroll_departments,
     "adp_labor_distribution_agency": _run_adp_labor_distribution_agency,
     "adp_labor_distribution_admin":  _run_adp_labor_distribution_admin,
+    "square_payroll":              _run_square_payroll,
 }
 
 _DIR = Path(__file__).parent
