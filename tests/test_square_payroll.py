@@ -147,6 +147,34 @@ class ParseWorkbookTest(unittest.TestCase):
         finally:
             Path(path).unlink()
 
+    def test_nonzero_employer_benefits_contribution_raises(self):
+        # ER Benefits Contributions (e.g. an employer 401(k) match) still has
+        # no QB account mapping — must fail loudly, unlike EE benefits below.
+        agg = _aggregate_block()
+        total_row = list(agg[-1])
+        total_row[15] = 25.00
+        agg[-1] = tuple(total_row)
+        path = _make_workbook(agg)
+        try:
+            with self.assertRaises(ValueError):
+                parse_workbook(path)
+        finally:
+            Path(path).unlink()
+
+    def test_nonzero_employee_benefits_deduction_does_not_raise(self):
+        # EE Benefits Deductions (401(k) employee withholding) is handled —
+        # see _build_journal — so this must parse cleanly, not raise.
+        agg = _aggregate_block()
+        total_row = list(agg[-1])
+        total_row[13] = 30.00
+        agg[-1] = tuple(total_row)
+        path = _make_workbook(agg)
+        try:
+            parsed = parse_workbook(path)
+        finally:
+            Path(path).unlink()
+        self.assertEqual(parsed["ee_benefits"], 30.00)
+
 
 class BuildJournalTest(unittest.TestCase):
     def test_journal_balances_and_matches_expected_memos(self):
@@ -160,6 +188,7 @@ class BuildJournalTest(unittest.TestCase):
         parsed = {
             "pay": 2000.0, "employer_taxes": 225.0, "net_pay": 1780.0,
             "ee_irs": 180.0, "er_irs": 149.0, "ee_edd": 40.0, "er_ui_ett": 76.0,
+            "ee_benefits": 0.0,
         }
         rows = _build_journal(cfg, parsed, "01/02/2026")
 
@@ -172,6 +201,33 @@ class BuildJournalTest(unittest.TestCase):
         self.assertEqual(memos["EDD"], "40.00")
         self.assertEqual(memos["IRS"], "329.00")
         self.assertEqual(memos["UI/ETT"], "76.00")
+        self.assertNotIn("Benefits", memos)
+
+    def test_401k_benefits_credit_added_when_nonzero(self):
+        cfg = {
+            "wages_account": "6000 · Salary & Wages",
+            "employer_tax_account": "7000 · Expenses:Tax & Lic:Employer Payroll Tax",
+            "payroll_bank_account": "1005 · Checking",
+        }
+        # net_pay already has the 401(k) withholding subtracted out (same as
+        # how Square's own Net Pay total works) — 401(k) needs its own credit
+        # line or the journal would be short by exactly that amount.
+        parsed = {
+            "pay": 2000.0, "employer_taxes": 225.0, "net_pay": 1700.0,
+            "ee_irs": 180.0, "er_irs": 149.0, "ee_edd": 40.0, "er_ui_ett": 76.0,
+            "ee_benefits": 80.0,
+        }
+        rows = _build_journal(cfg, parsed, "01/02/2026")
+
+        total_d = round(sum(float(r["Debit"]) for r in rows if r["Debit"]), 2)
+        total_c = round(sum(float(r["Credit"]) for r in rows if r["Credit"]), 2)
+        self.assertEqual(total_d, total_c)
+
+        memos = {r["Memo"]: r["Credit"] for r in rows if r["Credit"]}
+        self.assertEqual(memos["Benefits"], "80.00")
+        # Same bank account as the other credit lines, per instruction.
+        benefits_row = next(r for r in rows if r["Memo"] == "Benefits")
+        self.assertEqual(benefits_row["Account"], "1005 · Checking")
 
 
 if __name__ == "__main__":

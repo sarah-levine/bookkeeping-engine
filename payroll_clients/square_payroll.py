@@ -106,10 +106,12 @@ def parse_workbook(xlsx_path: str) -> dict:
         )
     result["check_date"] = normalize_check_date(from_date)
 
-    # Deductions/reimbursements/benefits aren't in any real fixture seen so far —
-    # rather than silently drop them from the journal, fail loudly so a human
-    # maps the correct QB accounts before this run gets booked.
-    for key in ("deductions", "reimbursements", "ee_benefits", "er_benefits"):
+    # Deductions/reimbursements/employer benefits contributions aren't handled
+    # yet (no client has needed them so far) — rather than silently drop them
+    # from the journal, fail loudly so a human maps the correct QB account
+    # before this run gets booked. EE benefits deductions (401(k) withholding)
+    # *are* handled — see _build_journal — since Needles Studio has these.
+    for key in ("deductions", "reimbursements", "er_benefits"):
         if abs(result[key]) > 0.01:
             raise ValueError(
                 f"{xlsx_path}: nonzero '{key}' (${result[key]:,.2f}) — this parser doesn't "
@@ -129,6 +131,11 @@ def _build_journal(cfg: dict, parsed: dict, check_date: str) -> list:
         make_row(check_date, bank, credit=round(parsed["ee_irs"] + parsed["er_irs"], 2), memo="IRS"),
         make_row(check_date, bank, credit=round(parsed["er_ui_ett"], 2), memo="UI/ETT"),
     ]
+    # 401(k) employee withholding (Roth/Traditional) — deducted from gross pay
+    # same as taxes, remitted to the plan provider the same way as the tax
+    # buckets above: another bank credit, memo'd separately for QB visibility.
+    if parsed["ee_benefits"] > 0.01:
+        rows.append(make_row(check_date, bank, credit=round(parsed["ee_benefits"], 2), memo="Benefits"))
     return rows
 
 
@@ -154,6 +161,8 @@ def run_square_payroll(args, config_name):
     print(f"  EDD:             ${parsed['ee_edd']:,.2f}")
     print(f"  IRS:             ${parsed['ee_irs'] + parsed['er_irs']:,.2f}")
     print(f"  UI/ETT:          ${parsed['er_ui_ett']:,.2f}")
+    if parsed["ee_benefits"] > 0.01:
+        print(f"  Benefits (401k): ${parsed['ee_benefits']:,.2f}")
 
     rows = _build_journal(cfg, parsed, check_date)
     total_d, total_c = check_balance(rows)
