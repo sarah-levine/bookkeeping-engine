@@ -220,6 +220,12 @@ class WellsFargoCheckingParser(StatementParser):
 
     def _normalize(self, desc):
         d = desc.strip()
+        # Strip Wells Fargo's "Business to Business ACH Debit -" boilerplate
+        # label — it's the transaction *type*, not the vendor, and precedes
+        # every B2B ACH debit regardless of payee (Wilbur Properties,
+        # Appfolio, CA Dept Tax Fee, etc.), so drop it before any
+        # vendor-specific matching runs.
+        d = re.sub(r'^Business to Business ACH Debit\s*-\s*', '', d, flags=re.IGNORECASE).strip()
         # Strip long reference codes: sequences of 10+ alphanum chars
         d = re.sub(r'\s+[A-Z0-9]{10,}\s*', ' ', d).strip()
         # Strip trailing location/cardholder noise (config-driven via
