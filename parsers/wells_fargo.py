@@ -341,8 +341,14 @@ class WellsFargoCheckingParser(StatementParser):
                     self.debits.append({'date': date, 'vendor': desc, 'amount': amt})
 
         for line_idx, line in enumerate(lines):
-            # Detect start of transaction section
-            if 'Transaction history' in line or 'Transaction History' in line:
+            # Detect start of transaction section. Must match the standalone
+            # section-header line, not an incidental mention elsewhere (e.g.
+            # "Summary of checks written (... displayed in the preceding
+            # Transaction history)") — a substring match re-opens
+            # in_transactions after the real "Totals" line and causes the
+            # trailing "Items returned unpaid" recap section to be double-
+            # counted as new withdrawal transactions.
+            if line.strip().lower() == 'transaction history':
                 in_transactions = True
                 continue
             if 'Totals' in line and in_transactions:
