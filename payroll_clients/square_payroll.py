@@ -110,7 +110,7 @@ def parse_workbook(xlsx_path: str) -> dict:
     # yet (no client has needed them so far) — rather than silently drop them
     # from the journal, fail loudly so a human maps the correct QB account
     # before this run gets booked. EE benefits deductions (401(k) withholding)
-    # *are* handled — see _build_journal — since Needles Studio has these.
+    # *are* handled — see _build_journal — since Acme Studio has these.
     for key in ("deductions", "reimbursements", "er_benefits"):
         if abs(result[key]) > 0.01:
             raise ValueError(

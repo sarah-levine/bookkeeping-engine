@@ -8,14 +8,14 @@ The report repeats the same block layout once for the company-wide total
 ("All Work Addresses") and again per individual work address (which can
 duplicate the same physical address across multiple Square "locations").
 parse_workbook() must read only the first (aggregate) block; a real fixture
-(needles_studio) has confirmed the per-address blocks sum exactly to the
-first block's totals, so reading anything past the first "Total" row would
-double either double-count or need extra aggregation logic for no benefit —
-QuickBooks only needs one journal entry per check date.
+has confirmed the per-address blocks sum exactly to the first block's
+totals, so reading anything past the first "Total" row would double either
+double-count or need extra aggregation logic for no benefit — QuickBooks
+only needs one journal entry per check date.
 
 These fixtures are hand-built (fictional numbers/company), not the real
-Square export — real-fixture verification against Needles Studio's actual
-report happens separately per this repo's testing policy (see CLAUDE.md).
+Square export — real-fixture verification against the actual client report
+happens separately per this repo's testing policy (see CLAUDE.md).
 """
 import tempfile
 import unittest
