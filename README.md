@@ -90,32 +90,80 @@ Exposes tools to Claude chat via the Model Context Protocol: `reconcile`, `recon
 
 ## Workflow Modes
 
-Every run passes through the same gate — how it responds to that gate depends on the mode you invoke it in:
+When you hand a statement (or a request) to the assistant in chat, it picks one of these modes based on what's attached and what you ask for:
+
+| What's attached / requested | Mode |
+|---|---|
+| Credit card statement PDF only | **A — Reconciliation** |
+| Checking account statement PDF | **A → then auto-run C and E** |
+| ADP Payroll Details PDF only | **B — Payroll Journal Entry** |
+| Payroll PDF + checking account statement PDF | **C — Payroll + Tie-Out** |
+| "Cross-check payroll" with no new PDF (prior session) | **C — Payroll + Tie-Out (log mode)** |
+| "Does the CC payment tie out" / checking vs CC | **E — CC Payment Tie-Out** |
+| QuickBooks Reconcile screenshots | **D — QA Verification** |
+| Scanned PDF / "enter manually" | **G — Manual Statement Entry** |
+| "Add new client" / new client onboarding | **F — Add New Client** |
+| "Upload fixture" / new client or account type with no test file | **H — Upload Test Fixture** |
+
+If it's ambiguous which mode applies, the assistant asks before proceeding.
 
 ```
-Statement PDF ──Parse + Verify──▶ Reconciliation Engine ──Mode──▶ Outcome
+ What's attached / asked?
+ ├─ CC statement ───────────────────────────▶  MODE A  (Reconciliation)
+ │                                                 │
+ │                                     scanned/unparseable?
+ │                                                 ▼
+ │                                             MODE G  (Manual Entry)
+ │
+ ├─ Checking statement ─────────────────────▶  MODE A
+ │                                                 │
+ │                                                 ├──▶ MODE C  (payroll tie-out, from log)
+ │                                                 └──▶ MODE E  (CC payment tie-out, from log)
+ │                                                 │
+ │                                          one combined block:
+ │                                     RECONCILIATION + PAYROLL TIE-OUT + CC TIE-OUT
+ │
+ ├─ Payroll PDF only ────────────────────────▶  MODE B  (Payroll Journal Entry)
+ │
+ ├─ Payroll PDF + checking statement ───────▶  MODE C  (Payroll + Tie-Out)
+ │
+ ├─ QuickBooks Reconcile screenshots ───────▶  MODE D  (QA vs QuickBooks)
+ │
+ ├─ "Does the CC payment tie out?" ─────────▶  MODE E  (CC Payment Tie-Out)
+ │
+ ├─ "Add new client" ────────────────────────▶  MODE F  (Add New Client)
+ │
+ └─ "Upload fixture" ────────────────────────▶  MODE H  (Upload Test Fixture)
 
-                                       │
-             ┌─────────────────────────┼─────────────────────────┐
-             ▼                         ▼                         ▼
-         ADVISORY                  BLOCKING                 ESCALATING
-       (--dry-run)              (interactive)            (balance FAILED)
-             │                         │                         │
-             ▼                         ▼                         ▼
-       Print Report            "done" / "later"           Re-extract via
-                                    prompt                Claude Vision
-
-     (balances shown,         done ──▶ Log DONE         Balance re-checked
-     nothing written,      later ─▶ Log IN_PROGRESS
-       no Drive, no                                        ties now ──▶
-       sheet update)                                    continue pipeline
-                              (only if "done":)
-                               Archive to Drive          still fails ──▶
-                                 Update Sheet            halt, don't log
-                                 Trigger Sync                bad data
+ Every A / C / E / G run ends the same way:
+   print report verbatim ─▶ "Done in QuickBooks?"
+       │                          │
+       │                        done ──▶ log DONE/CLEAN, archive to Drive, sync sheet
+       │                          │
+       │                        later ─▶ log IN_PROGRESS, STOP and wait
+       ▼
+   never auto-advances to the next statement — one at a time, earliest date first
 ```
 
-`--no-prompt` auto-answers `later` at the BLOCKING gate — for unattended/scripted runs. An unrecognized client or account type is its own hard stop (see `_assert_known_client` / `_assert_known_account_type`): it refuses to write in `--no-prompt` mode and asks for explicit confirmation interactively, rather than falling through any of the three gates above.
+**A — Monthly Reconciliation.** Runs `reconcile_comprehensive.py` on the statement PDF. Prints the full report verbatim (balances, charges, payments, checks), runs the balance check, reads back any client notes, then asks whether the entry has been made in QuickBooks before logging DONE/IN_PROGRESS and archiving the PDF to Drive.
+
+**Checking account auto-sequence.** A checking statement runs Mode A, then immediately checks for a matching payroll disbursement (Mode C) and a matching CC payment (Mode E) against already-logged data — no new PDFs needed for those two checks. All three are presented together as one block; QB confirmation happens once, after the full block.
+
+**B — Payroll Journal Entry.** Runs `payroll.py` for the client, prints the journal entry (or two, for Labor Distribution clients — Agency first, then Admin only after Agency is confirmed in QB), and logs the run to `payroll_log.csv`.
+
+**C — Payroll + Checking Account Tie-Out.** Confirms that a payroll disbursement (from this session's Mode B run, or from a prior logged run) matches a debit on the checking statement to the penny.
+
+**D — QA Verification Against QuickBooks.** Builds a JSON snapshot from QB Reconcile screenshots and diffs it against the statement via `qa_reconciliation.py` to catch missing, duplicate, or mismatched entries.
+
+**E — CC Payment Tie-Out.** Confirms a CC payment debit on the checking statement matches the payment received on the credit card statement, using already-reconciled log data for both sides.
+
+**F — Add New Client.** Walks through onboarding: client config JSON, `sheets_config.json` cell map, `digest_config.json` tracker entry, then a test reconciliation and digest check.
+
+**G — Manual Statement Entry.** For scanned/unparseable PDFs — values are entered by hand into `manual_statements.json` and run through `manual_statement_entry.py`, following the same report/QB-confirmation/sync flow as Mode A.
+
+**H — Upload Test Fixture.** Archives a reconciled statement PDF to Google Drive as a fixture (via `upload_fixtures_to_drive.py`) and records it in `fixtures_manifest.json`, so future parser changes have real data to test against.
+
+Every mode that writes data follows the same rule: an unrecognized client or account type is a hard stop (see `_assert_known_client` / `_assert_known_account_type`) — it asks for confirmation rather than guessing or silently creating a new key.
 
 ---
 
