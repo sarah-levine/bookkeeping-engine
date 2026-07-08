@@ -12,6 +12,24 @@ Whenever a status string value is renamed (e.g. `CLEAN` → `DONE`), always back
 1. Run `python3 tools/backfill_status.py <old> <new>` against the private logs dir
 2. Commit the updated `recon_log.json` to `Bookkeeping-clients` in the same commit as the code change
 
+## Workflow Modes protocol is binding, not descriptive
+`README.md`'s "Workflow Modes" section (the mode table, the flowchart, and the
+"every A / C / E / G run ends the same way" block) is a binding operational
+protocol for how reconciliation runs proceed in chat — treat it the same as
+this file, not as descriptive documentation for a human running the script by
+hand. Two rules from it that are easy to miss on a first read:
+
+1. **One interaction point per statement.** Print the report verbatim, then
+   ask "Have you entered this into QuickBooks? (done/later)" — that is the
+   only per-statement confirmation gate. Do not add an extra "should I write
+   this?" check before it; the report itself is the review step.
+2. **Credit cards before the checking statements that pay them, never
+   auto-advance.** A checking statement's CC Payment Tie-Out (Mode E) matches
+   a CC payment debit against the credit card statement's already-reconciled
+   log data — so when a client has both, reconcile all its credit card
+   statements before any checking statement, then earliest-date-first within
+   each account. Accounts with no CC tie-out relationship can go in any order.
+
 ## Client name governance
 Never write a new client key, name variant, or account_type to any log file (`recon_log.json`, `reconciliation_log.csv`, `payroll_log.csv`) without explicit user confirmation. If a reconciliation or payroll run surfaces an unrecognized client name or account type, stop and ask before committing. The runtime guards `log_utils._assert_known_client` and `log_utils._assert_known_account_type` enforce this technically — do not bypass them.
 
