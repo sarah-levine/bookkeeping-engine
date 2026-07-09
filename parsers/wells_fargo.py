@@ -226,11 +226,16 @@ class WellsFargoCheckingParser(StatementParser):
         # Appfolio, CA Dept Tax Fee, etc.), so drop it before any
         # vendor-specific matching runs.
         d = re.sub(r'^Business to Business ACH Debit\s*-\s*', '', d, flags=re.IGNORECASE).strip()
-        # Strip long reference codes: sequences of 10+ alphanum chars.
-        # Case-insensitive — Wells Fargo mixes case in these codes (e.g.
-        # "2Hhm736900718L8"), and the bare [A-Z0-9] class was silently
-        # missing anything with lowercase letters in it.
-        d = re.sub(r'\s+[A-Za-z0-9]{10,}\s*', ' ', d).strip()
+        # Strip long reference codes: sequences of 10+ alphanum chars that
+        # contain at least one digit. Case-insensitive — Wells Fargo mixes
+        # case in these codes (e.g. "2Hhm736900718L8"), and the bare
+        # [A-Z0-9] class was silently missing anything with lowercase
+        # letters in it. The digit requirement (lookahead) matters: a
+        # naive case-insensitive [A-Za-z0-9]{10,} also matches real
+        # 10+-letter words with no digits — e.g. "Usataxpymt" — which
+        # corrupted "IRS Usataxpymt" into just "IRS", silently dropping it
+        # out of the payroll-vendor exact-match set into generic Withdrawals.
+        d = re.sub(r'\s+(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{10,}\s*', ' ', d).strip()
         # Strip trailing location/cardholder noise (config-driven via
         # description_strip_suffixes), using the shared normalization helper.
         # Must run before the trailing-digit strip below — a description
