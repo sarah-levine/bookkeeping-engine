@@ -90,7 +90,7 @@ def run_reconciliation(pdf_path):
             return f.read()
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           'reconcile_comprehensive.py')
-    result = subprocess.run(['python', script, pdf_path, '--force'],
+    result = subprocess.run([sys.executable, script, pdf_path, '--force', '--no-prompt'],
                             capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"Reconciliation script failed:\n{result.stderr}")
