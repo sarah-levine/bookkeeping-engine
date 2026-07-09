@@ -29,6 +29,13 @@ hand. Two rules from it that are easy to miss on a first read:
    log data — so when a client has both, reconcile all its credit card
    statements before any checking statement, then earliest-date-first within
    each account. Accounts with no CC tie-out relationship can go in any order.
+3. **Always be operating in one of the named modes (A–H), and say which one.**
+   Before doing the work, name the mode out loud (e.g. "this is Mode D — QA
+   Verification"). If what's being asked doesn't cleanly fit an existing mode,
+   stop and say so rather than doing ad-hoc work that isn't backed by the
+   protocol — ad-hoc analysis skips whatever tooling that mode is supposed to
+   route through (e.g. manually eyeballing a QuickBooks screenshot against a
+   statement instead of running `qa_reconciliation.py`, Mode D's actual tool).
 
 ## Client name governance
 Never write a new client key, name variant, or account_type to any log file (`recon_log.json`, `reconciliation_log.csv`, `payroll_log.csv`) without explicit user confirmation. If a reconciliation or payroll run surfaces an unrecognized client name or account type, stop and ask before committing. The runtime guards `log_utils._assert_known_client` and `log_utils._assert_known_account_type` enforce this technically — do not bypass them.
