@@ -226,12 +226,26 @@ class WellsFargoCheckingParser(StatementParser):
         # Appfolio, CA Dept Tax Fee, etc.), so drop it before any
         # vendor-specific matching runs.
         d = re.sub(r'^Business to Business ACH Debit\s*-\s*', '', d, flags=re.IGNORECASE).strip()
-        # Strip long reference codes: sequences of 10+ alphanum chars
-        d = re.sub(r'\s+[A-Z0-9]{10,}\s*', ' ', d).strip()
+        # Strip long reference codes: sequences of 10+ alphanum chars.
+        # Case-insensitive — Wells Fargo mixes case in these codes (e.g.
+        # "2Hhm736900718L8"), and the bare [A-Z0-9] class was silently
+        # missing anything with lowercase letters in it.
+        d = re.sub(r'\s+[A-Za-z0-9]{10,}\s*', ' ', d).strip()
         # Strip trailing location/cardholder noise (config-driven via
         # description_strip_suffixes), using the shared normalization helper.
+        # Must run before the trailing-digit strip below — a description
+        # like "...022826 2Hhm736900718L8 Acme Studio LLC" still has the
+        # client name after the reference code at this point, so a
+        # digits-at-the-true-end regex wouldn't reach "022826" until the
+        # client suffix is gone first.
         cfg = _registry.get_config(self.client_name or '') or {}
         d = strip_client_suffixes(d, cfg.get('description_strip_suffixes'))
+        # Strip trailing runs of shorter pure-digit reference codes (e.g. a
+        # continuation line like "260330 48554157 921482" appended to
+        # "Matrix Trust CO Payment") — each token is individually under the
+        # 10-char threshold above but is still just noise, not part of the
+        # vendor name.
+        d = re.sub(r'(?:\s+\d{4,})+\s*$', '', d).strip()
         # Client-specific vendor naming (e.g. transfers to named individuals)
         # comes from the client config's vendor_rules — no client names here.
         configured = _registry.normalize_vendor(self.client_name or '', d)
