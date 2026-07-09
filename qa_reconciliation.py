@@ -98,7 +98,20 @@ def run_reconciliation(pdf_path):
 
 
 def parse_recon_output(recon_text):
-    """Parse the reconcile_comprehensive.py output into structured data."""
+    """Parse the reconcile_comprehensive.py output into structured data.
+
+    Handles both report shapes this script needs to QA against:
+    - Credit card: "Previous/New Balance", sections CHARGES / CREDITS /
+      RETURNS / PAYMENTS, dates always MM/DD/YY.
+    - Checking account: "Beginning/Ending Balance", sections
+      CREDITS / DEPOSITS, WITHDRAWALS AND DEBITS, CHECKS, PAYROLL,
+      CREDIT CARD PAYMENTS, dates are bare MM/DD (no year). CHECKS rows
+      also have a different shape (check# date payee amount, not just
+      date description amount), so they need their own regex.
+    Checking's debit-side sections (Withdrawals, Checks, Payroll, CC
+    Payments) all bucket into 'payments' — that's the side compared
+    against QB's single "Checks and Payments" list.
+    """
     data = {
         'beginning_balance': None,
         'ending_balance': None,
@@ -108,12 +121,23 @@ def parse_recon_output(recon_text):
     }
 
     for line in recon_text.splitlines():
-        m = re.search(r'Previous Balance[:\s]+\$\s*([\d,]+\.\d{2})', line)
+        m = re.search(r'(?:Previous|Beginning) Balance[:\s]+\$\s*([\d,]+\.\d{2})', line)
         if m and data['beginning_balance'] is None:
             data['beginning_balance'] = Decimal(m.group(1).replace(',', ''))
-        m = re.search(r'New Balance[:\s]+\$\s*([\d,]+\.\d{2})', line)
+        m = re.search(r'(?:New|Ending) Balance[:\s]+\$\s*([\d,]+\.\d{2})', line)
         if m and data['ending_balance'] is None:
             data['ending_balance'] = Decimal(m.group(1).replace(',', ''))
+
+    # Dates in these reports are MM/DD/YY (credit card) or bare MM/DD
+    # (checking account) — year is optional.
+    date_re = r'\d{1,2}/\d{1,2}(?:/\d{2,4})?'
+    row_re = re.compile(
+        rf'^\s*({date_re})\s+(.+?)\s+\$\s*([\d,]+\.\d{{2}})\s*$'
+    )
+    # Checks rows: "<check#> <date> <payee (may be blank)> $<amount>"
+    checks_re = re.compile(
+        rf'^\s*(\d+)\s+({date_re})\s+(.*?)\s+\$\s*([\d,]+\.\d{{2}})\s*$'
+    )
 
     # Split by section
     sections = re.split(r'={40,}', recon_text)
@@ -122,9 +146,11 @@ def parse_recon_output(recon_text):
         chunk_upper = chunk.upper()
         if 'CHARGES' in chunk_upper and 'CASH ADVANCE' not in chunk_upper:
             current_section = 'charges'
-        elif 'CREDITS' in chunk_upper or 'RETURNS' in chunk_upper:
+        elif 'CHECKS' in chunk_upper:
+            current_section = 'checks'
+        elif 'CREDITS' in chunk_upper or 'RETURNS' in chunk_upper or 'DEPOSITS' in chunk_upper:
             current_section = 'credits'
-        elif 'PAYMENTS' in chunk_upper:
+        elif 'PAYMENTS' in chunk_upper or 'WITHDRAWALS' in chunk_upper or 'PAYROLL' in chunk_upper:
             current_section = 'payments'
         else:
             current_section = None
@@ -133,10 +159,18 @@ def parse_recon_output(recon_text):
             continue
 
         for line in chunk.splitlines():
-            m = re.match(
-                r'^\s*(\d{1,2}/\d{1,2}/\d{2,4})\s+(.+?)\s+\$\s*([\d,]+\.\d{2})\s*$',
-                line.strip()
-            )
+            if current_section == 'checks':
+                m = checks_re.match(line.strip())
+                if m:
+                    payee = m.group(3).strip()
+                    data['payments'].append({
+                        'date': m.group(2),
+                        'vendor': payee or f'Check #{m.group(1)}',
+                        'amount': Decimal(m.group(4).replace(',', '')),
+                        'matched': False,
+                    })
+                continue
+            m = row_re.match(line.strip())
             if m:
                 data[current_section].append({
                     'date': m.group(1),
