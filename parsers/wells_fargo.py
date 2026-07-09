@@ -478,6 +478,25 @@ class WellsFargoCheckingParser(StatementParser):
         return self.statement_period or 'Unknown Period'
 
     def generate_report(self, check_payee_map=None, check_date_map=None):
+        # Apply payee/date overrides (config check_payee_overrides or CLI
+        # --check-payee) by check number — mirrors bofa.py's
+        # extract_check_payees(), which this parser was missing entirely,
+        # so check_payee_map was silently accepted but never applied.
+        check_payee_map = check_payee_map or {}
+        check_date_map = check_date_map or {}
+        for check in self.checks:
+            check_num = check.get('check_num', '')
+            post_date = check.get('date', '')
+            key = check_num if check_num else post_date
+            if key and key in check_payee_map:
+                check['payee'] = check_payee_map[key]
+            elif post_date in check_payee_map:
+                check['payee'] = check_payee_map[post_date]
+            if check_num and check_num in check_date_map:
+                check['date'] = check_date_map[check_num]
+            elif post_date in check_date_map:
+                check['date'] = check_date_map[post_date]
+
         # Aggregate deposits and debits by vendor
         def agg(txns, date_key='vendor'):
             from collections import defaultdict
