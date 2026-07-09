@@ -220,6 +220,15 @@ class WellsFargoCheckingParser(StatementParser):
 
     def _normalize(self, desc):
         d = desc.strip()
+        # Venmo payments carry the recipient's name as a trailing token in
+        # the raw text (e.g. "Venmo Payment 260315 1048932833560 Erika
+        # Harrington") — extract it here, before description_strip_suffixes
+        # below, since the name can coincide with a client's own configured
+        # suffix (e.g. the business owner) and would otherwise be stripped
+        # before we get a chance to see it.
+        m = re.match(r'^Venmo Payment\s+[\d\s]+?\s+([A-Za-z][A-Za-z\s]*)$', d, re.IGNORECASE)
+        if m:
+            return f"Venmo to {m.group(1).strip()}"
         # Strip Wells Fargo's "Business to Business ACH Debit -" boilerplate
         # label — it's the transaction *type*, not the vendor, and precedes
         # every B2B ACH debit regardless of payee (Wilbur Properties,
