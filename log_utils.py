@@ -258,6 +258,30 @@ def append_manual_issue(*, client: str, issue: str) -> None:
     _save_log(existing)
 
 
+def manual_issue_covers_event(client: str, *substrings: str) -> bool:
+    """True if an existing (unresolved) manual issue for this client already
+    mentions all of the given substrings — e.g. a formatted amount and date.
+
+    append_manual_issue() dedupes on exact (client, issue) text match, which
+    misses the same real-world event logged twice with different wording —
+    e.g. a human-written note ("AMEX Bill Payment of $1,234.56 on 03/15/26
+    has no corresponding Amex account...") and a session's auto-generated
+    one ("Unrecognized Amex payment $1,234.56 on 03/15/26 — ... ASK CLIENT")
+    both firing for the same underlying payment, producing duplicate digest
+    entries. Callers that auto-generate an issue string should check this
+    first and skip appending if a differently-worded note already covers
+    the same event.
+    """
+    client = _normalize_client_name(client)
+    for e in _load_log():
+        if e.get("type") != "manual" or e.get("client") != client or e.get("resolved"):
+            continue
+        text = e.get("issue", "")
+        if all(s in text for s in substrings):
+            return True
+    return False
+
+
 def resolve_manual_issue(*, client: str, issue: str) -> None:
     """Mark a manual issue as resolved so it stops appearing in digests."""
     existing = _load_log()

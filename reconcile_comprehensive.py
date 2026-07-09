@@ -1276,7 +1276,7 @@ def main():
                 # this session gets flagged (ASK CLIENT) and logged as an
                 # open manual issue in recon_log.json.
                 try:
-                    from log_utils import append_manual_issue as _flag
+                    from log_utils import append_manual_issue as _flag, manual_issue_covers_event as _already_flagged
                     cc_stmts_this_session = {
                         s for s in [t[0] for t in _session_stmt_types]
                         if s in _cc_keys()
@@ -1298,16 +1298,18 @@ def main():
                         # Flag if vendor contains a known card issuer but no
                         # statement for that issuer was reconciled this session
                         if 'AMERICAN EXPRESS' in vendor and 'amex' not in cc_stmts_this_session:
-                            issue = f"Unrecognized Amex payment ${pmt_amount:,.2f} on {pmt['date']} — no Amex statement on file (ASK CLIENT) — Not Recognized Account"
+                            amt_str = f"${pmt_amount:,.2f}"
+                            issue = f"Unrecognized Amex payment {amt_str} on {pmt['date']} — no Amex statement on file (ASK CLIENT) — Not Recognized Account"
                             print(f"  ⚠ {issue}")
-                            if parser.client_name:
+                            if parser.client_name and not _already_flagged(parser.client_name, amt_str, pmt['date']):
                                 _flag(client=parser.client_name, issue=issue)
                         elif 'CHASE' in vendor and not any(
                             s in cc_stmts_this_session for s in ('chase_ink', 'chase_united', 'chase_sapphire')
                         ):
-                            issue = f"Unrecognized Chase payment ${pmt_amount:,.2f} on {pmt['date']} — no Chase statement on file (ASK CLIENT) — Not Recognized Account"
+                            amt_str = f"${pmt_amount:,.2f}"
+                            issue = f"Unrecognized Chase payment {amt_str} on {pmt['date']} — no Chase statement on file (ASK CLIENT) — Not Recognized Account"
                             print(f"  ⚠ {issue}")
-                            if parser.client_name:
+                            if parser.client_name and not _already_flagged(parser.client_name, amt_str, pmt['date']):
                                 _flag(client=parser.client_name, issue=issue)
                 except Exception as _e:
                     print(f"  ⚠ CC flag check failed: {_e}")
