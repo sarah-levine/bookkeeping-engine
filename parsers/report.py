@@ -154,8 +154,13 @@ def _checks_section(checks, total_checks):
         check_num = ck.get('check_num') or ck.get('check_number', '')
         payee = ck.get('payee', '') or ''
         lines.append(f"{check_num:<10} {ck['date']:<12} {payee[:42]:<42} ${Decimal(str(ck['amount'])):>13,.2f}")
-    lines.append(f"{'':63} {'-' * 15}")
-    lines.append(f"{'TOTAL CHECKS:':<63} ${total_checks:>13,.2f}")
+    # Width here is 66 (10+1+12+1+42), not the 63 other sections use — checks
+    # have a 3-column prefix (check#/date/payee) instead of the usual
+    # date/description 2-column layout, so the shared "63" constant those
+    # sections rely on doesn't apply here; using it made TOTAL CHECKS' $
+    # sign land 3 characters left of the data rows' $ column.
+    lines.append(f"{'':66} {'-' * 15}")
+    lines.append(f"{'TOTAL CHECKS:':<66} ${total_checks:>13,.2f}")
     lines.append('')
     return '\n'.join(lines) + '\n'
 
