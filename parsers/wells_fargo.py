@@ -273,6 +273,8 @@ class WellsFargoCheckingParser(StatementParser):
             return 'Square Inc Payr Tax'
         if 'SQUARE INC PAYR DD' in u:
             return 'Square Inc Payr DD'
+        if 'SQUARE INC PAYROLL' in u:
+            return 'Square Inc Payroll'
         if 'SQUARE FIN SVCS' in u:
             return 'Square Fin Svcs Transfer'
         if 'IRS USATAXPYMT' in u or 'IRS USATAX' in u:
@@ -543,8 +545,12 @@ class WellsFargoCheckingParser(StatementParser):
 
         # Square Payroll section (individual lines): payroll tax, direct deposit, EDD, IRS
         # Everything else: Withdrawals and Debits, aggregated
-        PAYROLL_VENDORS = {'Square Inc Payr Tax', 'Square Inc Payr DD', 'Employment Devel EDD',
-                           'IRS Usataxpymt'}
+        # Default set covers the common Square Payroll line types; config's
+        # payroll_vendors (same field bmo.py/usbank.py already read) extends
+        # it per-client via substring match, e.g. "Square Inc Payroll" for a
+        # client whose payroll DD line prints differently.
+        DEFAULT_PAYROLL_VENDORS = {'Square Inc Payr Tax', 'Square Inc Payr DD',
+                                    'Employment Devel EDD', 'IRS Usataxpymt'}
         IRS_VENDORS     = set()  # IRS now grouped under payroll
 
         cfg = _registry.get_config(self.client_name) or {}
@@ -555,7 +561,10 @@ class WellsFargoCheckingParser(StatementParser):
             or _is_known_cc_network_payment(d['vendor'].upper())
             or any(kw.upper() in d['vendor'].upper() for kw in cc_kws)
         ]
-        payroll     = [d for d in self.debits if d['vendor'] in PAYROLL_VENDORS]
+        payroll_kws = [kw.upper() for kw in cfg.get('payroll_vendors', [])]
+        payroll     = [d for d in self.debits
+                       if d['vendor'] in DEFAULT_PAYROLL_VENDORS
+                       or any(kw in d['vendor'].upper() for kw in payroll_kws)]
         irs_deb     = []
         other_deb   = [d for d in self.debits if d not in cc_payments and d not in payroll]
 
