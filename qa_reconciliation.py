@@ -322,14 +322,38 @@ def compare(qb_data, recon_data):
         'CHARGES & CASH ADVANCES', qb_charges_checked, report_charges)
     output.append(charges_table)
 
-    # Payments & Credits table  (combine report payments + credits)
-    qb_pc = qb_data.get('payments_credits', [])
-    qb_pc_checked = [q for q in qb_pc if q.get('checked')]
-    report_pc = recon_data.get('credits', []) + recon_data.get('payments', [])
+    # Checking accounts show two side-by-side panels in QB's reconcile
+    # screen — "Deposits and Other Credits" and "Checks and Payments" — and
+    # QB data entered that way should stay split into two tables here too,
+    # matching what's actually on screen. Credit-card QB data has no
+    # separate deposits panel, so fall back to the original combined
+    # "PAYMENTS & CREDITS" table (credits + payments together) for that case.
+    has_deposits_panel = 'deposits' in qb_data
+    if has_deposits_panel:
+        qb_dep = qb_data.get('deposits', [])
+        qb_dep_checked = [q for q in qb_dep if q.get('checked')]
+        report_dep = recon_data.get('credits', [])
+        dep_table, qb_dep_total, rp_dep_total = build_section_table(
+            'DEPOSITS AND OTHER CREDITS', qb_dep_checked, report_dep)
+        output.append(dep_table)
 
-    pc_table, qb_pc_total, rp_pc_total = build_section_table(
-        'PAYMENTS & CREDITS', qb_pc_checked, report_pc)
-    output.append(pc_table)
+        qb_pc = qb_data.get('payments_credits', [])
+        qb_pc_checked = [q for q in qb_pc if q.get('checked')]
+        report_pc = recon_data.get('payments', [])
+        pc_table, qb_pc_total, rp_pc_total = build_section_table(
+            'CHECKS AND PAYMENTS', qb_pc_checked, report_pc)
+        output.append(pc_table)
+
+        qb_pc_total = qb_pc_total + qb_dep_total
+        rp_pc_total = rp_pc_total + rp_dep_total
+    else:
+        qb_pc = qb_data.get('payments_credits', [])
+        qb_pc_checked = [q for q in qb_pc if q.get('checked')]
+        report_pc = recon_data.get('credits', []) + recon_data.get('payments', [])
+
+        pc_table, qb_pc_total, rp_pc_total = build_section_table(
+            'PAYMENTS & CREDITS', qb_pc_checked, report_pc)
+        output.append(pc_table)
 
     # Summary
     output.append('=' * 80)
