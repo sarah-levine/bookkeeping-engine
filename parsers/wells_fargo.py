@@ -399,8 +399,21 @@ class WellsFargoCheckingParser(StatementParser):
             if line_idx in header_cols:
                 dep_col, deb_col = header_cols[line_idx]
 
-            # Skip header lines
-            if re.search(r'Deposits/\s*Credits|Withdrawals/\s*Debits|Date\s+Check', line):
+            # Skip header lines. The real Wells Fargo column-header pair is
+            # "Check ... Deposits/ <word> Withdrawals/ <word> Ending daily"
+            # then "Date  Number Description ... Credits Debits balance" —
+            # none of the three original patterns actually matched that text
+            # (they were written for a different header layout), so this
+            # never fired. Harmless on page 1 (no pending transaction to
+            # corrupt when the header first appears), but on continuation
+            # pages ("Transaction History (continued)") the repeated header
+            # was silently appended as description text onto whatever
+            # transaction was still pending right before the page break.
+            if re.search(
+                r'Deposits/\s*Credits|Withdrawals/\s*Debits|Date\s+Check'
+                r'|Deposits/\s*\S*\s*Withdrawals/|Date\s+Number\s+Description',
+                line
+            ):
                 continue
 
             # Date line: starts with spaces then M/D or MM/DD
