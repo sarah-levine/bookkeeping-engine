@@ -36,6 +36,13 @@ hand. Two rules from it that are easy to miss on a first read:
    protocol — ad-hoc analysis skips whatever tooling that mode is supposed to
    route through (e.g. manually eyeballing a QuickBooks screenshot against a
    statement instead of running `qa_reconciliation.py`, Mode D's actual tool).
+4. **"Print the report verbatim" means pipe it, never retype it.** Save the
+   script's output to a file, then paste it by reading that file back — don't
+   reconstruct the report text by hand in the chat reply, even to reformat or
+   "clean it up." Hand-retyping a fixed-width report breaks its column
+   alignment (the columns rely on exact character counts) even when every
+   number is copied correctly, and this has happened more than once in a
+   single session despite rule 1 above already saying "verbatim."
 
 ## Client name governance
 Never write a new client key, name variant, or account_type to any log file (`recon_log.json`, `reconciliation_log.csv`, `payroll_log.csv`) without explicit user confirmation. If a reconciliation or payroll run surfaces an unrecognized client name or account type, stop and ask before committing. The runtime guards `log_utils._assert_known_client` and `log_utils._assert_known_account_type` enforce this technically — do not bypass them.
