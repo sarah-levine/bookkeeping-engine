@@ -200,6 +200,14 @@ def find_match(qb_item, report_items, threshold=0.5):
             continue
         # Score on vendor similarity
         sim = vendor_similarity(qb_vendor, ri['vendor'])
+        # A blank vendor on either side (common for QB grid rows where the
+        # payee cell isn't repeated, or checks with no OCR'd payee) isn't
+        # evidence of a mismatch — vendor_similarity() returns 0.0 for an
+        # empty string, which was disqualifying an otherwise-exact
+        # amount+date match entirely. Treat "no vendor info" as neutral
+        # instead of "different vendor."
+        if not qb_vendor.strip() or not ri['vendor'].strip():
+            sim = max(sim, threshold)
         # Boost if dates match
         if qb_date and ri.get('date'):
             qb_d = qb_date[-5:].replace('/', '')  # MM/DD-ish
