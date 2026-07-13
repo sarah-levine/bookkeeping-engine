@@ -156,14 +156,17 @@ class NorthernTrustCheckingParser(StatementParser):
                     month, day = date_m.group(1).split('/')
                     date_str = f"{month}/{day}/{str(year)[2:]}"
                     vendor = self.normalize_vendor(pending['desc'])
-                    # Apply position-based Square QB account mapping
+                    # Apply position-based Square QB account mapping — keep
+                    # the vendor name visible (three ACH debits from "Square
+                    # Inc" are otherwise indistinguishable in the report) and
+                    # append the target QB account rather than replacing it.
                     memo = ''
                     if 'Square' in vendor and square_order:
                         square_counter += 1
                         mapping = square_order.get(square_counter)
                         if mapping:
-                            vendor = mapping['account']
                             memo = mapping.get('memo', '')
+                            vendor = f"{vendor} — {mapping['account']}"
                     if pending['is_credit']:
                         self.credits.append({'date': date_str, 'vendor': vendor, 'amount': pending['amount'], 'memo': memo})
                     elif (_is_known_cc_network_payment(vendor.upper())
