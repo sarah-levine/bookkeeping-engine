@@ -323,9 +323,12 @@ def detect_statement_type(pdf_path):
             'CHASE' not in text and 'WELLS FARGO' not in text):
         return 'bmo_checking'
 
-    # Northern Trust — scanned image PDF. Detect by the bank name in the
-    # filename; otherwise the OCR pass below reads the bank name off the
+    # Northern Trust — born-digital statements carry the bank name in the
+    # pdftotext output directly; scanned ones don't (pdftotext returns
+    # nothing usable), so fall back to filename, then an OCR pass over the
     # scanned statement body (generic, no client-specific tokens).
+    if 'NORTHERN TRUST' in text:
+        return 'northern_trust_checking'
     fname = str(pdf_path).upper()
     if 'NORTHERN' in fname:
         return 'northern_trust_checking'

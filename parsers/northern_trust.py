@@ -2,6 +2,7 @@ import sys
 import re
 import os
 import json
+import subprocess
 from pathlib import Path
 from decimal import Decimal
 from collections import defaultdict
@@ -40,7 +41,19 @@ class NorthernTrustCheckingParser(StatementParser):
         self.credit_card_payments = []
 
     def _extract_text(self):
-        """OCR the scanned PDF pages."""
+        """Try pdftotext first (Northern Trust also issues born-digital
+        statements, not just scanned ones); fall back to OCR."""
+        try:
+            result = subprocess.run(
+                ['pdftotext', '-layout', str(self.pdf_path), '-'],
+                capture_output=True, text=True, check=True
+            )
+            if result.stdout.strip():
+                self._ocr_text = result.stdout
+                return self._ocr_text
+        except Exception:
+            pass
+
         try:
             import fitz
             from PIL import Image
@@ -56,7 +69,7 @@ class NorthernTrustCheckingParser(StatementParser):
             doc.close()
             self._ocr_text = '\n'.join(pages)
             return self._ocr_text
-        except Exception as e:
+        except Exception:
             return ''
 
     def _detect_client(self):
@@ -122,8 +135,12 @@ class NorthernTrustCheckingParser(StatementParser):
             if stripped in ('Description', 'Amount', 'Description Amount'):
                 continue
 
-            # Primary transaction line: starts with "ACH Debit" and ends with amount
-            txn_m = re.match(r'^(ACH\s+Debit|ACH\s+Credit|Deposit|Withdrawal)\s+(.+?)\s+([\d,]+\.\d{2})\s*$',
+            # Primary transaction line: "ACH Debit ... amount", optionally
+            # preceded by a "MM-DD" date column (pdftotext -layout keeps the
+            # Date column inline; the OCR path drops it, relying on the
+            # continuation line's date instead — so the leading date here is
+            # optional and, when present, is not used for the entry's date).
+            txn_m = re.match(r'^(?:\d{2}-\d{2}\s+)?(ACH\s+Debit|ACH\s+Credit|Deposit|Withdrawal)\s+(.+?)\s+([\d,]+\.\d{2})\s*$',
                               stripped, re.IGNORECASE)
             if txn_m:
                 txn_type = txn_m.group(1).lower()
