@@ -323,10 +323,17 @@ class WellsFargoCheckingParser(StatementParser):
         if 'ONLINE TRANSFER' in u:
             return 'Online Transfer'
         if 'ZELLE TO' in u:
-            m = re.search(r'Zelle to ([A-Za-z\s]+?)\s+on', d, re.IGNORECASE)
+            # (?:\s+on|\s*$) — matches the raw "Zelle to NAME on DATE..."
+            # shape, but also NAME alone with nothing trailing. Needed for
+            # idempotency: _aggregate_by_vendor() calls normalize_vendor()
+            # again on already-normalized text ("Zelle to NAME", no " on"
+            # left to anchor on), and matching only "\s+on" would fall
+            # through to the generic 'Zelle Payment' fallback, silently
+            # losing the name on the second pass.
+            m = re.search(r'Zelle to ([A-Za-z\s]+?)(?:\s+on|\s*$)', d, re.IGNORECASE)
             return f"Zelle to {m.group(1).strip()}" if m else 'Zelle Payment'
         if 'ZELLE FROM' in u:
-            m = re.search(r'Zelle from ([A-Za-z\s]+?)\s+on', d, re.IGNORECASE)
+            m = re.search(r'Zelle from ([A-Za-z\s]+?)(?:\s+on|\s*$)', d, re.IGNORECASE)
             return f"Zelle From {m.group(1).strip()}" if m else 'Zelle Receipt'
         if 'CHECK REFERENCE' in u or 'CHECK REF' in u:
             return 'Check Returned Unpaid'
@@ -573,22 +580,6 @@ class WellsFargoCheckingParser(StatementParser):
             elif post_date in check_date_map:
                 check['date'] = check_date_map[post_date]
 
-        # Aggregate deposits and debits by vendor
-        def agg(txns, date_key='vendor'):
-            from collections import defaultdict
-            totals = defaultdict(lambda: {'amount': Decimal('0'), 'count': 0, 'date': ''})
-            for t in txns:
-                v = t[date_key]
-                totals[v]['amount'] += t['amount']
-                totals[v]['count']  += 1
-                totals[v]['date']    = t['date']
-            result = []
-            for vendor, d in totals.items():
-                result.append({'date': d['date'], 'vendor': vendor,
-                                'amount': d['amount'], 'count': d['count']})
-            result.sort(key=lambda x: x['date'])
-            return result
-
         # Square Payroll section (individual lines): payroll tax, direct deposit, EDD, IRS
         # Everything else: Withdrawals and Debits, aggregated
         # Default set covers the common Square Payroll line types; config's
@@ -619,10 +610,19 @@ class WellsFargoCheckingParser(StatementParser):
         # same root-cause fix as parsers/bofa.py (2026-07-07).
         self.credit_card_payments = cc_payments
 
-        agg_dep  = agg(self.credits)
-        agg_deb  = agg(other_deb)
-        agg_cc   = agg(cc_payments)
-        agg_fees = agg(self.bank_fees)
+        # Uses the shared aggregator (parsers/base.py) instead of a local
+        # reimplementation — gains month bucketing (not just vendor-only
+        # collapsing), normalize_vendor() (idempotent here since flush()
+        # already normalized once — verified against the real fixture, see
+        # REFACTORING_ROADMAP.md), and no_aggregate_vendors/
+        # never_aggregate_vendors config support for free. date_fmt='%m/%d'
+        # matches this parser's dateless (no-year) date strings exactly —
+        # the default '%m/%d/%y' would still parse correctly via the
+        # fallback chain but would render a spurious "/00" year suffix.
+        agg_dep  = self._aggregate_by_vendor(self.credits, date_fmt='%m/%d')
+        agg_deb  = self._aggregate_by_vendor(other_deb, date_fmt='%m/%d')
+        agg_cc   = self._aggregate_by_vendor(cc_payments, date_fmt='%m/%d')
+        agg_fees = self._aggregate_by_vendor(self.bank_fees, date_fmt='%m/%d')
         # Payroll (incl. IRS): NOT aggregated — show each transaction individually
         pay_rows = sorted(payroll, key=lambda x: x['date'])
         irs_rows = []

@@ -293,11 +293,8 @@ lines, accumulated via a `flush()`-closure pattern unlike any parser
 migrated so far), column positions that shift *per section header within
 one statement* (not once per statement, like the credit card parser's
 single `CREDIT_COL_THRESHOLD`), a bespoke ~80-line `_normalize()` override
-handling Venmo/Zelle/Square-payroll pattern matching, a **locally-
-duplicated `agg()` reimplementation instead of the shared
-`_aggregate_by_vendor()`** (very likely one of the "three local `agg()`
-reimplementations" the original roadmap complained about), and —
-critically — its credit-card-payment/payroll classification happens
+handling Venmo/Zelle/Square-payroll pattern matching, and — critically —
+its credit-card-payment/payroll classification happens
 *inside `generate_report()`*, not `parse()`, unlike every parser migrated
 so far. That last point means a byte-identical migration of this class
 can only touch `parse()`'s credits/debits/checks/bank_fees split;
@@ -328,6 +325,48 @@ Findings from the credit card parser:
   are never normalized at parse time (that happens later, inside
   `_aggregate_by_vendor()`). Preserved exactly by keeping the call in the
   adapter at the same logical point it fired before.
+
+### Status: WellsFargoCheckingParser's local agg() replaced with the shared aggregator (2026-07-14)
+
+Resolved ahead of the full checking-parser migration, as a standalone
+targeted fix (`fix/wells-fargo-checking-shared-aggregation`, one commit) —
+not a byte-identical-preserving change like the pipeline migrations, a
+deliberate behavior improvement requested explicitly: the local `agg()`
+closure in `generate_report()` collapsed by vendor name alone with no
+month bucketing, skipped `normalize_vendor()`, and sorted by a bare string
+compare. Replaced its 4 call sites with `self._aggregate_by_vendor(...,
+date_fmt='%m/%d')` — the explicit `date_fmt` matters, since this parser
+stores dates as bare `MM/DD` with no year, and the shared function's
+default would still parse correctly via its fallback chain but render a
+spurious `/00` year suffix on every aggregated date.
+
+**A real regression surfaced and was fixed in the same commit, not
+shipped separately**: `_aggregate_by_vendor()` calls `normalize_vendor()`
+internally, but this parser's `flush()` (in `parse()`) already calls it
+once at parse time — so aggregated buckets now get normalized *twice*.
+Traced every branch of `_normalize()` (`parsers/wells_fargo.py`) for
+idempotency before making the change; empirical verification against the
+real fixture caught the one branch the trace missed: the Zelle to/from
+name-extraction regexes required a trailing `" on"` token that's already
+been stripped by the first normalization pass, so a second pass silently
+degraded `"Zelle to Jane Doe"` to the generic `"Zelle Payment"` fallback,
+losing the name. Fixed by making the regex also match end-of-string
+(`(?:\s+on|\s*$)`), so it's idempotent on its own output. Verified via a
+byte-identical before/after diff against the real fixture
+(`tests/dump_report.py`) and a new regression test
+(`tests/test_wells_fargo_checking_agg_synthetic.py`) covering the name
+surviving double-normalization, same-vendor-different-months now
+rendering as separate rows, same-vendor-same-month still aggregating, and
+no spurious year suffix.
+
+**One residual, unverifiable risk remains**: the client-specific
+`vendor_rules` config path (`_registry.normalize_vendor()`) inside
+`_normalize()` — a rule's `normalize_to` output could theoretically
+re-trigger its own `contains` pattern on a second pass, the same failure
+shape as the Zelle bug. Not fixed preemptively (would mean auditing every
+real client's configured rules, which aren't all available locally) —
+if a future Wells Fargo Checking client's report shows a vendor name
+degrading to something generic, check this first.
 
 ### Rollout playbook for the remaining parsers (not scheduled yet)
 
