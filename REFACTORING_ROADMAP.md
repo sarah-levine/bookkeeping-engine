@@ -280,15 +280,64 @@ Findings:
   per-bucket) — another assumption worth checking per parser rather than
   taking for granted.
 
+### Status: Wells Fargo Credit Card migration complete, checking parser deferred (2026-07-14)
+
+`parsers/wells_fargo.py` has two very differently-shaped classes.
+`WellsFargoCreditCardParser` (~167 lines) migrated on
+`refactor/wells-fargo-credit-pipeline`, 3 commits — no new shared tooling
+or `classify.py` addition needed. `WellsFargoCheckingParser` (~350+ lines)
+was deliberately **not** touched this round and needs calling out
+explicitly so it isn't mistaken for already covered: continuation-spanning
+transactions (a single logical transaction can span multiple physical
+lines, accumulated via a `flush()`-closure pattern unlike any parser
+migrated so far), column positions that shift *per section header within
+one statement* (not once per statement, like the credit card parser's
+single `CREDIT_COL_THRESHOLD`), a bespoke ~80-line `_normalize()` override
+handling Venmo/Zelle/Square-payroll pattern matching, a **locally-
+duplicated `agg()` reimplementation instead of the shared
+`_aggregate_by_vendor()`** (very likely one of the "three local `agg()`
+reimplementations" the original roadmap complained about), and —
+critically — its credit-card-payment/payroll classification happens
+*inside `generate_report()`*, not `parse()`, unlike every parser migrated
+so far. That last point means a byte-identical migration of this class
+can only touch `parse()`'s credits/debits/checks/bank_fees split;
+`generate_report()`'s own re-classification of `self.debits` must stay
+untouched to preserve the "Report is never touched" invariant every prior
+migration has relied on. Left as its own dedicated future migration.
+
+Findings from the credit card parser:
+
+- **A fourth distinct classification-signal shape**: purely geometric
+  (`is_credit_col = len(line.rstrip('\n')) <= CREDIT_COL_THRESHOLD`, raw
+  line length against a dynamically-detected column position) — no vendor-
+  text inspection needed at all for the primary credit/charge split. More
+  "extraction-native" than even Northern Trust's text labels. Alongside
+  NT/Citi's keyword-native signal and Chase's classifier-entangled signal,
+  this is a third truly distinct shape parsers can take — reinforces
+  playbook item 4 below: check each parser's own signal, don't assume any
+  prior parser's shape generalizes.
+- **A hardcoded (not config-driven) vendor-text business rule inside the
+  credit branch** — the `ONLINE PAYMENT|PAYMENT THANK YOU` regex deciding
+  payment vs. generic credit — treated the same as Citi Checking's
+  hardcoded `'ADP'` check: a Classify-stage decision, adapter-local, even
+  though neither is config-dependent. The distinguishing test isn't
+  "is this config-driven" but "does deciding the bucket need business-rule
+  vendor-text inspection, or is it inherent in the raw text's structure."
+- **`normalize_vendor()` is called asymmetrically** — only for the "credit,
+  not a payment" case; payments use a fixed literal description, charges
+  are never normalized at parse time (that happens later, inside
+  `_aggregate_by_vendor()`). Preserved exactly by keeping the call in the
+  adapter at the same logical point it fired before.
+
 ### Rollout playbook for the remaining parsers (not scheduled yet)
 
-1. Suggested order: the large special-cased ones (Wells Fargo, BofA, Citi
-   Visa Costco, Amex — each needs real per-parser design work per the
-   "different scale of change" section above, not mechanical migration).
-   **Capital One** stays deferred until a real fixture exists (see status
-   above) — don't schedule it based on line-count/complexity alone; verify
-   a real fixture is actually available first, learned the hard way this
-   round.
+1. Suggested order: **`WellsFargoCheckingParser`** (deferred above, its own
+   migration) → the other large special-cased ones (BofA, Citi Visa Costco,
+   Amex — each needs real per-parser design work per the "different scale
+   of change" section above, not mechanical migration). **Capital One**
+   stays deferred until a real fixture exists (see status above) — don't
+   schedule it based on line-count/complexity alone; verify a real fixture
+   is actually available first, learned the hard way this round.
 2. Each migration gets its own branch, following the same
    one-branch/multi-phase-commit pattern as this prototype — never two
    parser-migration branches open at once, per `CLAUDE.md`'s branch-hygiene
