@@ -5,8 +5,8 @@ Synthetic regression coverage for CitiCheckingParser, purpose-built as a
 companion to tests/dump_report.py for the Extract/Classify/Report pipeline
 refactor (see REFACTORING_ROADMAP.md's "Architecture Proposal").
 
-The real fixture (citi_checking_mp_cheng, confirmed via tests/dump_report.py)
-is unusually rich — it already exercises aggregated charges, the
+The one real Citi Checking fixture (confirmed via tests/dump_report.py) is
+unusually rich — it already exercises aggregated charges, the
 no_aggregate_vendors tag mechanism, checks, ADP payroll, and credit card
 payments. This file covers the one real gap: the ACH CREDIT and ELECTRONIC
 CREDIT type keywords never appear in that fixture. It also isolates the
