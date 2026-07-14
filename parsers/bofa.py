@@ -30,6 +30,7 @@ from parsers.base import (
     StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL,
     _classify_cc_transaction, _is_known_cc_network_payment,
 )
+from parsers.row_schema import TransactionRow
 from parsers.report import *
 from parsers.report import (
     _safe_date_key, _report_header, _summary_block, _balance_check, _is_balanced,
@@ -93,6 +94,49 @@ class BankOfAmericaCreditCardParser(StatementParser):
                     sign = -1 if m.group(1) == '-' else 1
                     self.new_balance = sign * Decimal(m.group(2).replace(',', ''))
 
+        rows = self._extract_rows(lines)
+        self._rows_to_legacy_shape(rows)
+
+        for line in lines:
+            if 'PURCHASE *FINANCE CHARGE*' in line:
+                m = re.search(r'([\d,]+\.\d{2})$', line)
+                if m:
+                    self.finance_charge = Decimal(m.group(1).replace(',', ''))
+            if 'LATE PAYMENT FEE' in line or 'RETURNED PAYMENT FEE' in line or 'ANNUAL FEE' in line:
+                m = re.search(r'([\d,]+\.\d{2})$', line)
+                if m:
+                    self.fees += Decimal(m.group(1).replace(',', ''))
+
+        # Set total_payments now so _tied_out() works correctly before generate_report()
+        self.total_payments = sum(Decimal(str(p['amount'])) for p in self.payments)
+
+    def _extract_rows(self, lines):
+        """Extract stage (see parsers/row_schema.py): raw statement text ->
+        list[TransactionRow]. Classification here is a hybrid of two shapes
+        seen in prior migrations: which SECTION a line falls in
+        (in_payments/in_charges/in_credits_section, toggled by section-
+        header text markers as the loop scans — extraction-native, no
+        vendor-text inspection needed, similar in spirit to Wells Fargo
+        Checking's dynamic column tracking but signaled by headers instead
+        of column position) is the first-level split; within the payments/
+        credits section, _classify_cc_transaction() (the same shared
+        classifier Chase and Capital One already use) decides payment vs.
+        genuine credit — classifier-entangled, same as Chase, so it can't
+        be deferred to the adapter without already knowing the type.
+
+        In the charges section, a line whose description contains
+        'FINANCE CHARGE' is skipped entirely (no row) — finance charges are
+        captured separately by the loop below, in parse(). Every other
+        charges-section line becomes type='debit' with NO sign forcing:
+        self.charges has a genuinely mixed sign convention today (unlike
+        every other parser migrated so far — self.payments/self.credits
+        always store abs(amount), but self.charges stores the raw signed
+        regex match untouched). Forcing it negative here and abs()-ing it
+        back in the adapter would silently flip a genuinely negative charge
+        (e.g. an in-section merchant adjustment) positive, corrupting data
+        — so the row carries the exact raw signed amount, and the adapter
+        passes it through unchanged."""
+        rows = []
         cfg = _registry.get_config(self.client_name) or {}
         # Some BofA statements present a separate credits section keyed by a
         # specific account ending (config: bofa_credits_account); generic
@@ -148,36 +192,41 @@ class BankOfAmericaCreditCardParser(StatementParser):
                     full_date = f"{post_date}/{year_2d}"
                     try:
                         amount = Decimal(amount_str)
-                        txn_type = _classify_cc_transaction(description, amount)
                         if in_payments or in_credits_section:
+                            txn_type = _classify_cc_transaction(description, amount)
                             if txn_type == 'credit':
-                                self.credits.append({'date': full_date,
-                                                     'description': description,
-                                                     'amount': abs(amount)})
+                                rows.append(TransactionRow(
+                                    date=full_date, vendor=description, raw_description=description,
+                                    amount=abs(amount), type='credit',
+                                ))
                             else:
-                                self.payments.append({'date': full_date,
-                                                      'description': 'PAYMENT - THANK YOU',
-                                                      'amount': abs(amount)})
+                                rows.append(TransactionRow(
+                                    date=full_date, vendor=description, raw_description=description,
+                                    amount=abs(amount), type='payment',
+                                ))
                         elif 'FINANCE CHARGE' in description.upper():
                             pass  # captured separately as self.finance_charge
                         else:
-                            self.charges.append({'date': full_date,
-                                                  'vendor': description,
-                                                  'amount': amount})
+                            rows.append(TransactionRow(
+                                date=full_date, vendor=description, raw_description=description,
+                                amount=amount, type='debit',
+                            ))
                     except Exception as _txn_err:
                         print(f"  ⚠ CC parser skipped line (parse error): {_txn_err!r} — {line[:80]!r}")
-        for line in lines:
-            if 'PURCHASE *FINANCE CHARGE*' in line:
-                m = re.search(r'([\d,]+\.\d{2})$', line)
-                if m:
-                    self.finance_charge = Decimal(m.group(1).replace(',', ''))
-            if 'LATE PAYMENT FEE' in line or 'RETURNED PAYMENT FEE' in line or 'ANNUAL FEE' in line:
-                m = re.search(r'([\d,]+\.\d{2})$', line)
-                if m:
-                    self.fees += Decimal(m.group(1).replace(',', ''))
+        return rows
 
-        # Set total_payments now so _tied_out() works correctly before generate_report()
-        self.total_payments = sum(Decimal(str(p['amount'])) for p in self.payments)
+    def _rows_to_legacy_shape(self, rows):
+        """Adapter: list[TransactionRow] -> self.payments/self.credits/
+        self.charges in their existing dict shapes. 'debit' rows (charges)
+        pass their amount through exactly as stored on the row — no abs(),
+        no negation — preserving self.charges' mixed sign convention."""
+        for row in rows:
+            if row.type == 'payment':
+                self.payments.append({'date': row.date, 'description': 'PAYMENT - THANK YOU', 'amount': row.amount})
+            elif row.type == 'credit':
+                self.credits.append({'date': row.date, 'description': row.vendor, 'amount': row.amount})
+            else:  # 'debit'
+                self.charges.append({'date': row.date, 'vendor': row.vendor, 'amount': row.amount})
 
     def generate_report(self):
         aggregated = self._aggregate_by_vendor(self.charges, date_fmt='%m/%d/%y')
