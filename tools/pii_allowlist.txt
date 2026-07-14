@@ -45,7 +45,7 @@ t&t fc club surf test two
 
 # ── Generic business / vendor vocabulary ───────────────────────────
 supply supplies parts hardware wholesale distributor warehouse logistics freight
-gov govt government mfg manufacturing widgets adjustment
+gov govt government mfg manufacturing widgets adjustment decoy real desc source extra
 
 # ── Project's own generic labels ───────────────────────────────────
 client cardholder owner recipient counterparty bookkeeping sarah operator
@@ -54,7 +54,7 @@ client cardholder owner recipient counterparty bookkeeping sarah operator
 category
 base parser parsers registry detection report helpers utilities log fixtures root
 reconciliation comparison quickbooks qb pending clean done issues found error
-handling critical rules verify output mode columns final shared setup interactive
+handling critical rules verify output mode columns column final shared setup interactive
 approval entry point silent failures write post main manual sender tracker scopes
 native directly exactly multiline dotall ignorecase true false match initiate
 both after before last back only your this that see from order no not name type
