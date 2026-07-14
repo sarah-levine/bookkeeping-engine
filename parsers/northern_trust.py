@@ -104,9 +104,9 @@ class NorthernTrustCheckingParser(StatementParser):
         """Extract stage (see parsers/row_schema.py): raw statement text ->
         list[TransactionRow]. Only distinguishes credit vs. debit — that's
         all the raw text itself tells you. CC-payment classification and the
-        Square line-position remapping are business rules, not extraction,
-        so they live in _rows_to_legacy_shape() below (moving to a shared
-        parsers/classify.py in a later phase of the pipeline refactor)."""
+        Square line-position remapping are business rules, not extraction —
+        they live in the shared Classify stage (parsers/classify.py),
+        called from _rows_to_legacy_shape() below."""
         rows = []
 
         # Parse transactions — format:

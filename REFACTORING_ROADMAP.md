@@ -85,6 +85,83 @@ real per-parser design work, not a mechanical move.
   "the numbers are right" — the actual rendered text, since that's what
   gets pasted verbatim into bookkeeping work per `CLAUDE.md`.
 
+### Status: Northern Trust prototype complete (2026-07-14)
+
+The three-stage pipeline was prototyped end-to-end on
+`NorthernTrustCheckingParser` (`refactor/nt-pipeline-prototype` branch, 5
+commits — harness, schema, Extract, Classify, cleanup), phased more finely
+than the "Recommended approach" above for lower risk: each commit left the
+codebase in a fully working, byte-identical state. New pieces added:
+
+- `tests/dump_report.py` — the byte-identical-report-diff verification tool
+  this section's acceptance bar assumed but that didn't actually exist
+  before now. Every past fix in the "Closed: Fixed" section below was
+  verified by hand (`git stash` + manual `diff`); this makes it repeatable.
+- `parsers/row_schema.py` — the standard `TransactionRow` shape. **Sign
+  convention decided**: debits/fees negative, credits/payments positive
+  (matches Northern Trust's own prior convention). Citi and any other
+  parser that stores debits positive will need explicit inversion in its
+  own Extract step when migrated.
+- `parsers/classify.py` — `classify_checking_rows()`, the shared
+  Classify stage, scoped to what Northern Trust actually needs (CC-payment
+  classification + Square line-position remapping). Deliberately named
+  specific to checking-account statements, not generic — see the module
+  docstring for why generalizing further needs a second real caller first.
+
+**Known limitation carried forward**: Northern Trust never calls
+`_aggregate_by_vendor()` (no real client config it uses sets an
+aggregation-relevant knob), so this prototype validates Extract + Classify
++ Report but **not** the Aggregate stage's dedup behavior. `_aggregate_by_vendor()`
+in `parsers/base.py` was left untouched. Recommend **Citi Savings** as the
+next parser migrated specifically to prove Aggregate for real, before
+`classify.py`'s responsibilities expand to cover it.
+
+**External-consumer constraint discovered and preserved**:
+`reconcile_comprehensive.py` reads `getattr(parser, 'credit_card_payments', [])`
+directly (independent of `generate_report()`'s text) to drive its
+"flag unrecognized CC payment" feature. Any future parser migration must
+keep this attribute populated in its existing shape
+(`{date, vendor, amount}`, sign per the parser's own convention) — a
+report-text diff alone won't catch a regression here, since the report can
+render identically even if this attribute's shape changes. Verified for
+Northern Trust via `tests/smoke_all_fixtures.py northern_trust_checking_needles`,
+which exercises the real `reconcile_comprehensive.py --dry-run` path, not
+just `generate_report()`.
+
+**One real fixture is not enough to trust as a regression gate on its
+own** — `northern_trust_checking_needles` has zero CC-payment lines and no
+Square-mapped transactions, so it can't exercise either path.
+`tests/test_northern_trust_synthetic.py` was added as a belt-and-suspenders
+companion (fictional client, no PDF needed) specifically to cover what the
+one real fixture can't. Recommend the same treatment — a synthetic
+companion test, not just the real fixture(s) — as standard practice for any
+parser with only 1–2 real fixtures in `fixtures_manifest.json` (most of
+them, per a count taken during this work).
+
+### Rollout playbook for the remaining 8 parsers (not scheduled yet)
+
+1. Suggested order, by complexity (line count / client-config-knob count):
+   **Chase** (182 lines, zero client-config knobs) → **Capital One**
+   (251 lines — needs `PARSER_MAP`/fixtures-manifest wiring first; it's
+   currently absent from both despite `tests/smoke_all_fixtures.py` already
+   listing it) → **Citi Savings** (the "prove Aggregate for real" migration
+   flagged above) → **Citi Checking** → the large special-cased ones last
+   (Wells Fargo, BofA, Citi Visa Costco, Amex — each needs real per-parser
+   design work per the "different scale of change" section above, not
+   mechanical migration).
+2. Each migration gets its own branch, following the same
+   one-branch/multi-phase-commit pattern as this prototype — never two
+   parser-migration branches open at once, per `CLAUDE.md`'s branch-hygiene
+   rule.
+3. Same acceptance bar every time, using `tests/dump_report.py`: byte-identical
+   `generate_report()` output on every real fixture that parser has, plus a
+   synthetic companion test for anything the real fixture(s) can't exercise.
+4. `cc_keywords` vs `cc_payment_vendors` naming stays unresolved — Northern
+   Trust's `or`-fallback (`config.get('cc_keywords', []) or
+   config.get('cc_payment_vendors', [])`) was preserved as-is in
+   `classify.py` rather than picking one canonical name. Resolve this once
+   `classify.py` has more than one caller, not with a sample size of one.
+
 ---
 
 ## Closed: Fixed
