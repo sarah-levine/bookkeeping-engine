@@ -97,6 +97,27 @@ class CitiCheckingParser(StatementParser):
                         close_yy = str(int(ymd.group(3)) % 100).zfill(2)
                         self.closing_date = f"{close_mm:02d}/{close_dd:02d}/{close_yy}"
 
+        rows = self._extract_rows(lines)
+        self._rows_to_legacy_shape(rows)
+
+    def _extract_rows(self, lines):
+        """Extract stage (see parsers/row_schema.py): raw statement text ->
+        list[TransactionRow]. Classification comes straight from an explicit
+        type keyword in the raw text (like Northern Trust and Citi Savings,
+        not entangled like Chase). Vendor computation is purely per-type,
+        decided only by which keyword matched — no client-config logic here;
+        the ADP / no_aggregate_vendors / CREDIT CRD-AUTOPAY cascade for
+        ACH DEBIT rows is a Classify-stage decision (config-dependent,
+        mutates vendor) and lives in _rows_to_legacy_shape() below, same
+        precedent as Northern Trust's Square line-position remapping.
+
+        Preserves the exact index-based while-loop mechanics of the
+        original code, including the CHECK NO: override running
+        unconditionally *after* the type-keyword loop (so it wins over any
+        earlier match), and ELECTRONIC CREDIT being the one credit type
+        that keeps the full, unsplit vendor-lookahead line rather than
+        splitting on 2+ spaces like ACH DEBIT/ACH CREDIT do."""
+        rows = []
         i = 0
         while i < len(lines):
             line = lines[i]
@@ -129,23 +150,6 @@ class CitiCheckingParser(StatementParser):
 
                 if trans_type in ('ACH DEBIT', 'ACH CREDIT'):
                     vendor = re.split(r'\s{2,}', vendor)[0].strip()
-                    if trans_type == 'ACH DEBIT':
-                        if 'ADP' in vendor.upper():
-                            self.adp_transactions.append(
-                                {'date': date, 'vendor': vendor, 'amount': amount})
-                            self.total_charges += amount
-                            i += 1
-                            continue
-                        no_agg = (_registry.get_config(self.client_name) or {}).get('no_aggregate_vendors', [])
-                        if any(v.upper() in vendor.upper() for v in no_agg):
-                            # Tag with date to prevent aggregation; display strips the tag.
-                            vendor = f'{vendor}|{date}'
-                        if 'CREDIT CRD' in vendor.upper() or 'AUTOPAY' in vendor.upper():
-                            self.credit_card_payments.append(
-                                {'date': date, 'vendor': vendor, 'amount': amount})
-                            self.total_charges += amount
-                            i += 1
-                            continue
                 elif trans_type == 'INSTANT PAYMENT CREDIT':
                     vendor = 'Merchant Deposits'
                 elif trans_type == 'DEPOSIT':
@@ -153,19 +157,66 @@ class CitiCheckingParser(StatementParser):
                 elif trans_type == 'CHECK':
                     check_num_m = re.search(r'CHECK NO:\s*(\d+)', rest)
                     check_num = check_num_m.group(1) if check_num_m else '?'
-                    self.checks.append({'date': date, 'check_num': check_num, 'amount': amount})
-                    self.total_checks += amount
+                    rows.append(TransactionRow(
+                        date=date, vendor=check_num, raw_description=rest,
+                        amount=-amount, type='check',
+                    ))
                     i += 1
                     continue
+                # ELECTRONIC CREDIT: no override, vendor stays the full,
+                # unsplit vendor-lookahead line.
 
                 if trans_type in ('INSTANT PAYMENT CREDIT', 'DEPOSIT', 'ACH CREDIT', 'ELECTRONIC CREDIT'):
-                    self.credits.append({'date': date, 'vendor': vendor, 'amount': amount})
-                    self.total_credits += amount
-                else:
-                    self.charges.append({'date': date, 'vendor': vendor, 'amount': amount})
-                    self.total_charges += amount
+                    rows.append(TransactionRow(
+                        date=date, vendor=vendor, raw_description=rest,
+                        amount=amount, type='credit',
+                    ))
+                else:  # ACH DEBIT
+                    rows.append(TransactionRow(
+                        date=date, vendor=vendor, raw_description=rest,
+                        amount=-amount, type='debit',
+                    ))
 
             i += 1
+        return rows
+
+    def _rows_to_legacy_shape(self, rows):
+        """Adapter: list[TransactionRow] -> self.credits/self.charges/
+        self.adp_transactions/self.credit_card_payments/self.checks in
+        their existing dict shapes. 'debit' rows run the ADP -> config
+        no_aggregate_vendors tag -> CREDIT CRD/AUTOPAY cascade, exactly as
+        before (order matters: the no-agg tag is applied, and can still be
+        present, when the CREDIT CRD/AUTOPAY check runs next). All three
+        debit-derived buckets add into the same self.total_charges, matching
+        current behavior — it's one shared running total, not per-bucket.
+        'check' rows carry their check number in row.vendor (set that way
+        in _extract_rows for lack of a dedicated row field) and are
+        rebuilt into the checks bucket's own {'date', 'check_num', 'amount'}
+        shape, which has no 'vendor' key at all."""
+        for row in rows:
+            if row.type == 'credit':
+                self.credits.append({'date': row.date, 'vendor': row.vendor, 'amount': row.amount})
+                self.total_credits += row.amount
+            elif row.type == 'check':
+                self.checks.append({'date': row.date, 'check_num': row.vendor, 'amount': abs(row.amount)})
+                self.total_checks += abs(row.amount)
+            else:  # 'debit'
+                vendor = row.vendor
+                amount = abs(row.amount)
+                if 'ADP' in vendor.upper():
+                    self.adp_transactions.append({'date': row.date, 'vendor': vendor, 'amount': amount})
+                    self.total_charges += amount
+                    continue
+                no_agg = (_registry.get_config(self.client_name) or {}).get('no_aggregate_vendors', [])
+                if any(v.upper() in vendor.upper() for v in no_agg):
+                    # Tag with date to prevent aggregation; display strips the tag.
+                    vendor = f'{vendor}|{row.date}'
+                if 'CREDIT CRD' in vendor.upper() or 'AUTOPAY' in vendor.upper():
+                    self.credit_card_payments.append({'date': row.date, 'vendor': vendor, 'amount': amount})
+                    self.total_charges += amount
+                    continue
+                self.charges.append({'date': row.date, 'vendor': vendor, 'amount': amount})
+                self.total_charges += amount
 
     def generate_report(self, check_payee_map=None, check_date_map=None):
         check_payee_map = check_payee_map or {}
