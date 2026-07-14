@@ -9,6 +9,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, _classify_cc_transaction
+from parsers.row_schema import TransactionRow
 from parsers.report import *
 from parsers.report import (
     _report_header, _summary_block, _balance_check, _is_balanced,
@@ -60,6 +61,52 @@ class ChaseParser(StatementParser):
                 self.statement_type = label
                 break
 
+        rows = self._extract_rows(lines)
+        self._rows_to_legacy_shape(rows)
+
+    def _classify_row(self, date_str, vendor, raw_description, amount):
+        """Classify one raw (date, vendor, amount) into a TransactionRow.
+
+        Unlike Northern Trust's statement text (which literally prints
+        "ACH Debit"/"ACH Credit" labels — real extraction-time signal),
+        Chase's lines carry no type label at all: classifying a line as
+        payment/credit/charge requires _classify_cc_transaction()
+        (parsers/base.py, already the shared Classify building block used
+        by other credit-card parsers), which needs vendor text *and* amount
+        together. There's no raw-text-only signal to defer this with, so
+        classification happens here, inside extraction — documented as a
+        Chase-specific wrinkle, not a violation of the Extract/Classify
+        boundary in principle.
+        """
+        txn_type = _classify_cc_transaction(vendor, amount)
+        if txn_type == 'payment':
+            row_type, signed_amount = 'payment', abs(amount)
+        elif txn_type == 'credit':
+            row_type, signed_amount = 'credit', abs(amount)
+        else:  # 'charge' -> schema's 'debit'; _classify_cc_transaction
+            # guarantees amount >= 0 whenever it returns 'charge' (every
+            # negative-amount case is routed to 'payment' or 'credit'
+            # earlier), so this abs() is a no-op today, kept for safety.
+            row_type, signed_amount = 'debit', -abs(amount)
+        return TransactionRow(
+            date=date_str, vendor=vendor, raw_description=raw_description,
+            amount=signed_amount, type=row_type,
+        )
+
+    def _extract_rows(self, lines):
+        """Extract stage (see parsers/row_schema.py): raw statement text ->
+        list[TransactionRow]. Statement metadata (card name, closing date,
+        balances, interest_charged) and transaction-row extraction stay
+        interleaved in one pass over `lines`, exactly as before this
+        migration — closing_date must already be known at the point a given
+        transaction line is processed for _add_year_to_date() to apply, and
+        that depends on where "Opening/Closing Date" happens to fall in the
+        statement text relative to the transaction lines. Splitting this
+        into two separate passes (metadata first, then transactions) would
+        silently change behavior for any statement where a transaction line
+        precedes the closing-date line."""
+        rows = []
+
         for line in lines:
             # Statement closing date
             if 'Opening/Closing Date' in line and not self.closing_date:
@@ -94,14 +141,7 @@ class ChaseParser(StatementParser):
                     post_date = self._add_year_to_date(post_date, self.closing_date)
                 vendor = re.sub(r'\s+', ' ', description.strip())
                 amount = Decimal(amount_str.replace(',', ''))
-                txn_type = _classify_cc_transaction(vendor, amount)
-                if txn_type == 'payment':
-                    self.payments.append({'date': post_date, 'description': 'PAYMENT - THANK YOU', 'amount': abs(amount)})
-                    self.total_payments += abs(amount)
-                elif txn_type == 'credit':
-                    self.credits.append({'date': post_date, 'description': vendor, 'amount': abs(amount)})
-                else:
-                    self.charges.append({'date': post_date, 'vendor': vendor, 'amount': str(amount)})
+                rows.append(self._classify_row(post_date, vendor, description, amount))
                 continue
 
             # Single-date format: MM/DD  DESCRIPTION  AMOUNT
@@ -115,14 +155,30 @@ class ChaseParser(StatementParser):
             vendor = re.sub(r'\s+', ' ', m.group(2).strip())
             amount_str = m.group(3).replace(',', '')
             amount = Decimal(amount_str)
-            txn_type = _classify_cc_transaction(vendor, amount)
-            if txn_type == 'payment':
-                self.payments.append({'date': date_str, 'description': 'PAYMENT - THANK YOU', 'amount': abs(amount)})
-                self.total_payments += abs(amount)
-            elif txn_type == 'credit':
-                self.credits.append({'date': date_str, 'description': vendor, 'amount': abs(amount)})
-            else:
-                self.charges.append({'date': date_str, 'vendor': vendor, 'amount': str(amount)})
+            rows.append(self._classify_row(date_str, vendor, m.group(2), amount))
+
+        return rows
+
+    def _rows_to_legacy_shape(self, rows):
+        """Adapter: list[TransactionRow] -> self.payments/self.credits/
+        self.charges in their existing dict shapes. Note the pre-existing
+        field-name inconsistency this preserves exactly: payments/credits
+        use the key 'description', charges use 'vendor' (parsers/report.py's
+        own convention, not something this migration changes). Payments
+        always display the fixed literal 'PAYMENT - THANK YOU' regardless
+        of raw vendor text. Charges' amount is stored as str(Decimal), not
+        Decimal, matching the parser's pre-existing (if unusual) convention —
+        _aggregate_by_vendor() tolerates either via its own Decimal(str(...))
+        cast, but this preserves the exact prior shape rather than relying
+        on that tolerance."""
+        for row in rows:
+            if row.type == 'payment':
+                self.payments.append({'date': row.date, 'description': 'PAYMENT - THANK YOU', 'amount': row.amount})
+                self.total_payments += row.amount
+            elif row.type == 'credit':
+                self.credits.append({'date': row.date, 'description': row.vendor, 'amount': row.amount})
+            else:  # 'debit' -> charge
+                self.charges.append({'date': row.date, 'vendor': row.vendor, 'amount': str(abs(row.amount))})
 
     def generate_report(self):
         # Separate interest rows from purchase charges
