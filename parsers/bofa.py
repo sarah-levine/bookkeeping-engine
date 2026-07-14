@@ -326,6 +326,48 @@ class BankOfAmericaCheckingParser(StatementParser):
                 if m:
                     self.ending_balance = Decimal(m.group(1).replace(',', ''))
 
+        rows = self._extract_rows(lines)
+        self._rows_to_legacy_shape(rows)
+
+    def _extract_rows(self, lines):
+        """Extract stage (see parsers/row_schema.py): raw statement text ->
+        list[TransactionRow]. Single, structurally unchanged pass (section
+        state, continuation-line accumulation, and check parsing all stay
+        together) — every section-transition and closing marker flushes
+        the currently-pending transaction using the state *as it was
+        before* this line's transition, and that exact ordering (flush,
+        then reset the flags) must be preserved.
+
+        save_transaction() is now a local closure building TransactionRow
+        objects instead of appending to self.credits/self.debits directly
+        — credit vs. debit is still decided purely by which state flag was
+        true at call time (a structural signal), matching the original
+        _save_transaction() method exactly (now removed, dead after this
+        change). Checks are appended immediately per matched line (no
+        continuation, no save_transaction) — vendor holds the check number
+        (payee is always blank at parse time, filled in later by
+        extract_check_payees(), out of scope), same repurposing precedent
+        as Citi Checking/Wells Fargo Checking.
+
+        No amount is ever sign-forced here, matching the original: every
+        row carries the raw signed Decimal exactly as the regex captured
+        it — this parser family (confirmed already for
+        BankOfAmericaCreditCardParser's charges bucket) never normalizes to
+        a uniform positive convention."""
+        rows = []
+
+        def save_transaction(date, desc, amount, in_deposits, in_withdrawals):
+            if in_deposits:
+                rows.append(TransactionRow(
+                    date=date, vendor=desc, raw_description=desc,
+                    amount=amount, type='credit',
+                ))
+            elif in_withdrawals:
+                rows.append(TransactionRow(
+                    date=date, vendor=desc, raw_description=desc,
+                    amount=amount, type='debit',
+                ))
+
         in_deposits = False
         in_withdrawals = False
         in_checks = False
@@ -337,24 +379,24 @@ class BankOfAmericaCheckingParser(StatementParser):
 
             if line.strip().startswith('Deposits and other credits') and 'Total' not in line and not re.search(r'\$?[\d,]+\.\d{2}\s*$', line):
                 if current_date and current_desc and current_amount is not None:
-                    self._save_transaction(current_date, current_desc, current_amount,
-                                           in_deposits, in_withdrawals)
+                    save_transaction(current_date, current_desc, current_amount,
+                                     in_deposits, in_withdrawals)
                 current_date = current_desc = current_amount = None
                 in_deposits, in_withdrawals, in_checks = True, False, False
                 continue
 
             if line.strip().startswith('Withdrawals and other debits') and 'Total' not in line:
                 if current_date and current_desc and current_amount is not None:
-                    self._save_transaction(current_date, current_desc, current_amount,
-                                           in_deposits, in_withdrawals)
+                    save_transaction(current_date, current_desc, current_amount,
+                                     in_deposits, in_withdrawals)
                 current_date = current_desc = current_amount = None
                 in_deposits, in_withdrawals, in_checks = False, True, False
                 continue
 
             if line.strip() == 'Checks' or (line.strip().startswith('Date') and 'Check #' in line):
                 if current_date and current_desc and current_amount is not None:
-                    self._save_transaction(current_date, current_desc, current_amount,
-                                           in_deposits, in_withdrawals)
+                    save_transaction(current_date, current_desc, current_amount,
+                                     in_deposits, in_withdrawals)
                 current_date = current_desc = current_amount = None
                 in_deposits, in_withdrawals, in_checks = False, False, True
                 continue
@@ -362,8 +404,8 @@ class BankOfAmericaCheckingParser(StatementParser):
             if any(x in line for x in ['Total deposits', 'Total withdrawals', 'Total checks',
                                         'Daily ledger balances']):
                 if current_date and current_desc and current_amount is not None:
-                    self._save_transaction(current_date, current_desc, current_amount,
-                                           in_deposits, in_withdrawals)
+                    save_transaction(current_date, current_desc, current_amount,
+                                     in_deposits, in_withdrawals)
                 current_date = current_desc = current_amount = None
                 in_deposits = in_withdrawals = in_checks = False
                 continue
@@ -378,8 +420,8 @@ class BankOfAmericaCheckingParser(StatementParser):
 
             if 'Service fees' in line and 'Total' not in line:
                 if current_date and current_desc and current_amount is not None:
-                    self._save_transaction(current_date, current_desc, current_amount,
-                                           in_deposits, in_withdrawals)
+                    save_transaction(current_date, current_desc, current_amount,
+                                     in_deposits, in_withdrawals)
                 current_date = current_desc = current_amount = None
                 in_deposits = in_withdrawals = in_checks = False
                 continue
@@ -393,8 +435,8 @@ class BankOfAmericaCheckingParser(StatementParser):
                 dm = re.match(r'^(\d{2}/\d{2}/\d{2})\s+(.+)', line)
                 if dm:
                     if current_date and current_desc and current_amount is not None:
-                        self._save_transaction(current_date, current_desc, current_amount,
-                                               in_deposits, in_withdrawals)
+                        save_transaction(current_date, current_desc, current_amount,
+                                         in_deposits, in_withdrawals)
                     current_date = dm.group(1)
                     rest = dm.group(2).strip()
                     am = re.search(r'([-]?[\d,]+\.\d{2})$', rest)
@@ -439,18 +481,30 @@ class BankOfAmericaCheckingParser(StatementParser):
                 check_pat = r'(\d{2}/\d{2}/\d{2})\s+(\d+\*?)?\s*([-]?[\d,]+\.\d{2})'
                 for match in re.findall(check_pat, line):
                     date_c, chk_num, amt = match
-                    self.checks.append({
-                        'date': date_c,
-                        'check_number': chk_num.rstrip('*') if chk_num else '',
-                        'amount': Decimal(amt.replace(',', '')),
-                        'payee': ''
-                    })
+                    check_num = chk_num.rstrip('*') if chk_num else ''
+                    rows.append(TransactionRow(
+                        date=date_c, vendor=check_num, raw_description=check_num,
+                        amount=Decimal(amt.replace(',', '')), type='check',
+                    ))
 
-    def _save_transaction(self, date, desc, amount, in_deposits, in_withdrawals):
-        if in_deposits:
-            self.credits.append({'date': date, 'vendor': desc, 'amount': amount})
-        elif in_withdrawals:
-            self.debits.append({'date': date, 'vendor': desc, 'amount': amount})
+        return rows
+
+    def _rows_to_legacy_shape(self, rows):
+        """Adapter: list[TransactionRow] -> self.credits/self.debits/
+        self.checks in their existing dict shapes. No sign forcing — every
+        amount passes through exactly as stored on the row."""
+        for row in rows:
+            if row.type == 'credit':
+                self.credits.append({'date': row.date, 'vendor': row.vendor, 'amount': row.amount})
+            elif row.type == 'debit':
+                self.debits.append({'date': row.date, 'vendor': row.vendor, 'amount': row.amount})
+            else:  # 'check'
+                self.checks.append({
+                    'date': row.date,
+                    'check_number': row.vendor,
+                    'amount': row.amount,
+                    'payee': '',
+                })
 
     def extract_check_payees(self, check_payee_map=None, check_date_map=None):
         """Apply check payee/date maps and optionally use OCR to extract payee names."""
