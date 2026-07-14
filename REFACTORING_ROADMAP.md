@@ -490,15 +490,60 @@ Findings:
   logged as its own root-cause item near the top of this document (not
   fixed here, confirmed dormant against both real fixtures).
 
+### Status: BofA Checking/Savings migration complete — parsers/bofa.py fully closed out (2026-07-14)
+
+`BankOfAmericaCheckingParser` migrated on `refactor/bofa-checking-pipeline`,
+3 commits. `BankOfAmericaSavingsParser` inherits `parse()` unchanged from
+Checking (only overrides `generate_report()`), so this single migration
+covers both real fixture formats — confirmed by byte-identical diffs
+against all 4 real fixtures (2 checking, 2 savings). With this,
+`BankOfAmericaCreditCardParser` (done previously) and
+`BankOfAmericaCheckingParser`/`SavingsParser` (done here) mean
+`parsers/bofa.py` is now fully on the pipeline, same milestone as
+`parsers/wells_fargo.py` and `parsers/citi.py` (Visa Costco pending)
+earlier in this rollout.
+
+Findings:
+
+- **The most intricate `parse()` migrated so far** — three-way section
+  state (deposits/withdrawals/checks) combined with multi-line
+  continuation accumulation via a `current_date`/`current_desc`/
+  `current_amount` triple, where *every* section-transition and closing
+  marker flushes the pending transaction using the state *as it was
+  before* the transition — order-of-operations-critical in a way that
+  compounds Chase's "can't split the loop" lesson with Wells Fargo
+  Checking's "live mutable state threading through the pass" lesson.
+- **Checks are parsed on a completely different code path from
+  deposits/withdrawals within the same method** — no continuation
+  accumulation at all, immediate single-line `re.findall` append. A
+  reminder that "how transactions are parsed" isn't necessarily uniform
+  across buckets *within* one parser, let alone across parsers — check
+  each bucket's actual mechanics, not just the parser's as a whole.
+- **Confirms the BofA-family-wide "never force a sign" convention** across
+  a second class now (first seen in `BankOfAmericaCreditCardParser`'s
+  charges bucket) — credits, debits, and checks all store whatever signed
+  value the statement's own text used, with zero `abs()`/normalization at
+  extraction time. This is now a confirmed *family* pattern, not a
+  one-off — worth checking for in any future BofA-adjacent parser work.
+- **A structural (not vendor-text) skip filter checks the client's own
+  name appearing in a continuation line** — `if self.client_name and
+  self.client_name in line: continue`. Preserved exactly; this is
+  extraction-native (uses parser state, not a business-rule keyword list),
+  so it stayed in `_extract_rows()`, not deferred to an adapter.
+- `generate_report()` here is the most elaborate in the entire rollout
+  (ADP/online-banking-transfer/CC-payment/`transaction_aggregations`
+  classification, plus reconciliation-log-CSV-driven "pending" CC-payment
+  tagging) — entirely untouched, confirming the "Report never touched"
+  boundary holds even for the most complex case encountered.
+
 ### Rollout playbook for the remaining parsers (not scheduled yet)
 
-1. Suggested order: **BofA Checking/Savings** (deferred above) →
-   **Citi Visa Costco** → **Amex** — each needs real per-parser design work
-   per the "different scale of change" section above, not mechanical
-   migration. **Capital One** stays deferred until a real fixture exists
-   (see status above) — don't schedule it based on line-count/complexity
-   alone; verify a real fixture is actually available first, learned the
-   hard way this round.
+1. Suggested order: **Citi Visa Costco** → **Amex** — each needs real
+   per-parser design work per the "different scale of change" section
+   above, not mechanical migration. **Capital One** stays deferred until a
+   real fixture exists (see status above) — don't schedule it based on
+   line-count/complexity alone; verify a real fixture is actually
+   available first, learned the hard way earlier in this rollout.
 2. Each migration gets its own branch, following the same
    one-branch/multi-phase-commit pattern as this prototype — never two
    parser-migration branches open at once, per `CLAUDE.md`'s branch-hygiene
