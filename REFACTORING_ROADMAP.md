@@ -187,33 +187,90 @@ Findings that matter for future migrations:
   (single-date/Ink, two-date/Sapphire+United) had identical copy-pasted
   classify+append logic; now both call one shared `_classify_row()` helper.
 
-### Rollout playbook for the remaining 7 parsers (not scheduled yet)
+### Status: Capital One — no real fixture exists, deferred (2026-07-14)
 
-1. Suggested order, by complexity (line count / client-config-knob count):
-   **Capital One** (251 lines — needs `PARSER_MAP`/fixtures-manifest wiring
-   first; it's currently absent from both despite
-   `tests/smoke_all_fixtures.py` already listing it) → **Citi Savings** →
-   **Citi Checking** → the large special-cased ones last (Wells Fargo,
-   BofA, Citi Visa Costco, Amex — each needs real per-parser design work
-   per the "different scale of change" section above, not mechanical
-   migration).
+Attempted to start this migration next per the rollout order below, but
+found the gap is deeper than "missing `PARSER_MAP`/manifest wiring": **no
+real Capital One statement PDF exists anywhere accessible** — not in
+`fixtures_manifest.json`, not in the Drive fixtures/statements folders
+(confirmed via a live Drive search for any filename containing "apital",
+zero hits), and no `capital_one` entries in reconciliation-log history —
+even though one client's config lists `capital_one` in its
+`statement_types`. Skipped in favor of Citi Savings; the wiring gap noted
+in the rollout playbook below still applies whenever a real fixture becomes
+available (e.g. a scanned paper/email statement for that client).
+
+### Status: Citi Savings migration complete (2026-07-14)
+
+`CitiSavingsParser` (`parsers/citi.py` — `CitiCheckingParser`/
+`CitiVisaCostcoParser` in the same file untouched, verified unaffected)
+migrated on `refactor/citi-savings-pipeline`, 3 commits, same thin shape as
+Chase's (no new shared tooling or `classify.py` addition needed). Verified
+byte-identical against its one real fixture plus
+`tests/test_citi_savings_synthetic.py`.
+
+Findings:
+
+- **Turned out architecturally closer to Northern Trust than to Chase.**
+  Citi Savings' transaction lines carry an explicit type keyword (`ACH
+  CREDIT`/`DEPOSIT`/`INTEREST`/etc., `ACH DEBIT`/`WITHDRAWAL`/etc., a
+  `CHECK NO:` substring) — genuine extraction-time signal, no entangled
+  classifier call needed the way Chase required. Confirms the roadmap
+  item above ("check this on a per-parser basis") was the right caution —
+  it cuts both ways, some parsers are Chase-shaped, some are NT-shaped.
+- **The schema's `check` row type was used for the first time** (Northern
+  Trust and Chase never needed it). Still routed into the same
+  `self.withdrawals` legacy bucket as generic debits, matching current
+  behavior — checks aren't a separate bucket in this parser's report.
+- **One real fixture, again very thin** (a single `INTEREST` credit, zero
+  withdrawals, zero checks, no combined-statement scoping exercised) —
+  same synthetic-companion treatment as Northern Trust and Chase applied
+  again, now clearly the norm rather than the exception for this codebase's
+  fixture coverage.
+- **A statement-shape wrinkle worth remembering for future migrations**:
+  savings statements can arrive bundled inside a combined checking+savings
+  PDF, with the checking section's balances appearing before a `SAVINGS
+  ACTIVITY` marker. `statement_date`/`closing_date` are searched *unscoped*
+  (can appear on an earlier page), while balances/transactions are scoped
+  to start at the marker. This pre-existing scoping logic was left
+  untouched and is exactly the kind of parser-specific behavior worth
+  checking for before assuming a clean single-pass migration on the next
+  parser.
+
+### Rollout playbook for the remaining parsers (not scheduled yet)
+
+1. Suggested order: **Citi Checking** next (same file as Citi Savings,
+   already partially familiar) → the large special-cased ones last (Wells
+   Fargo, BofA, Citi Visa Costco, Amex — each needs real per-parser design
+   work per the "different scale of change" section above, not mechanical
+   migration). **Capital One** stays deferred until a real fixture exists
+   (see status above) — don't schedule it based on line-count/complexity
+   alone; verify a real fixture is actually available first, learned the
+   hard way this round.
 2. Each migration gets its own branch, following the same
    one-branch/multi-phase-commit pattern as this prototype — never two
    parser-migration branches open at once, per `CLAUDE.md`'s branch-hygiene
    rule.
 3. Same acceptance bar every time, using `tests/dump_report.py`: byte-identical
    `generate_report()` output on every real fixture that parser has, plus a
-   synthetic companion test for anything the real fixture(s) can't exercise.
+   synthetic companion test for anything the real fixture(s) can't exercise
+   — expect this to be needed every time; only one parser migrated so far
+   has had more than one real fixture.
 4. Before assuming a parser's Extract stage can defer classification the
-   way Northern Trust's did, check whether its raw statement text actually
-   carries an independent type-label signal — Chase's didn't, and that
-   changed the shape of its migration (see "Status: Chase migration
-   complete" above).
+   way Northern Trust's and Citi Savings' did, check whether its raw
+   statement text actually carries an independent type-label signal —
+   Chase's didn't, and that changed the shape of its migration (see
+   "Status: Chase migration complete" above). Check this per parser, not
+   by analogy to the last one migrated.
 5. `cc_keywords` vs `cc_payment_vendors` naming stays unresolved — Northern
    Trust's `or`-fallback (`config.get('cc_keywords', []) or
    config.get('cc_payment_vendors', [])`) was preserved as-is in
    `classify.py` rather than picking one canonical name. Resolve this once
    `classify.py` has more than one caller, not with a sample size of one.
+6. Before scheduling a parser by line count/complexity alone, confirm a
+   real fixture actually exists for it somewhere accessible (manifest,
+   Drive, or reconciliation-log history) — Capital One looked like a
+   reasonable next target on paper and had none.
 
 ---
 
