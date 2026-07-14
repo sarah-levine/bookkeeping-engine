@@ -112,6 +112,78 @@ class AmexStatementParser(StatementParser):
         if new_matches:
             self.new_balance = Decimal(new_matches[-1].replace(',', ''))
 
+        rows = self._extract_rows(lines)
+        self._rows_to_legacy_shape(rows)
+
+        # Fees / Interest — try the detailed section labels first, then fall back
+        # to the summary "Finance Charges" line used on some AMEX statement formats.
+        m = re.search(r'Total Fees for this Period\s+\$([0-9,]+\.\d{2})', self.text)
+        if m:
+            self.fees = Decimal(m.group(1).replace(',', ''))
+        m = re.search(r'Total Interest Charged for this Period\s+\$([0-9,]+\.\d{2})', self.text)
+        if m:
+            self.interest = Decimal(m.group(1).replace(',', ''))
+        if self.fees == 0 and self.interest == 0:
+            m = re.search(r'Finance Charges[:\s]+\$\s*([0-9,]+\.\d{2})', self.text)
+            if m:
+                self.fees = Decimal(m.group(1).replace(',', ''))
+
+        # Remove any charge transaction whose amount equals the captured finance-
+        # charge total — AMEX sometimes emits these as dated line items in the
+        # charges section even though they're already tallied in fees/interest.
+        finance_total = self.fees + self.interest
+        if finance_total > 0:
+            self.charges = [
+                c for c in self.charges
+                if not (
+                    abs(Decimal(str(c['amount'])) - finance_total) < Decimal('0.01')
+                    and any(kw in c.get('vendor', '').upper()
+                            for kw in ('INTEREST', 'FINANCE', 'PERIODIC', 'FEE', 'CHARGE'))
+                )
+            ]
+
+    def _extract_rows(self, lines):
+        """Extract stage (see parsers/row_schema.py): raw statement text ->
+        list[TransactionRow]. Two independent sequential sub-passes over
+        `lines`, exactly mirroring the two loops this replaces (not fused
+        into one state machine — they scan different line ranges for
+        different reasons):
+
+        1. Payments & Credits pass, over ALL of `lines`. Extraction-native:
+           the payment-keyword regex and the cardholder-aware `_credit_re`
+           (scoped to `-$amount` lines only) decide type from raw text/sign
+           alone, no classifier call. NOTE: this pass is NOT scoped to stop
+           before the Charges section — a pre-existing quirk, not
+           introduced here (see REFACTORING_ROADMAP.md's "Open: Needs Root
+           Cause Fix"): a negative-amount line inside the Charges section
+           gets matched here AND independently by pass 2 below, producing
+           the same credit twice. Preserved byte-identically.
+        2. Charges pass, over `lines[charges_start:]` only (starting at the
+           standalone "New Charges" header — the earlier Payments/Credits
+           block has a different inline-cardholder-prefix shape that would
+           mis-split under this pass's trailing-junk stripper). Sequential
+           and stateful: `current_cardholder` (set by standalone
+           cardholder-name header lines) and `pending_date`/`pending_vendor`
+           (carried across lines for the separate-line-amount fallback
+           format) both persist purely within this pass. Calls
+           `self.normalize_vendor()` then `_classify_cc_transaction()` —
+           classifier-entangled, same shape as Chase and
+           BankOfAmericaCreditCardParser's payments section — so type is
+           decided here, not deferred to the adapter. Any negative amount
+           or a 'credit' classification produces a `type='credit'` row;
+           everything else produces `type='debit'` (this parser's charges
+           bucket is always positive by construction — any negative line
+           is explicitly diverted to credit above — so the standard
+           sign-flip-for-debit, abs()-back-in-adapter convention applies,
+           unlike BofA's charges bucket which preserves raw/mixed sign).
+           `cardholder` has no TransactionRow slot, so it's carried via the
+           `raw_description` overflow field (same repurposing precedent
+           used for check numbers in Citi/Wells Fargo/BofA Checking) —
+           payment/credit rows just set `raw_description` = `vendor` too,
+           unused by the adapter for those two types, for schema
+           consistency."""
+        rows = []
+
         # Cardholder names for this client (from config) — used to recognize
         # credit lines that lead with a cardholder name. Built as an optional
         # regex group so capture-group numbering stays fixed (group 2 =
@@ -142,11 +214,10 @@ class AmexStatementParser(StatementParser):
                     desc = 'ONLINE PAYMENT - THANK YOU'
                 else:
                     desc = 'PAYMENT RECEIVED - THANK YOU'
-                self.payments.append({
-                    'date': m.group(1),
-                    'description': desc,
-                    'amount': Decimal(m.group(2).replace(',', ''))
-                })
+                rows.append(TransactionRow(
+                    date=m.group(1), vendor=desc, raw_description=desc,
+                    amount=Decimal(m.group(2).replace(',', '')), type='payment',
+                ))
             # Credits (e.g. AMEX Wireless Credit, refunds, returns)
             # Handle multiple formats:
             # 1. Simple: DATE DESCRIPTION -$AMOUNT
@@ -160,11 +231,10 @@ class AmexStatementParser(StatementParser):
             mc = _credit_re.match(line)
             if mc and not m:
                 desc = mc.group(3).strip()
-                self.credits.append({
-                    'date': mc.group(1),
-                    'description': desc,
-                    'amount': Decimal(mc.group(4).replace(',', ''))
-                })
+                rows.append(TransactionRow(
+                    date=mc.group(1), vendor=desc, raw_description=desc,
+                    amount=Decimal(mc.group(4).replace(',', '')), type='credit',
+                ))
 
         # Charges — multi-line: date+desc line, then optional phone/ref lines, then $amount line
         cardholders = CLIENT_CARDHOLDERS.get(self.client_name, [])
@@ -238,18 +308,15 @@ class AmexStatementParser(StatementParser):
                 txn_type = _classify_cc_transaction(vendor, txn_amount)
                 # Negative amounts are always credits (e.g. refunds on cardholder cards)
                 if is_negative or txn_type == 'credit':
-                    self.credits.append({
-                        'date': date_str,
-                        'description': vendor,
-                        'amount': txn_amount,
-                    })
+                    rows.append(TransactionRow(
+                        date=date_str, vendor=vendor, raw_description=vendor,
+                        amount=txn_amount, type='credit',
+                    ))
                 else:
-                    self.charges.append({
-                        'date': date_str,
-                        'cardholder': current_cardholder or '',
-                        'vendor': vendor,
-                        'amount': txn_amount,
-                    })
+                    rows.append(TransactionRow(
+                        date=date_str, vendor=vendor, raw_description=current_cardholder or '',
+                        amount=-txn_amount, type='debit',
+                    ))
                 pending_date = None
                 pending_vendor = None
                 continue
@@ -262,18 +329,15 @@ class AmexStatementParser(StatementParser):
                 txn_amount = Decimal(amt_m.group(2).replace(',', ''))
                 txn_type = _classify_cc_transaction(vendor, txn_amount)
                 if is_negative or txn_type == 'credit':
-                    self.credits.append({
-                        'date': pending_date,
-                        'description': vendor,
-                        'amount': txn_amount,
-                    })
+                    rows.append(TransactionRow(
+                        date=pending_date, vendor=vendor, raw_description=vendor,
+                        amount=txn_amount, type='credit',
+                    ))
                 else:
-                    self.charges.append({
-                        'date': pending_date,
-                        'cardholder': current_cardholder or '',
-                        'vendor': vendor,
-                        'amount': txn_amount,
-                    })
+                    rows.append(TransactionRow(
+                        date=pending_date, vendor=vendor, raw_description=current_cardholder or '',
+                        amount=-txn_amount, type='debit',
+                    ))
                 pending_date = None
                 pending_vendor = None
                 continue
@@ -296,32 +360,23 @@ class AmexStatementParser(StatementParser):
                 vendor_raw = re.sub(r'\s+[A-Z][A-Z\s]+[A-Z]{2}\s*$', '', vendor_raw).strip()
                 pending_vendor = vendor_raw
 
-        # Fees / Interest — try the detailed section labels first, then fall back
-        # to the summary "Finance Charges" line used on some AMEX statement formats.
-        m = re.search(r'Total Fees for this Period\s+\$([0-9,]+\.\d{2})', self.text)
-        if m:
-            self.fees = Decimal(m.group(1).replace(',', ''))
-        m = re.search(r'Total Interest Charged for this Period\s+\$([0-9,]+\.\d{2})', self.text)
-        if m:
-            self.interest = Decimal(m.group(1).replace(',', ''))
-        if self.fees == 0 and self.interest == 0:
-            m = re.search(r'Finance Charges[:\s]+\$\s*([0-9,]+\.\d{2})', self.text)
-            if m:
-                self.fees = Decimal(m.group(1).replace(',', ''))
+        return rows
 
-        # Remove any charge transaction whose amount equals the captured finance-
-        # charge total — AMEX sometimes emits these as dated line items in the
-        # charges section even though they're already tallied in fees/interest.
-        finance_total = self.fees + self.interest
-        if finance_total > 0:
-            self.charges = [
-                c for c in self.charges
-                if not (
-                    abs(Decimal(str(c['amount'])) - finance_total) < Decimal('0.01')
-                    and any(kw in c.get('vendor', '').upper()
-                            for kw in ('INTEREST', 'FINANCE', 'PERIODIC', 'FEE', 'CHARGE'))
-                )
-            ]
+    def _rows_to_legacy_shape(self, rows):
+        """Adapter: list[TransactionRow] -> self.payments/self.credits/
+        self.charges in their existing dict shapes."""
+        for row in rows:
+            if row.type == 'payment':
+                self.payments.append({'date': row.date, 'description': row.vendor, 'amount': row.amount})
+            elif row.type == 'credit':
+                self.credits.append({'date': row.date, 'description': row.vendor, 'amount': row.amount})
+            else:  # 'debit' (charges)
+                self.charges.append({
+                    'date': row.date,
+                    'cardholder': row.raw_description,
+                    'vendor': row.vendor,
+                    'amount': abs(row.amount),
+                })
 
     def generate_report(self):
         aggregated = self._aggregate_by_vendor(
