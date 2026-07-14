@@ -368,15 +368,66 @@ real client's configured rules, which aren't all available locally) —
 if a future Wells Fargo Checking client's report shows a vendor name
 degrading to something generic, check this first.
 
+### Status: WellsFargoCheckingParser migration complete — parsers/wells_fargo.py fully closed out (2026-07-14)
+
+Migrated on `refactor/wells-fargo-checking-pipeline`, 3 commits. The most
+structurally complex parser migrated in this entire rollout — more so than
+Citi Checking's cascade. With this, both classes in `parsers/wells_fargo.py`
+are now on the pipeline. Verified byte-identical against the real fixture
+(`tests/dump_report.py`) plus `tests/test_wells_fargo_checking_synthetic.py`.
+
+Findings:
+
+- **Transactions spanning multiple physical lines** — no parser migrated
+  before this one had this shape. A date line opens a transaction; blank-
+  amount date lines get their amount from a later continuation line;
+  `flush()` fires on the *next* date line or `'Totals'`. `_extract_rows()`
+  keeps this as one structurally unchanged pass (the inner `flush()`
+  closure, continuation handling, and column tracking all stay together) —
+  only its final action changed, from direct bucket-append to building a
+  `TransactionRow`.
+- **Column positions shift *within* one statement**, not just between
+  statements — `dep_col`/`deb_col` are genuinely mutated mid-loop as later
+  section headers are crossed. This is a stronger version of Chase's
+  "can't split metadata from transaction extraction" lesson: here it's not
+  just ordering that matters, it's *live mutable state* threading through
+  the whole pass. Any future parser with dynamically-updating extraction
+  state needs the same "don't split the loop" treatment.
+- **Normalization couldn't be deferred to aggregation** (unlike Chase/Citi)
+  — `checks` and `bank_fees` never go through `_aggregate_by_vendor()` at
+  all (checks render individually, bank fees are summed but never
+  rendered as a list), so `self._normalize()` had to stay called at parse
+  time, at the exact point it fired before. A reminder that "defer
+  normalization to aggregation" (the Chase/Citi pattern) is only safe when
+  *every* bucket a row can land in actually goes through the aggregator —
+  check this per parser before assuming it generalizes.
+- **The same cleanup regex can legitimately run twice, at two different
+  text states, and that's not accidental duplication** — check-payee
+  cleanup runs once on raw extracted text and again inside `flush()` on
+  normalized text. Preserved both call sites rather than consolidating —
+  worth remembering this rollout has now found *both* directions of this
+  pattern: real accidental duplication (Citi Checking's `agg()` vs the
+  no-agg tag) and legitimate intentional redundancy (this one). Don't
+  assume a repeated pattern is always a bug to fix.
+- **`TransactionRow` has no field for "two pieces of who-information"** —
+  checks here carry both a payee and a check number (unlike Citi
+  Checking's checks, which have no payee at all). Resolved by repurposing
+  fields the same way Citi Checking did, just inverted: `vendor` = payee,
+  `raw_description` = check number. Not a schema change — the schema
+  stays deliberately minimal; parser-specific two-piece data gets
+  repurposed into existing slots with a clear docstring, not a new field,
+  until a *third* parser needs the same shape and the pattern is proven
+  common enough to formalize.
+
 ### Rollout playbook for the remaining parsers (not scheduled yet)
 
-1. Suggested order: **`WellsFargoCheckingParser`** (deferred above, its own
-   migration) → the other large special-cased ones (BofA, Citi Visa Costco,
-   Amex — each needs real per-parser design work per the "different scale
-   of change" section above, not mechanical migration). **Capital One**
-   stays deferred until a real fixture exists (see status above) — don't
-   schedule it based on line-count/complexity alone; verify a real fixture
-   is actually available first, learned the hard way this round.
+1. Suggested order: the remaining large special-cased ones — **BofA**,
+   **Citi Visa Costco**, **Amex** — each needs real per-parser design work
+   per the "different scale of change" section above, not mechanical
+   migration. **Capital One** stays deferred until a real fixture exists
+   (see status above) — don't schedule it based on line-count/complexity
+   alone; verify a real fixture is actually available first, learned the
+   hard way this round.
 2. Each migration gets its own branch, following the same
    one-branch/multi-phase-commit pattern as this prototype — never two
    parser-migration branches open at once, per `CLAUDE.md`'s branch-hygiene
