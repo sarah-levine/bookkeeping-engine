@@ -536,14 +536,62 @@ Findings:
   tagging) — entirely untouched, confirming the "Report never touched"
   boundary holds even for the most complex case encountered.
 
+### Status: Amex Checking migration complete, Amex (credit card) deferred (2026-07-14)
+
+`AmexCheckingParser` migrated on `refactor/amex-checking-pipeline`, 3
+commits, byte-identical against its one real fixture. `AmexStatementParser`
+(credit card, ~285 lines — cardholder-aware dynamic regex, two-pass
+Payments/Credits-then-Charges structure, value-based dedup cleanup) is
+**not** migrated — deliberately deferred in favor of the smaller Checking
+class this round, per the reordering request to do Amex before Citi Visa
+Costco. Don't mistake `parsers/amex.py` for fully closed out the way
+`parsers/wells_fargo.py` and `parsers/bofa.py` are — only half of it is on
+the pipeline.
+
+Findings:
+
+- **First parser in the rollout where `generate_report()` calls
+  `self.parse()` itself** (`def generate_report(self, ...): self.parse()`),
+  rather than relying on the caller having already called `parse()` once.
+  This makes `parse()`'s existing idempotency-reset block (zeroing
+  `self.credits`/`self.debits`/`self.checks`/`self.interest_earned`/
+  balances/`statement_date`/`account_number` at the top) load-bearing in a
+  way it wasn't for any prior parser — `_rows_to_legacy_shape()` appends to
+  those lists, so without the reset a second `parse()` call would double
+  every transaction. Preserved exactly, untouched, ahead of the new
+  `_extract_rows()`/`_rows_to_legacy_shape()` calls. Covered directly by a
+  synthetic test that calls `parse()` twice and asserts identical results.
+- **`interest_earned` is a running scalar total, not a row-shaped bucket**
+  — interest-deposit lines never appear as individual line items in the
+  rendered report, only accumulate into `self.interest_earned`. Treated the
+  same as `self.service_fees`/`self.finance_charge` in other parsers:
+  accumulated as a direct side effect inside `_extract_rows()`, never
+  converted to a `TransactionRow`. This is a scoping decision about what
+  counts as "a row" at all, not a schema change — worth checking for on
+  future parsers with a similar "summary total, not a transaction" field.
+- **Classification is extraction-native, no classifier entanglement** —
+  `is_credit`/`is_debit` come directly from text labels literally printed
+  on the transaction line (`': CREDIT'`, `': DEBIT'`, `'INTEREST DEPOSIT'`,
+  `'WIRE TRANSFER DOMESTIC INCOMING'`, `'CHECK: WITHDRAWAL'`), the same
+  NT/Citi-style shape, not Chase's.
+- **Sign convention is the Citi/Chase-family "always positive, direction =
+  bucket membership"** — not the BofA family's "preserve raw sign."
+  Standard sign-flip-then-`abs()`-in-adapter pattern, no special handling.
+- A post-loop cleanup filter (`self.debits = [d for d in self.debits if
+  'CHECK' not in d['description'].upper()]`) removes check-labeled debits
+  that would otherwise double-count against the `Checks Paid Summary`
+  section — a batch cleanup over the already-built legacy list, so it
+  stayed in `parse()`, running after `_rows_to_legacy_shape()`, untouched.
+
 ### Rollout playbook for the remaining parsers (not scheduled yet)
 
-1. Suggested order: **Citi Visa Costco** → **Amex** — each needs real
-   per-parser design work per the "different scale of change" section
-   above, not mechanical migration. **Capital One** stays deferred until a
-   real fixture exists (see status above) — don't schedule it based on
-   line-count/complexity alone; verify a real fixture is actually
-   available first, learned the hard way earlier in this rollout.
+1. Suggested order: **`AmexStatementParser`** (credit card, deferred this
+   round) → **Citi Visa Costco** — each needs real per-parser design work
+   per the "different scale of change" section above, not mechanical
+   migration. **Capital One** stays deferred until a real fixture exists
+   (see status above) — don't schedule it based on line-count/complexity
+   alone; verify a real fixture is actually available first, learned the
+   hard way earlier in this rollout.
 2. Each migration gets its own branch, following the same
    one-branch/multi-phase-commit pattern as this prototype — never two
    parser-migration branches open at once, per `CLAUDE.md`'s branch-hygiene
