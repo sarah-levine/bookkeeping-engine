@@ -6,9 +6,9 @@ as a companion to tests/dump_report.py for the Extract/Classify/Report
 pipeline refactor (see REFACTORING_ROADMAP.md's "Architecture Proposal").
 
 Why this exists: the one real Northern Trust fixture in
-tests/fixtures_manifest.json (northern_trust_checking_needles) has zero
-CC-payment lines and no Square-position-mapped transactions — confirmed by
-running tests/dump_report.py against it. A real-fixture byte-diff alone
+tests/fixtures_manifest.json has zero CC-payment lines and no
+Square-position-mapped transactions — confirmed by running
+tests/dump_report.py against it. A real-fixture byte-diff alone
 therefore cannot prove a refactor preserved CC-payment classification or the
 config-driven Square line-position mapping, both of which live in
 parse()'s classification logic today. This file exercises both paths (plus

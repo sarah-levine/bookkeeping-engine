@@ -124,12 +124,12 @@ keep this attribute populated in its existing shape
 (`{date, vendor, amount}`, sign per the parser's own convention) — a
 report-text diff alone won't catch a regression here, since the report can
 render identically even if this attribute's shape changes. Verified for
-Northern Trust via `tests/smoke_all_fixtures.py northern_trust_checking_needles`,
-which exercises the real `reconcile_comprehensive.py --dry-run` path, not
-just `generate_report()`.
+Northern Trust via `tests/smoke_all_fixtures.py` against its one real
+fixture, which exercises the real `reconcile_comprehensive.py --dry-run`
+path, not just `generate_report()`.
 
 **One real fixture is not enough to trust as a regression gate on its
-own** — `northern_trust_checking_needles` has zero CC-payment lines and no
+own** — Northern Trust's one real fixture has zero CC-payment lines and no
 Square-mapped transactions, so it can't exercise either path.
 `tests/test_northern_trust_synthetic.py` was added as a belt-and-suspenders
 companion (fictional client, no PDF needed) specifically to cover what the

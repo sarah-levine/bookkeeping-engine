@@ -13,13 +13,13 @@ done by hand (git stash + manual diff). This script makes that repeatable.
 
 Usage:
     # Print a fixture's report to stdout (timestamp normalized)
-    python3 tests/dump_report.py northern_trust_checking_needles
+    python3 tests/dump_report.py FIXTURE_NAME
 
     # Save a "before" snapshot
-    python3 tests/dump_report.py northern_trust_checking_needles --out /tmp/before.txt
+    python3 tests/dump_report.py FIXTURE_NAME --out /tmp/before.txt
 
     # After a code change, diff against the saved snapshot
-    python3 tests/dump_report.py northern_trust_checking_needles --compare-to /tmp/before.txt
+    python3 tests/dump_report.py FIXTURE_NAME --compare-to /tmp/before.txt
 
 Reuses tests/test_parsers.py's PARSER_MAP/load_manifest() and
 tests/drive_fixtures.py's fetch_pdf_entry() — one source of truth for
