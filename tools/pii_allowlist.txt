@@ -45,7 +45,7 @@ t&t fc club surf test two
 
 # ── Generic business / vendor vocabulary ───────────────────────────
 supply supplies parts hardware wholesale distributor warehouse logistics freight
-gov govt government mfg manufacturing widgets
+gov govt government mfg manufacturing widgets adjustment
 
 # ── Project's own generic labels ───────────────────────────────────
 client cardholder owner recipient counterparty bookkeeping sarah operator
