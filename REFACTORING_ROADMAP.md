@@ -44,6 +44,41 @@ every other attribute already initialized there.
 
 ---
 
+### `AmexStatementParser.parse()` double-counts a negative-amount line inside the Charges section
+
+Found 2026-07-14 while migrating this parser to the Extract/Classify
+pipeline (constructing synthetic test coverage, not something the real
+fixtures' report diffs would have caught — none of the 4 real fixtures
+happen to contain a negative-amount line inside `New Charges`). The
+Payments & Credits pass scans *all* of `lines` unconditionally — it has no
+awareness of where the Charges section starts. So when a genuine in-section
+credit adjustment appears after the `New Charges` header (a negative `-$`
+amount, matched by `_credit_re` just as readily as any Payments-section
+line), that same physical line is matched **twice**: once by the unscoped
+Payments/Credits pass, and again by the Charges pass (which explicitly
+routes any negative amount there to `self.credits` too). The result is the
+identical credit appearing twice in `self.credits` — visibly duplicated in
+the rendered `CREDITS / RETURNS` report section, inflating `total_credits`
+by the duplicated amount and, in turn, inflating `total_charges` (via the
+`_add_missing_row` reconciliation math in `generate_report()`, which pads
+charges to match `new_balance - previous_balance + payments + credits -
+fees - interest`).
+
+Confirmed via `tests/test_amex_statement_synthetic.py::
+test_negative_amount_in_charges_section_routes_to_credit_not_charge`.
+Not fixed as part of the pipeline migration (would have been an
+unrequested behavior change mid-migration) — preserved verbatim,
+double-count and all; `_extract_rows()` faithfully replicates both passes
+scanning the same lines, so the migration doesn't change this behavior
+either way.
+
+**Root cause fix:** scope the Payments & Credits pass to stop before
+`charges_start` (the same boundary the Charges pass already computes),
+mirroring the scoping comment already in the code for *why* the Charges
+pass is bounded the other direction.
+
+---
+
 ## Open: Architecture Proposal — standardize the parser → report pipeline
 
 Not a bug, not started — captured 2026-07-07 from a design discussion, for
@@ -536,17 +571,16 @@ Findings:
   tagging) — entirely untouched, confirming the "Report never touched"
   boundary holds even for the most complex case encountered.
 
-### Status: Amex Checking migration complete, Amex (credit card) deferred (2026-07-14)
+### Status: Amex Checking migration complete, Amex (credit card) deferred until the next status entry below (2026-07-14)
 
 `AmexCheckingParser` migrated on `refactor/amex-checking-pipeline`, 3
 commits, byte-identical against its one real fixture. `AmexStatementParser`
 (credit card, ~285 lines — cardholder-aware dynamic regex, two-pass
 Payments/Credits-then-Charges structure, value-based dedup cleanup) is
-**not** migrated — deliberately deferred in favor of the smaller Checking
-class this round, per the reordering request to do Amex before Citi Visa
-Costco. Don't mistake `parsers/amex.py` for fully closed out the way
-`parsers/wells_fargo.py` and `parsers/bofa.py` are — only half of it is on
-the pipeline.
+**not** migrated in this entry — deliberately deferred in favor of the
+smaller Checking class this round, per the reordering request to do Amex
+before Citi Visa Costco. See "Status: Amex (credit card) migration
+complete" below for its own migration, done as a separate follow-up.
 
 Findings:
 
@@ -583,15 +617,75 @@ Findings:
   section — a batch cleanup over the already-built legacy list, so it
   stayed in `parse()`, running after `_rows_to_legacy_shape()`, untouched.
 
+### Status: Amex (credit card) migration complete — parsers/amex.py fully closed out (2026-07-14)
+
+`AmexStatementParser` migrated on `refactor/amex-statement-pipeline`, 3
+commits, byte-identical against all 4 real fixtures (`amex_duran`,
+`amex_fcba`, `amex_silicon_valley_west_annual_fee`,
+`amex_silicon_valley_west_late_fee` — the most of any parser in this
+rollout except Chase). With `AmexCheckingParser` (done in the entry above)
+also migrated, `parsers/amex.py` is now fully on the pipeline, same
+milestone as `parsers/wells_fargo.py` and `parsers/bofa.py`.
+
+Findings:
+
+- **Two independent sequential passes over `lines`, not one combined state
+  machine** — the first parser in this rollout with that shape. A
+  Payments/Credits pass scans *all* of `lines`; a separately-scoped Charges
+  pass scans only `lines[charges_start:]` (from the standalone `"New
+  Charges"` header onward), deliberately bounded because the earlier
+  Payments/Credits block has an inline-cardholder-prefix shape that would
+  mis-split under the Charges pass's trailing-junk stripper. `_extract_rows()`
+  keeps both as separate sub-passes rather than fusing them into one state
+  machine — they scan different line ranges for different reasons, and
+  fusing them would have obscured that the first pass is (today,
+  unintentionally — see the new "Open" item above) unscoped.
+- **The Charges pass is classifier-entangled** (calls
+  `self.normalize_vendor()` then `_classify_cc_transaction()` to decide
+  credit vs. charge), same shape as Chase and
+  `BankOfAmericaCreditCardParser`'s payments section — classification
+  happens in `_extract_rows()`, can't be deferred to the adapter. The
+  Payments/Credits pass, by contrast, is extraction-native (payment
+  keywords / negative-amount sign alone decide type, no classifier call) —
+  a reminder that a single parser can mix both shapes across its own
+  different sections, not just across different parsers.
+- **`cardholder` needed a `TransactionRow` overflow slot** — `self.charges`
+  carries a `cardholder` field (set by standalone cardholder-name header
+  lines in the Charges section, persisting via `current_cardholder` state
+  until the next header) that `TransactionRow` has no dedicated slot for.
+  Reused `raw_description` for it, the same overflow-slot precedent used
+  for check numbers in Citi/Wells Fargo/BofA Checking.
+- **Confirmed the Citi/Chase-family "always positive" sign convention** for
+  the charges bucket — *not* `BankOfAmericaCreditCardParser`'s mixed-sign
+  convention, despite both being credit-card "charges" buckets. Amex's
+  Charges pass explicitly routes any negative amount to `self.credits`
+  before it can reach `self.charges`, so the bucket is always positive by
+  construction; BofA's charges section can contain an un-flagged negative
+  adjustment line with no such routing. A reminder that "charges bucket"
+  isn't itself a fixed sign convention across parsers — check each one.
+- **Discovered (not introduced, not fixed) a pre-existing double-counting
+  bug**: the unscoped Payments/Credits pass and the scoped Charges pass
+  both independently match a negative-amount line inside the Charges
+  section, producing the same credit twice. Found via synthetic test
+  construction (none of the 4 real fixtures happen to contain such a line)
+  — logged above under "Open: Needs Root Cause Fix", preserved
+  byte-identically by this migration since both passes still scan exactly
+  the same lines they did before.
+- **All 3 real fixture clients (`duran`, `fcba`, `silicon valley west`)
+  happen to have cardholders configured** — none exercises the
+  no-cardholders-configured fallback (`cardholder_pattern = None`,
+  `_cardholder_inner = '(?!)'`). Added synthetic coverage for it
+  specifically, since it's likely the *more* common case across the rest
+  of the client base, not an edge case.
+
 ### Rollout playbook for the remaining parsers (not scheduled yet)
 
-1. Suggested order: **`AmexStatementParser`** (credit card, deferred this
-   round) → **Citi Visa Costco** — each needs real per-parser design work
-   per the "different scale of change" section above, not mechanical
-   migration. **Capital One** stays deferred until a real fixture exists
-   (see status above) — don't schedule it based on line-count/complexity
-   alone; verify a real fixture is actually available first, learned the
-   hard way earlier in this rollout.
+1. **Citi Visa Costco** is the only parser left — needs real per-parser
+   design work per the "different scale of change" section above, not
+   mechanical migration. **Capital One** stays deferred until a real
+   fixture exists (see status above) — don't schedule it based on
+   line-count/complexity alone; verify a real fixture is actually
+   available first, learned the hard way earlier in this rollout.
 2. Each migration gets its own branch, following the same
    one-branch/multi-phase-commit pattern as this prototype — never two
    parser-migration branches open at once, per `CLAUDE.md`'s branch-hygiene
