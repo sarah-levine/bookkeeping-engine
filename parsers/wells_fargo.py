@@ -368,6 +368,46 @@ class WellsFargoCheckingParser(StatementParser):
             except ValueError:
                 pass
 
+        rows = self._extract_rows(lines)
+        self._rows_to_legacy_shape(rows)
+
+        # (Items returned unpaid are already captured in main transaction loop)
+
+    def _extract_rows(self, lines):
+        """Extract stage (see parsers/row_schema.py): raw statement text ->
+        list[TransactionRow]. This is a single, structurally unchanged pass
+        (the header_cols pre-scan plus the entire main transaction loop,
+        including the flush() closure and continuation-line handling) —
+        NOT split into separate passes, because dep_col/deb_col are
+        genuinely mutated mid-loop as later section headers are crossed,
+        affecting how *subsequent* lines in the same pass are classified.
+        Splitting this the way Chase's metadata/transaction passes could be
+        split would silently change behavior for any statement where a
+        transaction appears in a different column layout than another.
+
+        self._normalize() is called at the exact same point flush() called
+        it before this migration (checks and bank_fees never go through
+        the shared _aggregate_by_vendor(), so this is the only place they
+        get normalized at all). The check-payee cleanup that runs on RAW
+        desc (before normalization, further down in this method) and the
+        cleanup that runs again inside flush() on NORMALIZED desc are both
+        preserved at their original call sites — not consolidated into one
+        pass, since that's how the original code guards against
+        header-bleed noise surviving either text state.
+
+        Checks carry two pieces of vendor-shaped info (payee AND check
+        number) that TransactionRow has no dedicated field for. Following
+        the same repurposing precedent Citi Checking used the other way
+        around (storing check_num in vendor when there was no payee):
+        here, vendor = payee (consistent with every other row type's
+        vendor meaning "the who") and raw_description = check_num.
+
+        The bank-fees-vs-generic-debit split (a vendor-text keyword check)
+        is deferred to _rows_to_legacy_shape() below — a Classify-stage
+        decision, same category as Citi Checking's hardcoded 'ADP' check —
+        so every non-credit, non-check row here is uniformly type='debit'."""
+        rows = []
+
         # Column positions are detected dynamically per-section header, since
         # Wells Fargo uses different column widths on different pages of the same statement.
         dep_col = 95   # fallback
@@ -400,7 +440,10 @@ class WellsFargoCheckingParser(StatementParser):
                 return
             date = txn['date']
             if txn['is_credit']:
-                self.credits.append({'date': date, 'vendor': desc, 'amount': amt})
+                rows.append(TransactionRow(
+                    date=date, vendor=desc, raw_description=txn['desc'],
+                    amount=amt, type='credit',
+                ))
             else:
                 # Check line?
                 chk = txn.get('check_num', '')
@@ -409,12 +452,15 @@ class WellsFargoCheckingParser(StatementParser):
                     payee = re.sub(r'\s*Deposits/.*$', '', desc, flags=re.IGNORECASE).strip()
                     payee = re.sub(r'^\s*Check\s*$', '', payee, flags=re.IGNORECASE).strip()
                     payee = re.sub(r'\s+Check\s*$', '', payee, flags=re.IGNORECASE).strip()
-                    self.checks.append({'date': date, 'check_num': chk,
-                                        'payee': payee, 'amount': amt})
-                elif 'WIRE TRANS SVC CHARGE' in desc.upper() or 'OVERDRAFT FEE' in desc.upper():
-                    self.bank_fees.append({'date': date, 'vendor': desc, 'amount': amt})
+                    rows.append(TransactionRow(
+                        date=date, vendor=payee, raw_description=chk,
+                        amount=-amt, type='check',
+                    ))
                 else:
-                    self.debits.append({'date': date, 'vendor': desc, 'amount': amt})
+                    rows.append(TransactionRow(
+                        date=date, vendor=desc, raw_description=txn['desc'],
+                        amount=-amt, type='debit',
+                    ))
 
         for line_idx, line in enumerate(lines):
             # Detect start of transaction section. Must match the standalone
@@ -554,8 +600,27 @@ class WellsFargoCheckingParser(StatementParser):
                     current['desc'] += ' ' + line.strip()
 
         flush(current)
+        return rows
 
-        # (Items returned unpaid are already captured in main transaction loop)
+    def _rows_to_legacy_shape(self, rows):
+        """Adapter: list[TransactionRow] -> self.credits/self.checks/
+        self.bank_fees/self.debits in their existing dict shapes. 'debit'
+        rows run the WIRE TRANS SVC CHARGE/OVERDRAFT FEE vendor-keyword
+        check here (not in extraction) — same order as the original
+        flush() — landing in self.bank_fees or self.debits."""
+        for row in rows:
+            if row.type == 'credit':
+                self.credits.append({'date': row.date, 'vendor': row.vendor, 'amount': row.amount})
+            elif row.type == 'check':
+                self.checks.append({'date': row.date, 'check_num': row.raw_description,
+                                    'payee': row.vendor, 'amount': abs(row.amount)})
+            else:  # 'debit'
+                vendor = row.vendor
+                amount = abs(row.amount)
+                if 'WIRE TRANS SVC CHARGE' in vendor.upper() or 'OVERDRAFT FEE' in vendor.upper():
+                    self.bank_fees.append({'date': row.date, 'vendor': vendor, 'amount': amount})
+                else:
+                    self.debits.append({'date': row.date, 'vendor': vendor, 'amount': amount})
 
     def _extract_period(self):
         return self.statement_period or 'Unknown Period'
