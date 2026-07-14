@@ -237,16 +237,58 @@ Findings:
   checking for before assuming a clean single-pass migration on the next
   parser.
 
+### Status: Citi Checking migration complete (2026-07-14)
+
+`CitiCheckingParser` (`parsers/citi.py` — `CitiSavingsParser`/
+`CitiVisaCostcoParser` in the same file untouched, verified unaffected)
+migrated on `refactor/citi-checking-pipeline`, 3 commits. The most
+structurally complex parser migrated so far — 5 target buckets (`charges`,
+`credits`, `adp_transactions`, `credit_card_payments`, `checks`) instead of
+2–3 — but still no new shared tooling or `classify.py` addition needed.
+Verified byte-identical against its real fixture (unusually rich — already
+exercised aggregated charges, the `no_aggregate_vendors` tag mechanism via a
+real client's config, checks, ADP payroll, and credit card payments) plus
+`tests/test_citi_checking_synthetic.py`.
+
+Findings:
+
+- **A second real case of a config-dependent, vendor-mutating cascade**,
+  same shape as Northern Trust's Square line-position remapping: `ACH
+  DEBIT` rows run an ADP-keyword check → `no_aggregate_vendors` config tag
+  (mutates the vendor string to `vendor|date`, stripped only at render time
+  in `report.py`'s `_charges_section()`) → `CREDIT CRD`/`AUTOPAY` keyword
+  check, in that exact order — landing in `adp_transactions`,
+  `credit_card_payments`, or generic `charges` respectively. Kept
+  parser-local in the adapter, same discipline as before: this vendor-
+  keyword set is Citi-Checking-specific, not shared with any other parser.
+- **A pre-existing, un-fixed duplication surfaced by reading this code
+  closely**: the `vendor|date` tag mechanism is a *second*, independent
+  "never aggregate this vendor" implementation, separate from
+  `_aggregate_by_vendor()`'s own `no_aggregate_vendors`/
+  `never_aggregate_vendors` handling in `parsers/base.py`. Not fixed here —
+  out of scope for a byte-identical migration — but worth calling out
+  explicitly as a real candidate for consolidation whenever the Aggregate
+  stage itself gets generalized.
+- **Vendor computation is genuinely per-type, not per-config** — worth
+  noting for the next parser: `ELECTRONIC CREDIT` keeps the full, unsplit
+  vendor-lookahead line while every other type splits on 2+ spaces. A
+  parser-shape assumption ("all vendor text gets the same cleanup") would
+  have been wrong here; check each type keyword's handling individually,
+  don't assume uniformity within one parser.
+- Multiple buckets can share one running total (`total_charges` here rolls
+  up `charges` + `adp_transactions` + `credit_card_payments` together, not
+  per-bucket) — another assumption worth checking per parser rather than
+  taking for granted.
+
 ### Rollout playbook for the remaining parsers (not scheduled yet)
 
-1. Suggested order: **Citi Checking** next (same file as Citi Savings,
-   already partially familiar) → the large special-cased ones last (Wells
-   Fargo, BofA, Citi Visa Costco, Amex — each needs real per-parser design
-   work per the "different scale of change" section above, not mechanical
-   migration). **Capital One** stays deferred until a real fixture exists
-   (see status above) — don't schedule it based on line-count/complexity
-   alone; verify a real fixture is actually available first, learned the
-   hard way this round.
+1. Suggested order: the large special-cased ones (Wells Fargo, BofA, Citi
+   Visa Costco, Amex — each needs real per-parser design work per the
+   "different scale of change" section above, not mechanical migration).
+   **Capital One** stays deferred until a real fixture exists (see status
+   above) — don't schedule it based on line-count/complexity alone; verify
+   a real fixture is actually available first, learned the hard way this
+   round.
 2. Each migration gets its own branch, following the same
    one-branch/multi-phase-commit pattern as this prototype — never two
    parser-migration branches open at once, per `CLAUDE.md`'s branch-hygiene
@@ -254,20 +296,25 @@ Findings:
 3. Same acceptance bar every time, using `tests/dump_report.py`: byte-identical
    `generate_report()` output on every real fixture that parser has, plus a
    synthetic companion test for anything the real fixture(s) can't exercise
-   — expect this to be needed every time; only one parser migrated so far
-   has had more than one real fixture.
+   — expect this to be needed at least narrowly every time; only one parser
+   migrated so far (Chase) has had more than one real fixture.
 4. Before assuming a parser's Extract stage can defer classification the
-   way Northern Trust's and Citi Savings' did, check whether its raw
-   statement text actually carries an independent type-label signal —
-   Chase's didn't, and that changed the shape of its migration (see
-   "Status: Chase migration complete" above). Check this per parser, not
-   by analogy to the last one migrated.
-5. `cc_keywords` vs `cc_payment_vendors` naming stays unresolved — Northern
+   way Northern Trust's, Citi Savings', and Citi Checking's did, check
+   whether its raw statement text actually carries an independent
+   type-label signal — Chase's didn't, and that changed the shape of its
+   migration (see "Status: Chase migration complete" above). Check this per
+   parser, not by analogy to the last one migrated.
+5. Config-dependent, vendor-mutating cascades (Northern Trust's Square
+   remapping, Citi Checking's ADP/no-agg-tag/CC-payment dispatch) go in the
+   adapter, parser-local, no new `classify.py` function — until a second
+   parser is found that genuinely shares the *same* keyword set/logic, not
+   just the same shape of problem.
+6. `cc_keywords` vs `cc_payment_vendors` naming stays unresolved — Northern
    Trust's `or`-fallback (`config.get('cc_keywords', []) or
    config.get('cc_payment_vendors', [])`) was preserved as-is in
    `classify.py` rather than picking one canonical name. Resolve this once
    `classify.py` has more than one caller, not with a sample size of one.
-6. Before scheduling a parser by line count/complexity alone, confirm a
+7. Before scheduling a parser by line count/complexity alone, confirm a
    real fixture actually exists for it somewhere accessible (manifest,
    Drive, or reconciliation-log history) — Capital One looked like a
    reasonable next target on paper and had none.
