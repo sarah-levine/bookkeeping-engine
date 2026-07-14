@@ -138,17 +138,65 @@ companion test, not just the real fixture(s) — as standard practice for any
 parser with only 1–2 real fixtures in `fixtures_manifest.json` (most of
 them, per a count taken during this work).
 
-### Rollout playbook for the remaining 8 parsers (not scheduled yet)
+### Status: Chase migration complete (2026-07-14)
+
+`ChaseParser` (`parsers/chase.py`, all three registered formats —
+`chase_ink`/`chase_sapphire`/`chase_united` share one class) migrated on
+`refactor/chase-pipeline`, 3 commits (synthetic test + real-fixture
+baselines, Extract + adapter, cleanup/roadmap/merge) — thinner than
+Northern Trust's 5 because no new shared tooling or `classify.py` addition
+was needed this time. Verified byte-identical against all 4 real fixtures
+in `fixtures_manifest.json` (spanning both statement line formats and two
+different client statements — better real coverage than Northern Trust's
+one fixture) plus
+`tests/test_chase_synthetic.py`.
+
+Findings that matter for future migrations:
+
+- **First real proof of the Aggregate stage surviving the pipeline.**
+  Chase's `generate_report()` calls `self._aggregate_by_vendor()` on both
+  purchases and interest charges — unlike Northern Trust, which never
+  aggregates. `_aggregate_by_vendor()` itself was left untouched in
+  `parsers/base.py`; this migration only proves rows flowing through
+  `TransactionRow` still feed it correctly. The "prove Aggregate for real"
+  item from the Northern Trust status above is now satisfied — Citi Savings
+  no longer needs to be prioritized for that specific reason (still a
+  reasonable next target on its own merits).
+- **Classification can be entangled with extraction, parser-shape
+  dependent.** Northern Trust's raw text prints an explicit `"ACH Debit"` /
+  `"ACH Credit"` label — real extraction-time signal, letting Classify stay
+  cleanly downstream. Chase's lines carry no such label at all: deciding
+  payment/credit/charge requires calling `_classify_cc_transaction()`
+  (`parsers/base.py`) with both vendor text *and* amount, so a row can't
+  even be constructed without classifying it first. `chase.py`'s
+  `_extract_rows()` calls the classifier directly, documented inline as a
+  parser-shape-dependent wrinkle. **Check this on a per-parser basis** when
+  migrating the rest — don't assume every parser's raw text carries an
+  NT-style type label.
+- **No new `parsers/classify.py` function added.** `_classify_cc_transaction()`
+  was already the shared Classify building block (used by Chase and,
+  per this file's history, other credit-card parsers too) — there was no
+  parser-specific classification logic to peel out the way Northern Trust's
+  Square-mapping was. A shared credit-card bucket-shape-adapter (the
+  `description`-vs-`vendor` field-naming, the fixed `'PAYMENT - THANK YOU'`
+  literal, `str(Decimal)` for charges) is a candidate for `classify.py`
+  once a **second** credit-card parser is migrated and its bucket shapes
+  are confirmed to actually match Chase's — not before, same
+  don't-generalize-from-one-caller discipline applied to Aggregate above.
+- Incidentally deduplicated: Chase's two statement-line-format branches
+  (single-date/Ink, two-date/Sapphire+United) had identical copy-pasted
+  classify+append logic; now both call one shared `_classify_row()` helper.
+
+### Rollout playbook for the remaining 7 parsers (not scheduled yet)
 
 1. Suggested order, by complexity (line count / client-config-knob count):
-   **Chase** (182 lines, zero client-config knobs) → **Capital One**
-   (251 lines — needs `PARSER_MAP`/fixtures-manifest wiring first; it's
-   currently absent from both despite `tests/smoke_all_fixtures.py` already
-   listing it) → **Citi Savings** (the "prove Aggregate for real" migration
-   flagged above) → **Citi Checking** → the large special-cased ones last
-   (Wells Fargo, BofA, Citi Visa Costco, Amex — each needs real per-parser
-   design work per the "different scale of change" section above, not
-   mechanical migration).
+   **Capital One** (251 lines — needs `PARSER_MAP`/fixtures-manifest wiring
+   first; it's currently absent from both despite
+   `tests/smoke_all_fixtures.py` already listing it) → **Citi Savings** →
+   **Citi Checking** → the large special-cased ones last (Wells Fargo,
+   BofA, Citi Visa Costco, Amex — each needs real per-parser design work
+   per the "different scale of change" section above, not mechanical
+   migration).
 2. Each migration gets its own branch, following the same
    one-branch/multi-phase-commit pattern as this prototype — never two
    parser-migration branches open at once, per `CLAUDE.md`'s branch-hygiene
@@ -156,7 +204,12 @@ them, per a count taken during this work).
 3. Same acceptance bar every time, using `tests/dump_report.py`: byte-identical
    `generate_report()` output on every real fixture that parser has, plus a
    synthetic companion test for anything the real fixture(s) can't exercise.
-4. `cc_keywords` vs `cc_payment_vendors` naming stays unresolved — Northern
+4. Before assuming a parser's Extract stage can defer classification the
+   way Northern Trust's did, check whether its raw statement text actually
+   carries an independent type-label signal — Chase's didn't, and that
+   changed the shape of its migration (see "Status: Chase migration
+   complete" above).
+5. `cc_keywords` vs `cc_payment_vendors` naming stays unresolved — Northern
    Trust's `or`-fallback (`config.get('cc_keywords', []) or
    config.get('cc_payment_vendors', [])`) was preserved as-is in
    `classify.py` rather than picking one canonical name. Resolve this once
