@@ -9,6 +9,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL
+from parsers.row_schema import TransactionRow
 from parsers.report import *
 from parsers.report import (
     _report_header, _summary_block, _balance_check, _is_balanced,
@@ -701,10 +702,30 @@ class CitiSavingsParser(StatementParser):
                     self.ending_balance = Decimal(bm.group(1).replace(',', ''))
                     found_ending = True
 
-        _CREDIT_TYPES = {'ACH CREDIT', 'ELECTRONIC CREDIT', 'INSTANT PAYMENT CREDIT',
-                         'DEPOSIT', 'INTEREST'}
-        _DEBIT_TYPES  = {'ACH DEBIT', 'WITHDRAWAL', 'TRANSFER OUT'}
+        rows = self._extract_rows(lines)
+        self._rows_to_legacy_shape(rows)
 
+    _CREDIT_TYPES = {'ACH CREDIT', 'ELECTRONIC CREDIT', 'INSTANT PAYMENT CREDIT',
+                     'DEPOSIT', 'INTEREST'}
+    _DEBIT_TYPES  = {'ACH DEBIT', 'WITHDRAWAL', 'TRANSFER OUT'}
+
+    def _extract_rows(self, lines):
+        """Extract stage (see parsers/row_schema.py): raw statement text
+        (already scoped to the SAVINGS ACTIVITY section by parse(), unlike
+        the unscoped statement_date/closing_date search above it) -> list of
+        TransactionRow. Classification comes straight from an explicit type
+        keyword in the raw text (like Northern Trust's "ACH Debit"/"ACH
+        Credit" labels, unlike Chase's entangled case) — genuine
+        extraction-time signal, no shared classifier call needed.
+
+        Preserves the exact index-based while-loop mechanics of the
+        original code: a matched transaction line's vendor comes from
+        lines[i + 1] (the following line), and the loop does NOT skip past
+        that consumed line (i only advances by 1, not 2) — it relies on
+        vendor lines never themselves matching the ^MM/DD transaction-line
+        pattern. Not "fixed" to i += 2 here, since this migration's job is
+        byte-identical behavior, not closing a latent edge case."""
+        rows = []
         i = 0
         while i < len(lines):
             line = lines[i]
@@ -722,7 +743,7 @@ class CitiSavingsParser(StatementParser):
                 if 'CHECK NO:' in rest:
                     trans_type = 'CHECK'
                 else:
-                    for ttype in list(_CREDIT_TYPES) + list(_DEBIT_TYPES):
+                    for ttype in list(self._CREDIT_TYPES) + list(self._DEBIT_TYPES):
                         if ttype in rest:
                             trans_type = ttype
                             break
@@ -735,18 +756,40 @@ class CitiSavingsParser(StatementParser):
                         vendor = re.split(r'\s{2,}', vendor_line.strip())[0].strip() or rest
                         vendor = self.normalize_vendor(vendor)
 
-                        if trans_type in _CREDIT_TYPES:
-                            self.deposits.append({'date': date, 'vendor': vendor, 'amount': amount})
-                            self.total_deposits += amount
+                        if trans_type in self._CREDIT_TYPES:
+                            rows.append(TransactionRow(
+                                date=date, vendor=vendor, raw_description=rest,
+                                amount=amount, type='credit',
+                            ))
                         elif trans_type == 'CHECK':
                             check_num_m = re.search(r'CHECK NO:\s*(\d+)', rest)
                             check_num = check_num_m.group(1) if check_num_m else '?'
-                            self.withdrawals.append({'date': date, 'vendor': f'Check #{check_num}', 'amount': amount})
-                            self.total_withdrawals += amount
+                            rows.append(TransactionRow(
+                                date=date, vendor=f'Check #{check_num}', raw_description=rest,
+                                amount=-amount, type='check',
+                            ))
                         else:
-                            self.withdrawals.append({'date': date, 'vendor': vendor, 'amount': amount})
-                            self.total_withdrawals += amount
+                            rows.append(TransactionRow(
+                                date=date, vendor=vendor, raw_description=rest,
+                                amount=-amount, type='debit',
+                            ))
             i += 1
+        return rows
+
+    def _rows_to_legacy_shape(self, rows):
+        """Adapter: list[TransactionRow] -> self.deposits/self.withdrawals
+        in their existing dict shapes ({'date', 'vendor', 'amount'}, always
+        positive — this parser's own convention, direction is bucket
+        membership not sign, matching CitiCheckingParser's convention).
+        'check' and 'debit' rows both land in self.withdrawals, matching
+        current behavior (checks aren't a separate bucket here)."""
+        for row in rows:
+            if row.type == 'credit':
+                self.deposits.append({'date': row.date, 'vendor': row.vendor, 'amount': row.amount})
+                self.total_deposits += row.amount
+            else:  # 'check' or 'debit' -> withdrawals
+                self.withdrawals.append({'date': row.date, 'vendor': row.vendor, 'amount': abs(row.amount)})
+                self.total_withdrawals += abs(row.amount)
 
     def generate_report(self, check_payee_map=None, check_date_map=None):
         calc = self.beginning_balance + self.total_deposits - self.total_withdrawals
