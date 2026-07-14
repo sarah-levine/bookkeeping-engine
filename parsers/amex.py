@@ -14,6 +14,7 @@ from parsers.base import (
     StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, CLIENT_CARDHOLDERS,
     _classify_cc_transaction, _is_known_cc_network_payment,
 )
+from parsers.row_schema import TransactionRow
 from parsers.report import *
 from parsers.report import (
     _report_header, _summary_block, _balance_check, _is_balanced,
@@ -450,6 +451,37 @@ class AmexCheckingParser(StatementParser):
         # Continuation lines (leading spaces) provide vendor detail.
         # Checks Paid Summary at end: "312   01/12/2026   $1,500.00"
 
+        rows = self._extract_rows(lines)
+        self._rows_to_legacy_shape(rows)
+
+        # Remove check debits — they appear in Checks Paid Summary and are
+        # fully accounted for in the CHECKS section. Filter by description keyword.
+        self.debits = [d for d in self.debits
+                       if 'CHECK' not in d['description'].upper()]
+
+    def _extract_rows(self, lines):
+        """Extract stage (see parsers/row_schema.py): raw statement text ->
+        list[TransactionRow]. is_credit/is_debit come directly from text
+        labels literally printed on the transaction line (': CREDIT',
+        ': DEBIT', 'INTEREST DEPOSIT', etc.) — extraction-native, no
+        classifier entanglement.
+
+        Interest-deposit lines are NOT converted to rows at all —
+        self.interest_earned is a running scalar total (never rendered as
+        individual line items), the same category as self.service_fees/
+        self.finance_charge in other parsers, so it's accumulated here as a
+        direct side effect, same as those.
+
+        Checks (from the Checks Paid Summary section) produce type='check'
+        rows with vendor = check number (payee is always blank at parse
+        time), same repurposing precedent as Citi Checking/Wells Fargo
+        Checking/BofA Checking.
+
+        Amounts are always positive at this parser (`amount = abs(...)`
+        for both credits and debits) — the Citi/Chase-family convention,
+        not BofA's raw-sign-preserved convention — so the standard
+        sign-flip-for-debit, abs()-back-in-adapter pattern applies."""
+        rows = []
         in_checks_summary = False
         skip_keywords = ['Beginning Balance', 'Ending Balance', 'Date         Description',
                          'Continued on next page', 'Account Activity', 'Accounts offered by',
@@ -467,12 +499,11 @@ class AmexCheckingParser(StatementParser):
             if in_checks_summary:
                 m = re.match(r'^\s*(\d+)\s+(\d{2}/\d{2}/\d{4})\s+\$([0-9,]+\.\d{2})', line)
                 if m:
-                    self.checks.append({
-                        'check_number': m.group(1),
-                        'date': self._fmt_date(m.group(2)),
-                        'amount': Decimal(m.group(3).replace(',', '')),
-                        'payee': '',
-                    })
+                    check_num = m.group(1)
+                    rows.append(TransactionRow(
+                        date=self._fmt_date(m.group(2)), vendor=check_num, raw_description=check_num,
+                        amount=-Decimal(m.group(3).replace(',', '')), type='check',
+                    ))
                 i += 1
                 continue
 
@@ -537,17 +568,36 @@ class AmexCheckingParser(StatementParser):
                 if is_interest:
                     self.interest_earned += amount
                 else:
-                    self.credits.append({'date': date, 'description': desc, 'amount': amount})
+                    rows.append(TransactionRow(
+                        date=date, vendor=desc, raw_description=desc,
+                        amount=amount, type='credit',
+                    ))
             else:
                 amount = abs(txn_amount)
-                self.debits.append({'date': date, 'description': desc, 'amount': amount})
+                rows.append(TransactionRow(
+                    date=date, vendor=desc, raw_description=desc,
+                    amount=-amount, type='debit',
+                ))
 
             i = j
 
-        # Remove check debits — they appear in Checks Paid Summary and are
-        # fully accounted for in the CHECKS section. Filter by description keyword.
-        self.debits = [d for d in self.debits
-                       if 'CHECK' not in d['description'].upper()]
+        return rows
+
+    def _rows_to_legacy_shape(self, rows):
+        """Adapter: list[TransactionRow] -> self.credits/self.debits/
+        self.checks in their existing dict shapes."""
+        for row in rows:
+            if row.type == 'credit':
+                self.credits.append({'date': row.date, 'description': row.vendor, 'amount': row.amount})
+            elif row.type == 'debit':
+                self.debits.append({'date': row.date, 'description': row.vendor, 'amount': abs(row.amount)})
+            else:  # 'check'
+                self.checks.append({
+                    'check_number': row.vendor,
+                    'date': row.date,
+                    'amount': abs(row.amount),
+                    'payee': '',
+                })
 
     def _fmt_date(self, date_str):
         """Convert MM/DD/YYYY → MM/DD/YY for consistency with other parsers."""
