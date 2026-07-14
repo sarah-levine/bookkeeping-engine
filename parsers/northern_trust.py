@@ -9,8 +9,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from parsers.ocr_support import fitz, pytesseract, Image, _io, OCR_AVAILABLE
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, _is_known_cc_network_payment
+from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL
 from parsers.row_schema import TransactionRow
+from parsers.classify import classify_checking_rows
 from parsers.report import *
 from parsers.report import (
     _balance_check, _deposits_section, _individual_section,
@@ -161,33 +162,13 @@ class NorthernTrustCheckingParser(StatementParser):
     def _rows_to_legacy_shape(self, rows):
         """Adapter: list[TransactionRow] -> self.credits/self.debits/
         self.credit_card_payments in their existing dict shapes
-        ({'date', 'vendor', 'amount', 'memo'}). Owns the CC-payment
-        classification and Square line-position remapping for now — moving
-        to a shared parsers/classify.py in a later phase — so this phase's
-        change is purely internal to Extract, with zero output change."""
+        ({'date', 'vendor', 'amount', 'memo'}), via the shared Classify
+        stage (parsers/classify.py's classify_checking_rows)."""
         config = _registry.get_config(self.client_name) or {}
-        square_order = {entry['position']: entry for entry in config.get('square_line_order', [])}
-        square_counter = 0  # tracks which Square transaction we're on
-        cc_kws = config.get('cc_keywords', []) or config.get('cc_payment_vendors', [])
-
-        for row in rows:
-            vendor = row.vendor
-            # Apply position-based Square QB account mapping
-            memo = ''
-            if 'Square' in vendor and square_order:
-                square_counter += 1
-                mapping = square_order.get(square_counter)
-                if mapping:
-                    vendor = mapping['account']
-                    memo = mapping.get('memo', '')
-            if row.type == 'credit':
-                self.credits.append({'date': row.date, 'vendor': vendor, 'amount': row.amount, 'memo': memo})
-            elif (_is_known_cc_network_payment(vendor.upper())
-                  or any(kw.upper() in vendor.upper() for kw in cc_kws)):
-                self.credit_card_payments.append(
-                    {'date': row.date, 'vendor': vendor, 'amount': row.amount, 'memo': memo})
-            else:
-                self.debits.append({'date': row.date, 'vendor': vendor, 'amount': row.amount, 'memo': memo})
+        classified = classify_checking_rows(rows, config)
+        self.credits.extend(classified['credits'])
+        self.debits.extend(classified['debits'])
+        self.credit_card_payments.extend(classified['credit_card_payments'])
 
     def _get_statement_year(self):
         # Look for 4-digit year in statement period line
