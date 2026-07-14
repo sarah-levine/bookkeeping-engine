@@ -46,7 +46,7 @@ t&t fc club surf test two
 # ── Generic business / vendor vocabulary ───────────────────────────
 supply supplies parts hardware wholesale distributor warehouse logistics freight
 gov govt government mfg manufacturing widgets adjustment decoy real desc source extra
-recurring charge charges full
+recurring charge charges full merchandise merchant
 
 # ── Project's own generic labels ───────────────────────────────────
 client cardholder owner recipient counterparty bookkeeping sarah operator
