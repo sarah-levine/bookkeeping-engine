@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, _is_known_cc_network_payment
 from parsers.vendor_normalize import strip_client_suffixes
+from parsers.row_schema import TransactionRow
 from parsers.report import *
 from parsers.report import (
     _report_header, _summary_block, _balance_check, _is_balanced,
@@ -85,6 +86,22 @@ class WellsFargoCreditCardParser(StatementParser):
                     CREDIT_COL_THRESHOLD = credits_pos + 15
                 break
 
+        rows = self._extract_rows(lines, CREDIT_COL_THRESHOLD)
+        self._rows_to_legacy_shape(rows)
+
+    def _extract_rows(self, lines, credit_col_threshold):
+        """Extract stage (see parsers/row_schema.py): raw statement text ->
+        list[TransactionRow]. The credit-vs-charge split is purely
+        geometric — raw line length vs. credit_col_threshold — needing no
+        vendor-text inspection at all, unlike every other parser migrated
+        so far. The payment-vs-generic-credit split (a hardcoded vendor-text
+        regex) is a Classify-stage decision and lives in
+        _rows_to_legacy_shape() below, same precedent as Citi Checking's
+        hardcoded 'ADP' check. vendor/raw_description are left UNNORMALIZED
+        here — normalize_vendor() is only ever called for the "credit but
+        not a payment" case today, and that call happens in the adapter to
+        preserve the exact same call-site timing."""
+        rows = []
         in_transactions = False
         for line in lines:
             if 'Transaction Details' in line or ('Trans' in line and 'Post' in line and 'Description' in line):
@@ -126,24 +143,40 @@ class WellsFargoCreditCardParser(StatementParser):
             full_date = f"{raw_date}/{str(yr)[-2:]}"
 
             # Classify by column position (raw line length before strip)
-            is_credit_col = len(line.rstrip('\n')) <= CREDIT_COL_THRESHOLD
+            is_credit_col = len(line.rstrip('\n')) <= credit_col_threshold
 
-            if is_credit_col:
-                if re.search(r'ONLINE PAYMENT|PAYMENT THANK YOU', raw_desc, re.IGNORECASE):
+            rows.append(TransactionRow(
+                date=full_date, vendor=raw_desc, raw_description=raw_desc,
+                amount=amt if is_credit_col else -amt,
+                type='credit' if is_credit_col else 'debit',
+            ))
+        return rows
+
+    def _rows_to_legacy_shape(self, rows):
+        """Adapter: list[TransactionRow] -> self.payments/self.credits/
+        self.charges in their existing dict shapes. 'credit' rows run the
+        hardcoded payment-keyword check (same regex as before); match ->
+        self.payments with the fixed literal description; no match ->
+        self.credits with normalize_vendor() applied now (same call-site
+        timing as before this migration, just relocated). 'debit' rows ->
+        self.charges, vendor left unnormalized (normalization happens later,
+        inside _aggregate_by_vendor(), unchanged)."""
+        for row in rows:
+            if row.type == 'credit':
+                if re.search(r'ONLINE PAYMENT|PAYMENT THANK YOU', row.vendor, re.IGNORECASE):
                     self.payments.append({
-                        'date': full_date,
+                        'date': row.date,
                         'description': 'PAYMENT - THANK YOU',
-                        'amount': amt,
+                        'amount': row.amount,
                     })
                 else:
-                    # Return / credit — normalize description same as charges
                     self.credits.append({
-                        'date': full_date,
-                        'description': self.normalize_vendor(raw_desc),
-                        'amount': amt,
+                        'date': row.date,
+                        'description': self.normalize_vendor(row.vendor),
+                        'amount': row.amount,
                     })
-            else:
-                self.charges.append({'date': full_date, 'vendor': raw_desc, 'amount': amt})
+            else:  # 'debit'
+                self.charges.append({'date': row.date, 'vendor': row.vendor, 'amount': abs(row.amount)})
 
     def generate_report(self):
         aggregated = self._aggregate_by_vendor(self.charges, date_fmt='%m/%d/%y')
