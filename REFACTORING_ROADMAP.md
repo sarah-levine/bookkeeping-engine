@@ -19,6 +19,31 @@ following the pattern in `parsers/bofa.py`'s `_extract_closing_date()`.
 
 ---
 
+### `BankOfAmericaCreditCardParser.parse()` crashes on a real fee line — `self.fees` is never initialized
+
+Found 2026-07-14 while migrating this parser to the Extract/Classify pipeline
+(reading `parse()` closely, not something a report-diff would have caught).
+A `LATE PAYMENT FEE`, `RETURNED PAYMENT FEE`, or `ANNUAL FEE` line triggers
+`self.fees += Decimal(...)` (`parsers/bofa.py`), but `self.fees` is never
+initialized anywhere — not in this class's `__init__`, not unconditionally
+by `StatementParser`. The only place `parsers/base.py` ever sets `self.fees`
+is inside `_try_recover_balance()` — a separate, conditionally-invoked
+recovery path that only runs later, at `generate_report()` time, and only
+when the statement doesn't already tie out. `parse()` itself has no such
+fallback, so the first real statement containing one of those three fee
+lines will raise `AttributeError: 'BankOfAmericaCreditCardParser' object
+has no attribute 'fees'`.
+
+Confirmed dormant against both real fixtures for this format — neither
+contains any of the three trigger phrases. Not fixed as part of the pipeline migration (would have been an
+unrequested behavior change mid-migration) — preserved verbatim, crash
+risk and all.
+
+**Root cause fix:** add `self.fees = Decimal('0')` to `__init__`, matching
+every other attribute already initialized there.
+
+---
+
 ## Open: Architecture Proposal — standardize the parser → report pipeline
 
 Not a bug, not started — captured 2026-07-07 from a design discussion, for
@@ -419,10 +444,56 @@ Findings:
   until a *third* parser needs the same shape and the pattern is proven
   common enough to formalize.
 
+### Status: BofA Credit Card migration complete, Checking/Savings deferred (2026-07-14)
+
+`BankOfAmericaCreditCardParser` (`parsers/bofa.py`, ~195 lines) migrated on
+`refactor/bofa-credit-pipeline`, 3 commits. `BankOfAmericaCheckingParser`
+(~536 lines) and `BankOfAmericaSavingsParser` (inherits `parse()` from
+Checking, overrides only `generate_report()`) are deliberately **not**
+touched — deferred to their own future migration, same two-step pattern
+used for Wells Fargo. Verified byte-identical against both real fixtures
+for this format plus `tests/test_bofa_credit_synthetic.py`.
+
+Findings:
+
+- **A fifth classification-signal shape: section-based document state.**
+  Three mutually-exclusive states (`in_payments`/`in_charges`/
+  `in_credits_section`) toggle on section-header text markers as the loop
+  scans — extraction-native (no vendor-text inspection needed to know
+  *which section* a line is in), structurally similar in spirit to Wells
+  Fargo Checking's dynamic column tracking but signaled by text headers
+  instead of geometry.
+- **A hybrid case**: within the payments/credits section specifically, a
+  second-level split is classifier-entangled exactly like Chase —
+  `_classify_cc_transaction()` (the same shared classifier Chase and
+  Capital One already use) decides payment vs. genuine credit, and can't
+  be deferred to the adapter without already knowing the type. First
+  parser to combine a structural first-level signal with a classifier-
+  entangled second level.
+- **`self.charges` has a genuinely mixed sign convention — the first
+  parser in this rollout where the usual "force negative, `abs()` back in
+  the adapter" pattern would have been actively wrong**, not just
+  unnecessary. `self.payments`/`self.credits` always store `abs(amount)`,
+  but `self.charges` stores the *raw signed* regex match with zero
+  forcing. Applying the usual pattern would have silently flipped
+  genuinely negative charges (in-section merchant adjustments) positive —
+  caught by reading the code closely before writing any migration code,
+  not by a failing test. The row carries the exact raw signed amount
+  through unchanged instead. **Lesson for future migrations**: check
+  whether a bucket's sign convention is uniform before assuming the
+  standard sign-flip pattern applies — this one wasn't, and forcing it
+  would have corrupted data invisibly (the byte-identical check would
+  still have caught it before merge, but it's a reminder the "just flip
+  and abs()" pattern is a default, not a law).
+- **A real, pre-existing bug found by reading closely, not by testing**:
+  `self.fees` is used (`self.fees += ...`) but never initialized —
+  logged as its own root-cause item near the top of this document (not
+  fixed here, confirmed dormant against both real fixtures).
+
 ### Rollout playbook for the remaining parsers (not scheduled yet)
 
-1. Suggested order: the remaining large special-cased ones — **BofA**,
-   **Citi Visa Costco**, **Amex** — each needs real per-parser design work
+1. Suggested order: **BofA Checking/Savings** (deferred above) →
+   **Citi Visa Costco** → **Amex** — each needs real per-parser design work
    per the "different scale of change" section above, not mechanical
    migration. **Capital One** stays deferred until a real fixture exists
    (see status above) — don't schedule it based on line-count/complexity
