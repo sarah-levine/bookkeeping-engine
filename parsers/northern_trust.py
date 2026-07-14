@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from parsers.ocr_support import fitz, pytesseract, Image, _io, OCR_AVAILABLE
 from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, _is_known_cc_network_payment
+from parsers.row_schema import TransactionRow
 from parsers.report import *
 from parsers.report import (
     _balance_check, _deposits_section, _individual_section,
@@ -95,18 +96,24 @@ class NorthernTrustCheckingParser(StatementParser):
                 if m:
                     self.ending_balance = Decimal(m.group(1).replace(',', ''))
 
+        rows = self._extract_rows(lines)
+        self._rows_to_legacy_shape(rows)
+
+    def _extract_rows(self, lines):
+        """Extract stage (see parsers/row_schema.py): raw statement text ->
+        list[TransactionRow]. Only distinguishes credit vs. debit — that's
+        all the raw text itself tells you. CC-payment classification and the
+        Square line-position remapping are business rules, not extraction,
+        so they live in _rows_to_legacy_shape() below (moving to a shared
+        parsers/classify.py in a later phase of the pipeline refactor)."""
+        rows = []
+
         # Parse transactions — format:
         #   "ACH Debit ACH DEBIT Square Inc SQ250303 T3QXZF 55.00"
         #   "C74FOYMZZ 03/03 8797583 CCD"   <- continuation has the date
         in_transactions = False
-        pending = None  # {'desc': str, 'amount': Decimal}
+        pending = None  # {'desc': str, 'amount': Decimal, 'is_credit': bool}
         year = self._get_statement_year()
-
-        # Load client config for Square line position mapping
-        config = _registry.get_config(self.client_name) or {}
-        square_order = {entry['position']: entry for entry in config.get('square_line_order', [])}
-        square_counter = 0  # tracks which Square transaction we're on
-        cc_kws = config.get('cc_keywords', []) or config.get('cc_payment_vendors', [])
 
         for line in lines:
             stripped = line.strip()
@@ -139,23 +146,48 @@ class NorthernTrustCheckingParser(StatementParser):
                     month, day = date_m.group(1).split('/')
                     date_str = f"{month}/{day}/{str(year)[2:]}"
                     vendor = self.normalize_vendor(pending['desc'])
-                    # Apply position-based Square QB account mapping
-                    memo = ''
-                    if 'Square' in vendor and square_order:
-                        square_counter += 1
-                        mapping = square_order.get(square_counter)
-                        if mapping:
-                            vendor = mapping['account']
-                            memo = mapping.get('memo', '')
-                    if pending['is_credit']:
-                        self.credits.append({'date': date_str, 'vendor': vendor, 'amount': pending['amount'], 'memo': memo})
-                    elif (_is_known_cc_network_payment(vendor.upper())
-                          or any(kw.upper() in vendor.upper() for kw in cc_kws)):
-                        self.credit_card_payments.append(
-                            {'date': date_str, 'vendor': vendor, 'amount': -pending['amount'], 'memo': memo})
-                    else:
-                        self.debits.append({'date': date_str, 'vendor': vendor, 'amount': -pending['amount'], 'memo': memo})
+                    is_credit = pending['is_credit']
+                    signed_amount = pending['amount'] if is_credit else -pending['amount']
+                    rows.append(TransactionRow(
+                        date=date_str,
+                        vendor=vendor,
+                        raw_description=pending['desc'],
+                        amount=signed_amount,
+                        type='credit' if is_credit else 'debit',
+                    ))
                     pending = None
+        return rows
+
+    def _rows_to_legacy_shape(self, rows):
+        """Adapter: list[TransactionRow] -> self.credits/self.debits/
+        self.credit_card_payments in their existing dict shapes
+        ({'date', 'vendor', 'amount', 'memo'}). Owns the CC-payment
+        classification and Square line-position remapping for now — moving
+        to a shared parsers/classify.py in a later phase — so this phase's
+        change is purely internal to Extract, with zero output change."""
+        config = _registry.get_config(self.client_name) or {}
+        square_order = {entry['position']: entry for entry in config.get('square_line_order', [])}
+        square_counter = 0  # tracks which Square transaction we're on
+        cc_kws = config.get('cc_keywords', []) or config.get('cc_payment_vendors', [])
+
+        for row in rows:
+            vendor = row.vendor
+            # Apply position-based Square QB account mapping
+            memo = ''
+            if 'Square' in vendor and square_order:
+                square_counter += 1
+                mapping = square_order.get(square_counter)
+                if mapping:
+                    vendor = mapping['account']
+                    memo = mapping.get('memo', '')
+            if row.type == 'credit':
+                self.credits.append({'date': row.date, 'vendor': vendor, 'amount': row.amount, 'memo': memo})
+            elif (_is_known_cc_network_payment(vendor.upper())
+                  or any(kw.upper() in vendor.upper() for kw in cc_kws)):
+                self.credit_card_payments.append(
+                    {'date': row.date, 'vendor': vendor, 'amount': row.amount, 'memo': memo})
+            else:
+                self.debits.append({'date': row.date, 'vendor': vendor, 'amount': row.amount, 'memo': memo})
 
     def _get_statement_year(self):
         # Look for 4-digit year in statement period line
