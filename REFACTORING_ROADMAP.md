@@ -19,16 +19,23 @@ following the pattern in `parsers/bofa.py`'s `_extract_closing_date()`.
 
 ---
 
-## Open: Architecture Proposal — standardize the parser → report pipeline
+## Closed: Architecture Proposal — standardize the parser → report pipeline (complete, 2026-07-14)
 
-Not a bug, not started — captured 2026-07-07 from a design discussion, for
-whenever there's appetite to take this on. Motivation: nearly every
-duplication bug found and fixed this session (`normalize_vendor()` x5,
-`credit_card_payments` classification x4, three local `agg()`
-reimplementations, the balance-tolerance check) has the same root cause —
-each parser owns not just PDF extraction but also its own classification,
-aggregation, and report-assembly logic, hand-rolled per bank. That's a
-structural invitation for the same bug shape to keep recurring.
+Captured 2026-07-07 from a design discussion, not a bug. Motivation:
+nearly every duplication bug found and fixed around that time
+(`normalize_vendor()` x5, `credit_card_payments` classification x4, three
+local `agg()` reimplementations, the balance-tolerance check) had the same
+root cause — each parser owned not just PDF extraction but also its own
+classification, aggregation, and report-assembly logic, hand-rolled per
+bank. That was a structural invitation for the same bug shape to keep
+recurring.
+
+Rolled out across every parser with a real fixture between 2026-07-14 and
+this entry — see the "Status" sections below for the play-by-play, and
+"Rollout playbook" near the end for the final state (only Capital One
+remains off the pipeline, blocked on a real fixture existing at all). The
+proposal below is preserved as written at the time, as the historical
+record of what was proposed before the rollout began.
 
 ### Proposed shape: three stages instead of one monolithic parser
 
