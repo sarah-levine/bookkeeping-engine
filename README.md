@@ -90,6 +90,8 @@ Exposes tools to Claude chat via the Model Context Protocol: `reconcile`, `recon
 
 ## Workflow Modes
 
+> Prefer a visual reference? Open [`docs/workflow.html`](docs/workflow.html) in a browser — same content as the tables below, laid out as a decision tree with mode cards.
+
 When you hand a statement (or a request) to the assistant in chat, it picks one of these modes based on what's attached and what you ask for:
 
 | What's attached / requested | Mode |

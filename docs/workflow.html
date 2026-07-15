@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bookkeeping Engine — Workflow Decision Tree</title>
+<style>
+  :root {
+    --bg: #f2f4f1;
+    --surface: #ffffff;
+    --surface-2: #eaeee9;
+    --ink: #1c2621;
+    --ink-muted: #5b6b62;
+    --ink-faint: #8a988f;
+    --accent: #2f5d50;
+    --accent-ink: #ffffff;
+    --accent-soft: #e2ece5;
+    --accent-soft-line: #c3d6c9;
+    --line: #d8ded9;
+    --mono-bg: #101614;
+    --mono-ink: #cfe8da;
+    --mono-ink-dim: #7fa896;
+    --good: #2f7d4f;
+    --warn: #a3701f;
+    --danger: #b23b3b;
+    --good-soft: #e4f1e8;
+    --warn-soft: #f5ecd9;
+    --danger-soft: #f6e4e2;
+
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+    --sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+    --mono: "SF Mono", "Cascadia Code", "Fira Code", Consolas, "Liberation Mono", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101512;
+      --surface: #171e1a;
+      --surface-2: #1c2420;
+      --ink: #e7ede9;
+      --ink-muted: #93a69b;
+      --ink-faint: #5f6f66;
+      --accent: #6fcda8;
+      --accent-ink: #0c1512;
+      --accent-soft: #1d2b24;
+      --accent-soft-line: #2c4438;
+      --line: #2a342e;
+      --mono-bg: #0b0f0d;
+      --mono-ink: #a9e8ca;
+      --mono-ink-dim: #5c8973;
+      --good: #4caf77;
+      --warn: #d9a441;
+      --danger: #e2685f;
+      --good-soft: #16261c;
+      --warn-soft: #2b2415;
+      --danger-soft: #2a1917;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .page {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 56px 28px 96px;
+  }
+
+  /* ---------- Header ---------- */
+
+  header.hero {
+    margin-bottom: 44px;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 22px;
+    height: 1px;
+    background: var(--accent);
+  }
+
+  h1 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(30px, 4.4vw, 44px);
+    line-height: 1.12;
+    margin: 0 0 14px;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+
+  .lede {
+    max-width: 62ch;
+    color: var(--ink-muted);
+    font-size: 16px;
+    margin: 0;
+  }
+  .lede code { font-family: var(--mono); font-size: 0.92em; color: var(--ink); }
+
+  /* ---------- Section scaffolding ---------- */
+
+  section { margin-bottom: 52px; }
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 10px;
+  }
+
+  h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 22px;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .section-note {
+    font-size: 13px;
+    color: var(--ink-faint);
+    font-family: var(--mono);
+    white-space: nowrap;
+  }
+
+  /* ---------- Router ---------- */
+
+  .router {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .router-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--line);
+  }
+  .router-row:last-child { border-bottom: none; }
+
+  .router-row .trigger {
+    color: var(--ink);
+  }
+  .router-row .trigger .cond {
+    color: var(--ink-muted);
+    font-style: italic;
+  }
+
+  .leader {
+    flex: 1;
+    border-bottom: 1px dotted var(--ink-faint);
+    min-width: 24px;
+    height: 0;
+    margin-bottom: 5px;
+  }
+
+  .mode-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .mode-badge .letter {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--accent-ink);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: 12px;
+  }
+
+  .router-branch {
+    padding: 8px 20px 13px 46px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .router-branch:last-child { border-bottom: none; }
+  .branch-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13.5px;
+    color: var(--ink-muted);
+  }
+  .branch-line .arrow { color: var(--ink-faint); font-family: var(--mono); }
+
+  .ambiguous {
+    padding: 12px 20px;
+    font-size: 13.5px;
+    color: var(--ink-muted);
+    background: var(--surface-2);
+    font-style: italic;
+  }
+
+  /* ---------- Ending callout ---------- */
+
+  .ending {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-soft-line);
+    border-radius: 10px;
+    padding: 22px 24px;
+  }
+  .ending .ending-title {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 6px;
+  }
+  .ending .ending-modes {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-muted);
+    margin: 0 0 16px;
+  }
+  .ending-flow {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .ending-step {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13.5px;
+    white-space: nowrap;
+  }
+  .ending-arrow { color: var(--ink-faint); }
+
+  .outcomes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  @media (max-width: 620px) { .outcomes { grid-template-columns: 1fr; } }
+
+  .outcome {
+    background: var(--surface);
+    border-radius: 8px;
+    padding: 14px 16px;
+    border-left: 3px solid var(--line);
+  }
+  .outcome.done { border-left-color: var(--good); }
+  .outcome.later { border-left-color: var(--warn); }
+  .outcome .tag {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .outcome.done .tag { color: var(--good); }
+  .outcome.later .tag { color: var(--warn); }
+  .outcome ul {
+    margin: 8px 0 0;
+    padding-left: 18px;
+    font-size: 13.5px;
+    color: var(--ink-muted);
+  }
+  .outcome li + li { margin-top: 3px; }
+  .outcome code { font-family: var(--mono); font-size: 0.92em; color: var(--ink); }
+
+  .never-advance {
+    margin: 16px 0 0;
+    font-size: 13px;
+    color: var(--ink-muted);
+    font-style: italic;
+  }
+
+  /* ---------- Mode cards ---------- */
+
+  .mode-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 760px) { .mode-grid { grid-template-columns: 1fr; } }
+
+  .mode-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .mode-card .card-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .mode-card .letter {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--accent-soft-line);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--serif);
+    font-size: 17px;
+    flex-shrink: 0;
+  }
+  .mode-card h3 {
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: 15.5px;
+    margin: 0;
+  }
+  .mode-card .gate {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 3px 9px;
+    white-space: nowrap;
+  }
+  .mode-card .gate.active { color: var(--accent); border-color: var(--accent-soft-line); background: var(--accent-soft); }
+
+  .field-label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 4px;
+  }
+
+  .trigger-text {
+    font-size: 13.5px;
+    color: var(--ink-muted);
+    margin: 0;
+  }
+
+  pre.cmd {
+    background: var(--mono-bg);
+    color: var(--mono-ink);
+    border-radius: 7px;
+    padding: 11px 13px;
+    font-family: var(--mono);
+    font-size: 12.3px;
+    line-height: 1.5;
+    margin: 0;
+    overflow-x: auto;
+    font-variant-numeric: tabular-nums;
+  }
+  pre.cmd .flag { color: var(--mono-ink-dim); }
+  pre.cmd .prompt { color: var(--mono-ink-dim); }
+
+  .mode-card .desc {
+    font-size: 13.5px;
+    color: var(--ink-muted);
+    margin: 0;
+  }
+
+  /* ---------- Supporting scripts table ---------- */
+
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow-x: auto;
+  }
+
+  table.scripts {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 720px;
+  }
+  table.scripts th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 400;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+  table.scripts td {
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+    font-size: 13.5px;
+  }
+  table.scripts tr:last-child td { border-bottom: none; }
+  table.scripts code {
+    font-family: var(--mono);
+    font-size: 12.3px;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  table.scripts .when {
+    color: var(--ink-muted);
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+  table.scripts .desc { color: var(--ink-muted); }
+
+  /* ---------- Footer ---------- */
+
+  footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  footer code { font-family: var(--mono); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .mode-card, .router-row { transition: border-color 0.15s ease; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <div class="eyebrow">bookkeeping-engine · workflow reference</div>
+    <h1>What's attached, and which script runs</h1>
+    <p class="lede">
+      The router the assistant uses in chat to pick a mode (<strong>A–H</strong>), the
+      exact Python entry point each one calls, and the scripts that live outside the
+      router entirely — run on a schedule, or by hand, once a statement's already logged.
+      Source: <code>README.md</code> §Workflow Modes, binding per <code>CLAUDE.md</code>.
+    </p>
+  </header>
+
+  <section aria-labelledby="router-h">
+    <div class="section-head">
+      <h2 id="router-h">What's attached / requested?</h2>
+      <span class="section-note">ambiguous → assistant asks first</span>
+    </div>
+
+    <div class="router">
+      <div class="router-row">
+        <span class="trigger">Credit card statement PDF</span>
+        <span class="leader"></span>
+        <span class="mode-badge"><span class="letter">A</span>Reconciliation</span>
+      </div>
+      <div class="router-branch">
+        <div class="branch-line"><span class="arrow">└─</span> scanned / unparseable <span class="arrow">→</span> <span class="mode-badge"><span class="letter">G</span>Manual Entry</span></div>
+      </div>
+
+      <div class="router-row">
+        <span class="trigger">Checking account statement PDF</span>
+        <span class="leader"></span>
+        <span class="mode-badge"><span class="letter">A</span>Reconciliation</span>
+      </div>
+      <div class="router-branch">
+        <div class="branch-line"><span class="arrow">└─</span> auto-runs, no new PDF needed <span class="arrow">→</span> <span class="mode-badge"><span class="letter">C</span>Payroll Tie-Out</span> <span class="arrow">+</span> <span class="mode-badge"><span class="letter">E</span>CC Tie-Out</span></div>
+      </div>
+
+      <div class="router-row">
+        <span class="trigger">ADP Payroll Details PDF only</span>
+        <span class="leader"></span>
+        <span class="mode-badge"><span class="letter">B</span>Payroll Journal Entry</span>
+      </div>
+
+      <div class="router-row">
+        <span class="trigger">Payroll PDF + checking statement PDF</span>
+        <span class="leader"></span>
+        <span class="mode-badge"><span class="letter">C</span>Payroll + Tie-Out</span>
+      </div>
+
+      <div class="router-row">
+        <span class="trigger">"Cross-check payroll" <span class="cond">(no new PDF, prior session)</span></span>
+        <span class="leader"></span>
+        <span class="mode-badge"><span class="letter">C</span>Tie-Out, log mode</span>
+      </div>
+
+      <div class="router-row">
+        <span class="trigger">"Does the CC payment tie out?"</span>
+        <span class="leader"></span>
+        <span class="mode-badge"><span class="letter">E</span>CC Payment Tie-Out</span>
+      </div>
+
+      <div class="router-row">
+        <span class="trigger">QuickBooks Reconcile screenshots</span>
+        <span class="leader"></span>
+        <span class="mode-badge"><span class="letter">D</span>QA Verification</span>
+      </div>
+
+      <div class="router-row">
+        <span class="trigger">Scanned PDF / "enter manually"</span>
+        <span class="leader"></span>
+        <span class="mode-badge"><span class="letter">G</span>Manual Entry</span>
+      </div>
+
+      <div class="router-row">
+        <span class="trigger">"Add new client"</span>
+        <span class="leader"></span>
+        <span class="mode-badge"><span class="letter">F</span>Add New Client</span>
+      </div>
+
+      <div class="router-row">
+        <span class="trigger">"Upload fixture" <span class="cond">(new client/account type, no test file)</span></span>
+        <span class="leader"></span>
+        <span class="mode-badge"><span class="letter">H</span>Upload Test Fixture</span>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="ending-h">
+    <div class="section-head">
+      <h2 id="ending-h">Every A / C / E / G run ends the same way</h2>
+    </div>
+    <div class="ending">
+      <p class="ending-title">One confirmation gate per statement</p>
+      <p class="ending-modes">applies to modes A · C · E · G — never to B, D, F, H</p>
+      <div class="ending-flow">
+        <span class="ending-step">print report, verbatim</span>
+        <span class="ending-arrow">→</span>
+        <span class="ending-step">"Entered in QuickBooks?"</span>
+      </div>
+      <div class="outcomes">
+        <div class="outcome done">
+          <span class="tag">DONE</span>
+          <ul>
+            <li>log status <code>DONE</code> / <code>CLEAN</code></li>
+            <li>archive PDF to Google Drive</li>
+            <li>sync the tracker sheet</li>
+          </ul>
+        </div>
+        <div class="outcome later">
+          <span class="tag">LATER</span>
+          <ul>
+            <li>log status <code>IN_PROGRESS</code></li>
+            <li>stop — wait for <code>mark_clean.py</code></li>
+          </ul>
+        </div>
+      </div>
+      <p class="never-advance">Never auto-advances to the next statement — one at a time, earliest date first; credit cards before the checking statements that pay them.</p>
+    </div>
+  </section>
+
+  <section aria-labelledby="modes-h">
+    <div class="section-head">
+      <h2 id="modes-h">Mode reference</h2>
+      <span class="section-note">8 modes · A–H</span>
+    </div>
+
+    <div class="mode-grid">
+
+      <article class="mode-card">
+        <div class="card-head">
+          <span class="letter">A</span>
+          <h3>Reconciliation</h3>
+          <span class="gate active">QB gate</span>
+        </div>
+        <div>
+          <p class="field-label">script</p>
+          <pre class="cmd">python3 reconcile_comprehensive.py &lt;statement.pdf&gt; \
+  <span class="flag">[output.txt] [--dry-run] [--no-prompt]</span>
+  <span class="flag">[--check-payee 1235='Jane Doe']</span></pre>
+        </div>
+        <p class="desc">Parses the PDF, prints balances / charges / payments / checks, runs the balance check, reads back client notes.</p>
+      </article>
+
+      <article class="mode-card">
+        <div class="card-head">
+          <span class="letter">B</span>
+          <h3>Payroll Journal Entry</h3>
+          <span class="gate">logged, no QB gate</span>
+        </div>
+        <div>
+          <p class="field-label">script</p>
+          <pre class="cmd">python3 payroll.py &lt;client_key&gt; &lt;pdf&gt; \
+  <span class="flag">[--config client.json] [--pay-by-pay AMOUNT]</span></pre>
+        </div>
+        <p class="desc">Prints the journal entry (Agency, then Admin — confirmed separately for Labor Distribution clients) and logs to <code>payroll_log.csv</code>.</p>
+      </article>
+
+      <article class="mode-card">
+        <div class="card-head">
+          <span class="letter">C</span>
+          <h3>Payroll + Tie-Out</h3>
+          <span class="gate active">QB gate</span>
+        </div>
+        <div>
+          <p class="field-label">script</p>
+          <pre class="cmd">python3 reconcile_comprehensive.py &lt;checking.pdf&gt;
+<span class="prompt"># cross-checks payroll_log.csv — no separate binary</span></pre>
+        </div>
+        <p class="desc">Confirms a payroll disbursement (this session's Mode B, or a prior logged run) matches a checking debit to the penny.</p>
+      </article>
+
+      <article class="mode-card">
+        <div class="card-head">
+          <span class="letter">D</span>
+          <h3>QA Verification</h3>
+          <span class="gate">no QB gate — this <em>is</em> the QB check</span>
+        </div>
+        <div>
+          <p class="field-label">script</p>
+          <pre class="cmd">python3 qa_reconciliation.py &lt;statement.pdf&gt; &lt;qb_data.json&gt;
+<span class="flag">python3 qa_reconciliation.py &lt;statement.pdf&gt; --json '{...}'</span></pre>
+        </div>
+        <p class="desc">Diffs a JSON snapshot (built from QB Reconcile screenshots) against the statement — catches missing, duplicate, mismatched entries.</p>
+      </article>
+
+      <article class="mode-card">
+        <div class="card-head">
+          <span class="letter">E</span>
+          <h3>CC Payment Tie-Out</h3>
+          <span class="gate active">QB gate</span>
+        </div>
+        <div>
+          <p class="field-label">script</p>
+          <pre class="cmd">python3 reconcile_comprehensive.py &lt;checking.pdf&gt;
+<span class="prompt"># cross-checks recon_log.json — no separate binary</span></pre>
+        </div>
+        <p class="desc">Confirms a checking-side CC payment debit matches the payment already logged on the credit card statement.</p>
+      </article>
+
+      <article class="mode-card">
+        <div class="card-head">
+          <span class="letter">F</span>
+          <h3>Add New Client</h3>
+          <span class="gate">walkthrough, no single script</span>
+        </div>
+        <div>
+          <p class="field-label">touches, in order</p>
+          <pre class="cmd">clients/&lt;key&gt;.json
+sheets_config.json      <span class="flag"># cell map</span>
+digest_config.json      <span class="flag"># tracker entry</span>
+reconcile_comprehensive.py  <span class="flag"># test run</span></pre>
+        </div>
+        <p class="desc">Onboards config first, then proves it with a real reconciliation and a digest check.</p>
+      </article>
+
+      <article class="mode-card">
+        <div class="card-head">
+          <span class="letter">G</span>
+          <h3>Manual Entry</h3>
+          <span class="gate active">QB gate</span>
+        </div>
+        <div>
+          <p class="field-label">script</p>
+          <pre class="cmd">manual_statements.json  <span class="flag"># hand-edited first</span>
+python3 manual_statement_entry.py <span class="flag">[--month MM-YYYY]</span></pre>
+        </div>
+        <p class="desc">For scanned/unparseable PDFs — same report / QB-confirm / sync flow as Mode A, values entered by hand.</p>
+      </article>
+
+      <article class="mode-card">
+        <div class="card-head">
+          <span class="letter">H</span>
+          <h3>Upload Test Fixture</h3>
+          <span class="gate">no QB gate</span>
+        </div>
+        <div>
+          <p class="field-label">script</p>
+          <pre class="cmd">python3 upload_fixtures_to_drive.py \
+  &lt;entry_name&gt; &lt;format&gt; &lt;pdf_path&gt;
+<span class="flag">python3 upload_fixtures_to_drive.py --migrate-repo</span></pre>
+        </div>
+        <p class="desc">Archives a reconciled statement as a fixture, records it in <code>fixtures_manifest.json</code>, so future parser changes have real data to test against.</p>
+      </article>
+
+    </div>
+  </section>
+
+  <section aria-labelledby="support-h">
+    <div class="section-head">
+      <h2 id="support-h">Outside the router</h2>
+      <span class="section-note">scheduled or run by hand — not mode-selected</span>
+    </div>
+    <div class="table-wrap">
+      <table class="scripts">
+        <thead>
+          <tr>
+            <th>script</th>
+            <th>when</th>
+            <th>does</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>mark_clean.py &lt;client&gt; &lt;acct&gt; [date]</code></td>
+            <td class="when">QB entry confirmed after the fact</td>
+            <td class="desc">Finds the matching <code>IN_PROGRESS</code> entry, marks it <code>DONE</code>, updates the CSV, sheet, and pushes.</td>
+          </tr>
+          <tr>
+            <td><code>mark_payroll_done.py &lt;key&gt; &lt;date&gt; &lt;amount&gt;</code></td>
+            <td class="when">payroll bank credit confirmed later</td>
+            <td class="desc">Same idea as <code>mark_clean.py</code>, for <code>payroll_log.csv</code>.</td>
+          </tr>
+          <tr>
+            <td><code>send_morning_digest.py [--date] [--scheduled] [--cc-due]</code></td>
+            <td class="when">every morning, cron-triggered</td>
+            <td class="desc">Builds and sends the color-coded tracker digest by Gmail SMTP — what ran, what's pending, what's blocked.</td>
+          </tr>
+          <tr>
+            <td><code>drive_archiver.py [--dry-run] &lt;pdf&gt; &lt;client&gt; &lt;acct&gt; [date]</code></td>
+            <td class="when">called internally by Mode A/C/E/G on DONE</td>
+            <td class="desc">Uploads to <code>Bookkeeping/&lt;Client&gt;/&lt;Account&gt;/</code>, dedupes by filename, keeps the 2 most recent.</td>
+          </tr>
+          <tr>
+            <td><code>tools/pii_scan.py [--staged | --audit]</code></td>
+            <td class="when">pre-commit hook, and before any publish</td>
+            <td class="desc">Flags real names / account numbers not in <code>pii_allowlist.txt</code> before code reaches the public repo.</td>
+          </tr>
+          <tr>
+            <td><code>tools/backfill_status.py &lt;old&gt; &lt;new&gt;</code></td>
+            <td class="when">a status string gets renamed in code</td>
+            <td class="desc">Rewrites matching values across the private logs dir so history stays consistent with the new name.</td>
+          </tr>
+          <tr>
+            <td><code>tools/dedup_recon_log.py [--apply]</code></td>
+            <td class="when">log hygiene, run by hand</td>
+            <td class="desc">Dry-run by default — shows duplicate <code>recon_log.json</code> entries before removing them.</td>
+          </tr>
+          <tr>
+            <td><code>alert_failure.py [subject]</code></td>
+            <td class="when">GitHub Actions sync_tracker workflow fails</td>
+            <td class="desc">Emails a failure alert — sender/recipient come from env, never hard-coded.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <span>bookkeeping-engine · reconcile_comprehensive.py pipeline, 23 steps, §Pipeline — Step by Step</span>
+    <span>generated from <code>README.md</code> + <code>CLAUDE.md</code></span>
+  </footer>
+
+</div>
+</body>
+</html>
