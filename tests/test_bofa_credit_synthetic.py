@@ -64,6 +64,13 @@ _TEXT = (
     + _txn_line("12/17", "12/16", "PURCHASE *FINANCE CHARGE* ON PURCHASES", "10.00") + "\n"
     "TOTAL PURCHASES\n"
     "PURCHASE *FINANCE CHARGE* ...................... 10.00\n"
+    # self.fees was never initialized in __init__ (only inside the separate,
+    # conditionally-invoked _try_recover_balance() recovery path) -- any real
+    # statement reaching this line raised AttributeError before the
+    # 2026-07-14 fix. Neither real fixture contains this trigger phrase, so
+    # this was dormant until caught here. See REFACTORING_ROADMAP.md's
+    # "Closed: Fixed".
+    "LATE PAYMENT FEE ...................... 25.00\n"
 )
 
 
@@ -83,6 +90,7 @@ class BofaCreditSyntheticPipelineTest(unittest.TestCase):
         p.charges = []
         p.finance_charge = None
         p.total_payments = Decimal('0')
+        p.fees = Decimal('0')
         p.text = text
         return p
 
@@ -134,6 +142,14 @@ class BofaCreditSyntheticPipelineTest(unittest.TestCase):
         p = self._parser()
         p.parse()
         self.assertEqual(p.finance_charge, _d('10.00'))
+
+    def test_late_payment_fee_line_adds_to_fees_without_crashing(self):
+        # Regression test for the self.fees-never-initialized crash fixed
+        # 2026-07-14 -- parse() used to raise AttributeError the moment a
+        # LATE PAYMENT FEE/RETURNED PAYMENT FEE/ANNUAL FEE line was reached.
+        p = self._parser()
+        p.parse()
+        self.assertEqual(p.fees, _d('25.00'))
 
     def test_report_balances(self):
         p = self._parser()
@@ -197,6 +213,7 @@ class BofaCreditsAccountConfigTest(unittest.TestCase):
         p.charges = []
         p.finance_charge = None
         p.total_payments = Decimal('0')
+        p.fees = Decimal('0')
         p.text = text
         p.parse()
         self.assertEqual(len(p.credits), 1)

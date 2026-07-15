@@ -55,6 +55,7 @@ class BankOfAmericaCreditCardParser(StatementParser):
         self.charges = []
         self.finance_charge = None
         self.total_payments = Decimal('0')
+        self.fees = Decimal('0')
 
     def parse(self):
         lines = self.text.split('\n')
