@@ -3,8 +3,8 @@ test_reconcile_sync_guard.py
 ------------------------------
 Regression coverage for _sync_logs_before_write() (reconcile_comprehensive.py),
 the pull-before-write safeguard added to close a real incident: the private
-Bookkeeping-clients repo had a commit titled "Restore 14 Needles Studio
-Square payroll log entries wiped by a concurrent session" -- a stale local
+Bookkeeping-clients repo had a commit restoring a client's payroll log
+entries after they were wiped by a concurrent session -- a stale local
 clone silently clobbering another session's log writes, because
 reconcile_comprehensive.py only ever pushed (tools.github_clients.sync_up())
 and never pulled first.

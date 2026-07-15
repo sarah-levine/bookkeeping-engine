@@ -122,9 +122,8 @@ def _sync_logs_before_write(dry_run: bool, no_prompt: bool) -> bool:
     """Pull fresh copies of recon_log.json / reconciliation_log.csv /
     payroll_log.csv from Bookkeeping-clients before this run reads or writes
     them, so a stale local clone can't silently clobber another session's
-    work — the exact failure mode behind a real incident there ("Restore 14
-    Needles Studio Square payroll log entries wiped by a concurrent
-    session").
+    work — the exact failure mode behind a real prior incident there (a
+    client's payroll log entries wiped by a concurrent session).
 
     tools.github_clients.sync_down() already does this (pull via the GitHub
     REST API, no git required) but was never called from this file's actual
