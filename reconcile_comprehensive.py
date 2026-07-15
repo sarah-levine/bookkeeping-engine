@@ -118,6 +118,54 @@ def _check_statement_date(date_str: str, client_name: str, account_type: str) ->
     return None
 
 
+def _sync_logs_before_write(dry_run: bool, no_prompt: bool) -> bool:
+    """Pull fresh copies of recon_log.json / reconciliation_log.csv /
+    payroll_log.csv from Bookkeeping-clients before this run reads or writes
+    them, so a stale local clone can't silently clobber another session's
+    work — the exact failure mode behind a real incident there ("Restore 14
+    Needles Studio Square payroll log entries wiped by a concurrent
+    session").
+
+    tools.github_clients.sync_down() already does this (pull via the GitHub
+    REST API, no git required) but was never called from this file's actual
+    write path — only sync_up() (push) was. This wires the existing pull
+    helper in ahead of it.
+
+    Returns True if the caller's log-write steps should proceed, False if
+    the user declined to proceed against a possibly-stale local state
+    (only reachable when interactive; --no-prompt always proceeds, see
+    below). dry_run always returns True without syncing — dry runs never
+    write logs, so pulling first would just add an unneeded network
+    dependency to what's supposed to be a fast, offline-friendly preview.
+    """
+    if dry_run:
+        return True
+
+    try:
+        from tools.github_clients import sync_down as _sync_down
+        _sync_down(include_configs=False)
+        print("[Step 0] ✓ Synced latest logs from Bookkeeping-clients")
+        return True
+    except Exception as _e:
+        print()
+        print('!' * 80)
+        print('  COULD NOT VERIFY LOG FRESHNESS BEFORE WRITING.')
+        print(f'  Reason: {_e}')
+        print()
+        print('  recon_log.json / reconciliation_log.csv / payroll_log.csv on this')
+        print('  machine may be stale relative to Bookkeeping-clients. Writing now')
+        print('  risks silently overwriting another session\'s work with old data.')
+        print('!' * 80)
+        if no_prompt:
+            print('  --no-prompt: proceeding anyway (see warning above).')
+            return True
+        _cont = input('  Continue and write to logs anyway? [y/N] ').strip().lower()
+        if _cont != 'y':
+            print('  Skipping log writes for this run. Fix the sync and re-run to log it.')
+            return False
+        return True
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
 # CLIENT DETECTION
@@ -1180,6 +1228,12 @@ def main():
 
     print(f"Processing: {pdf_path}")
 
+    # Pull fresh logs before this run reads or writes them — see
+    # _sync_logs_before_write()'s docstring for why. Checked once per
+    # invocation; a "no" here skips log writes for every statement in this
+    # PDF (the report/balance-check/Drive-archive steps still run normally).
+    _logs_synced = _sync_logs_before_write(dry_run, no_prompt)
+
     from parsers.registry import parser_by_type as _parser_by_type
     parser_map = _parser_by_type()
 
@@ -1339,7 +1393,7 @@ def main():
                 raise SystemExit(1)
 
             # ── Digest log: IN_PROGRESS (written immediately after parse) ───
-            if has_data and parser.client_name and not dry_run:
+            if has_data and parser.client_name and not dry_run and _logs_synced:
                 try:
                     from log_utils import upsert_recon_log as _upsert_log
                     _beg = getattr(parser, 'beginning_balance',
@@ -1428,12 +1482,14 @@ def main():
             # ── Reconciliation log ──────────────────────────────────────────
             if dry_run:
                 print(f"[Step 12] --dry-run: skipping log writes and sheet updates")
+            elif not _logs_synced:
+                print(f"[Step 12] Skipping log writes — declined to write against unsynced logs")
             else:
                 print(f"[Step 12] Writing logs...")
             # Always write to BOTH reconciliation_log.csv AND recon_log.json.
             # "later" logs with IN_PROGRESS status; "done" logs with DONE status.
             # Sheet update only fires on "done".
-            if has_data and parser.client_name and not dry_run:
+            if has_data and parser.client_name and not dry_run and _logs_synced:
                 try:
                     from log_utils import write_both_logs as _write_logs
                     _beg = getattr(parser, 'beginning_balance',
