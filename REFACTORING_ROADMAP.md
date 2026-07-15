@@ -678,43 +678,107 @@ Findings:
   specifically, since it's likely the *more* common case across the rest
   of the client base, not an edge case.
 
-### Rollout playbook for the remaining parsers (not scheduled yet)
+### Status: Citi Visa Costco migration complete — Architecture Proposal rollout complete (2026-07-14)
 
-1. **Citi Visa Costco** is the only parser left — needs real per-parser
-   design work per the "different scale of change" section above, not
-   mechanical migration. **Capital One** stays deferred until a real
-   fixture exists (see status above) — don't schedule it based on
-   line-count/complexity alone; verify a real fixture is actually
-   available first, learned the hard way earlier in this rollout.
+`CitiVisaCostcoParser` migrated on `refactor/citi-visa-costco-pipeline`, 3
+commits. This was the last parser on the rollout: `parsers/citi.py`,
+`parsers/wells_fargo.py`, `parsers/bofa.py`, and `parsers/amex.py` are now
+all fully on the Extract/Classify/Report pipeline. **Capital One** remains
+the sole holdout, deferred indefinitely pending a real fixture (see status
+above) — not part of "complete" above, but not schedulable either.
+
+While scoping this migration, found and fixed **separately** (own branch,
+own commit, merged to `main` ahead of the pipeline work) a real crash bug:
+`parsers/citi.py` never imported `_classify_cc_transaction`, so
+`_store_transaction()` raised `NameError` on any transaction line that
+matched far enough to reach it. Confirmed two historical `recon_log.json`
+entries (both logged `CLEAN`, `$0.00` difference) are consistent with this
+bug going undetected — the `_add_missing_row()` balance-padding mechanism
+makes an empty parse look reconciled regardless of whether real line items
+were ever captured. Re-running reconciliation for those two statements
+against the fixed parser was deferred as a separate follow-up task, not
+folded into either the patch or this migration, per the user's direction —
+re-processing real client statements is a Mode D/E workflow action, not a
+code-patch or refactor side effect.
+
+Findings:
+
+- **The real fixture provides almost no coverage of the transaction-
+  extraction loop itself** — the inverse of every other migration in this
+  rollout. `citi_visa_costco_jojo` is OCR-garbled badly enough that no line
+  ever reaches the transaction-classification call site, before or after
+  this migration (confirmed both ways via `tests/dump_report.py`, same
+  near-empty output each time). The 14-test synthetic suite added in
+  Commit 1 was the *primary* verification here, not a gap-filler — worth
+  remembering for any future parser whose only real fixture is a heavily
+  scanned/OCR'd statement.
+- **One long, single-pass, deeply stateful loop with 4 fallback shapes** —
+  more branches than any prior parser (inline date+vendor+amount,
+  amount-only continuation, vendor+amount-continuation-with-no-date, and a
+  malformed-partial-date payment fallback), all sharing
+  `pending_date`/`pending_vendor` state. Stayed as one sequential scan in
+  `_extract_rows()`, same category as BofA Checking's continuation
+  accumulation and Amex Statement's Charges pass — just with more
+  branches to keep intact.
+- **A classifier-entangled helper called from 4 separate sites** —
+  `_store_transaction()` was called from all 4 fallback branches, not just
+  one. Converted into a nested closure (`_make_row()`) inside
+  `_extract_rows()` rather than an instance method, so all 4 call sites
+  stayed textually identical (`_make_row(...)` in place of
+  `self._store_transaction(...)`) instead of needing four different
+  row-building patterns inlined separately.
+- **Heavy OCR-repair preprocessing folded into the Extract stage** —
+  `fix_ocr_line()`'s ~14 chained regex substitutions are pure input
+  transformation with no business logic, and nothing outside the
+  transaction loop consumes the OCR-fixed lines (metadata/balance
+  extraction upstream reads `raw_lines` directly) — so it moved into
+  `_extract_rows()` wholesale, unchanged.
+- **No balance-verification block at all** — unlike every other parser in
+  this rollout, `generate_report()` here has no `_balance_check`/
+  `_is_balanced` call, confirmed directly (no "Balance verification:
+  PASSED" line ever prints). The synthetic test asserts on the rendered
+  summary figures instead, since there's no pass/fail line to check.
+- **Sign convention is the Citi/Chase-family "always positive"** — every
+  bucket stores `abs(amount)` regardless of type, consistent with
+  `CitiCheckingParser`/`CitiSavingsParser` (already migrated earlier in
+  this rollout) and unlike BofA's mixed-sign charges bucket.
+
+### Rollout playbook
+
+**Nothing scheduled.** The Architecture Proposal rollout is complete —
+every parser with a real fixture is on the Extract/Classify/Report
+pipeline. Only **Capital One** remains off it, blocked on a real fixture
+existing anywhere accessible (manifest, Drive, reconciliation-log
+history) — confirmed absent as of this writing (see status above). If one
+becomes available, the same 3-commit branch pattern applies:
+
+1. Same acceptance bar as every migration in this rollout, using
+   `tests/dump_report.py`: byte-identical `generate_report()` output on
+   every real fixture that parser has, plus a synthetic companion test for
+   anything the real fixture(s) can't exercise. If the only real fixture
+   turns out to be OCR-garbled/scanned (as happened with Citi Visa
+   Costco), expect synthetic tests to carry most of the verification
+   weight, not just fill narrow gaps.
 2. Each migration gets its own branch, following the same
-   one-branch/multi-phase-commit pattern as this prototype — never two
-   parser-migration branches open at once, per `CLAUDE.md`'s branch-hygiene
-   rule.
-3. Same acceptance bar every time, using `tests/dump_report.py`: byte-identical
-   `generate_report()` output on every real fixture that parser has, plus a
-   synthetic companion test for anything the real fixture(s) can't exercise
-   — expect this to be needed at least narrowly every time; only one parser
-   migrated so far (Chase) has had more than one real fixture.
-4. Before assuming a parser's Extract stage can defer classification the
+   one-branch/multi-phase-commit pattern as every parser in this rollout —
+   never two feature branches open at once, per `CLAUDE.md`'s
+   branch-hygiene rule.
+3. Before assuming a parser's Extract stage can defer classification the
    way Northern Trust's, Citi Savings', and Citi Checking's did, check
    whether its raw statement text actually carries an independent
    type-label signal — Chase's didn't, and that changed the shape of its
    migration (see "Status: Chase migration complete" above). Check this per
    parser, not by analogy to the last one migrated.
-5. Config-dependent, vendor-mutating cascades (Northern Trust's Square
+4. Config-dependent, vendor-mutating cascades (Northern Trust's Square
    remapping, Citi Checking's ADP/no-agg-tag/CC-payment dispatch) go in the
    adapter, parser-local, no new `classify.py` function — until a second
    parser is found that genuinely shares the *same* keyword set/logic, not
    just the same shape of problem.
-6. `cc_keywords` vs `cc_payment_vendors` naming stays unresolved — Northern
+5. `cc_keywords` vs `cc_payment_vendors` naming stays unresolved — Northern
    Trust's `or`-fallback (`config.get('cc_keywords', []) or
    config.get('cc_payment_vendors', [])`) was preserved as-is in
    `classify.py` rather than picking one canonical name. Resolve this once
    `classify.py` has more than one caller, not with a sample size of one.
-7. Before scheduling a parser by line count/complexity alone, confirm a
-   real fixture actually exists for it somewhere accessible (manifest,
-   Drive, or reconciliation-log history) — Capital One looked like a
-   reasonable next target on paper and had none.
 
 ---
 
