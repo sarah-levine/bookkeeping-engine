@@ -375,6 +375,59 @@ class CitiVisaCostcoParser(StatementParser):
                 if m:
                     self.finance_charge = Decimal(m.group(1).replace(',', ''))
 
+        rows = self._extract_rows(raw_lines)
+        self._rows_to_legacy_shape(rows)
+
+    def _extract_rows(self, raw_lines):
+        """Extract stage (see parsers/row_schema.py): raw statement text ->
+        list[TransactionRow]. One long, single-pass, deeply stateful scan —
+        genuinely order-dependent (pending_date/pending_vendor carry across
+        lines for three different fallback shapes, plus a fourth
+        partial-date fallback), so it stays as one sequential loop here,
+        same category as BofA Checking's continuation accumulation and
+        Amex Statement's Charges pass.
+
+        _make_row() is a nested closure replacing the 4 call sites that
+        used to call self._store_transaction() directly — it's
+        classifier-entangled (_classify_cc_transaction() decides the row's
+        type, same shape as Chase/BofA-payments/Amex-charges) and applies
+        the hardcoded credit-description overrides (AMAZON MKTPLACE PMTS /
+        COSTCO RETURN) inline, so classification can't be deferred to the
+        adapter. Sign convention: Citi/Chase-family "always positive" —
+        every bucket stores abs(amount) regardless of type today, so
+        payment/credit rows store abs(amount) (matching TransactionRow's
+        documented default) and debit (charge) rows store -abs(amount),
+        sign-flipped back to positive in the adapter."""
+        rows = []
+
+        def _make_row(date_str, vendor_raw, amount):
+            if self.closing_date:
+                date_str = self._add_year_to_date(date_str, self.closing_date)
+            txn_type = _classify_cc_transaction(vendor_raw, amount)
+            if txn_type == 'payment':
+                rows.append(TransactionRow(
+                    date=date_str, vendor='PAYMENT - THANK YOU', raw_description=vendor_raw,
+                    amount=abs(amount), type='payment',
+                ))
+            elif txn_type == 'credit':
+                # Normalize credit descriptions
+                v = vendor_raw.upper()
+                if 'AMAZON MKTPLACE' in v or 'MKTPLACE PMTS' in v:
+                    description = 'AMAZON MKTPLACE PMTS'
+                elif 'WWW COSTCO' in v or 'COSTCO COM' in v:
+                    description = 'COSTCO RETURN'
+                else:
+                    description = vendor_raw
+                rows.append(TransactionRow(
+                    date=date_str, vendor=description, raw_description=vendor_raw,
+                    amount=abs(amount), type='credit',
+                ))
+            else:
+                rows.append(TransactionRow(
+                    date=date_str, vendor=vendor_raw, raw_description=vendor_raw,
+                    amount=-abs(amount), type='debit',
+                ))
+
         # ── Pre-process: fix common OCR issues ────────────────────────────────
         def fix_ocr_line(line):
             # Strip sidebar rewards: $X.XX followed by 6+ spaces then another $Y.YY at end
@@ -474,7 +527,7 @@ class CitiVisaCostcoParser(StatementParser):
             if amt_only and pending_date and pending_vendor:
                 try:
                     amount = Decimal(amt_only.group(1).replace(',', ''))
-                    self._store_transaction(pending_date, pending_vendor, amount)
+                    _make_row(pending_date, pending_vendor, amount)
                 except Exception:
                     pass
                 pending_date = pending_vendor = None
@@ -502,7 +555,7 @@ class CitiVisaCostcoParser(StatementParser):
                             continue
                     try:
                         amount = Decimal(cont_m.group(1).replace('$', '').replace(',', ''))
-                        self._store_transaction(pending_date, pending_vendor, amount)
+                        _make_row(pending_date, pending_vendor, amount)
                     except Exception:
                         pass
                     pending_date = pending_vendor = None
@@ -517,7 +570,7 @@ class CitiVisaCostcoParser(StatementParser):
                 if partial_m:
                     partial_date = f"{partial_m.group(1)}/{partial_m.group(2)}0"
                     amt = Decimal(partial_m.group(4).replace('$','').replace(',',''))
-                    self._store_transaction(partial_date, 'PAYMENT - THANK YOU', -amt)
+                    _make_row(partial_date, 'PAYMENT - THANK YOU', -amt)
                 # No date — if line looks like a header/footer, reset pending
                 # otherwise keep pending (vendor or amount may follow)
                 if re.search(r'^\s*[A-Z][a-z]|Page \d|Statement|Account|Citi', stripped):
@@ -562,42 +615,27 @@ class CitiVisaCostcoParser(StatementParser):
 
             try:
                 amount = Decimal(amt_str)
-                self._store_transaction(date_str, vendor_raw, amount)
+                _make_row(date_str, vendor_raw, amount)
                 pending_date = pending_vendor = None
             except Exception:
                 pending_date = pending_vendor = None
 
-    def _store_transaction(self, date_str, vendor_raw, amount):
-        if self.closing_date:
-            date_str = self._add_year_to_date(date_str, self.closing_date)
-        txn_type = _classify_cc_transaction(vendor_raw, amount)
-        if txn_type == 'payment':
-            self.payments.append({
-                'date': date_str,
-                'description': 'PAYMENT - THANK YOU',
-                'amount': abs(amount),
-            })
-            self.total_payments += abs(amount)
-        elif txn_type == 'credit':
-            # Normalize credit descriptions
-            v = vendor_raw.upper()
-            if 'AMAZON MKTPLACE' in v or 'MKTPLACE PMTS' in v:
-                description = 'AMAZON MKTPLACE PMTS'
-            elif 'WWW COSTCO' in v or 'COSTCO COM' in v:
-                description = 'COSTCO RETURN'
-            else:
-                description = vendor_raw
-            self.credits.append({
-                'date': date_str,
-                'description': description,
-                'amount': abs(amount),
-            })
-        else:
-            self.charges.append({
-                'date': date_str,
-                'vendor': vendor_raw,
-                'amount': abs(amount),
-            })
+        return rows
+
+    def _rows_to_legacy_shape(self, rows):
+        """Adapter: list[TransactionRow] -> self.payments/self.credits/
+        self.charges in their existing dict shapes. self.total_payments is
+        incremented in lockstep as each payment row is processed, matching
+        _store_transaction's original behavior of accumulating it directly
+        rather than deriving it by summing self.payments afterward."""
+        for row in rows:
+            if row.type == 'payment':
+                self.payments.append({'date': row.date, 'description': row.vendor, 'amount': row.amount})
+                self.total_payments += row.amount
+            elif row.type == 'credit':
+                self.credits.append({'date': row.date, 'description': row.vendor, 'amount': row.amount})
+            else:  # 'debit' (charges)
+                self.charges.append({'date': row.date, 'vendor': row.vendor, 'amount': abs(row.amount)})
 
 
     def load_from_dict(self, data):
