@@ -165,6 +165,36 @@ If it's ambiguous which mode applies, the assistant asks before proceeding.
 
 Every mode that writes data follows the same rule: an unrecognized client or account type is a hard stop (see `_assert_known_client` / `_assert_known_account_type`) — it asks for confirmation rather than guessing or silently creating a new key.
 
+### Mode → script quick reference
+
+| Mode | Script | QB gate? |
+|---|---|---|
+| **A** — Reconciliation | `reconcile_comprehensive.py <statement.pdf> [output.txt] [--dry-run] [--no-prompt] [--check-payee 1235='Jane Doe']` | Yes |
+| **B** — Payroll Journal Entry | `payroll.py <client_key> <pdf> [--config client.json] [--pay-by-pay AMOUNT]` | No (logged only) |
+| **C** — Payroll + Tie-Out | `reconcile_comprehensive.py <checking.pdf>` — cross-checks `payroll_log.csv`, no separate script | Yes |
+| **D** — QA Verification | `qa_reconciliation.py <statement.pdf> <qb_data.json>` (or `--json '{...}'`) | No — this *is* the QB check |
+| **E** — CC Payment Tie-Out | `reconcile_comprehensive.py <checking.pdf>` — cross-checks `recon_log.json`, no separate script | Yes |
+| **F** — Add New Client | walkthrough: `clients/<key>.json` → `sheets_config.json` → `digest_config.json` → `reconcile_comprehensive.py` (test run) | No |
+| **G** — Manual Entry | edit `manual_statements.json` by hand → `manual_statement_entry.py [--month MM-YYYY]` | Yes |
+| **H** — Upload Test Fixture | `upload_fixtures_to_drive.py <entry_name> <format> <pdf_path>` or `--migrate-repo` | No |
+
+Modes C and E don't have their own binary — both are `reconcile_comprehensive.py`'s checking-statement auto-sequence, cross-checking data that's already logged rather than parsing a new PDF.
+
+### Scripts outside the router
+
+Not mode-selected — these run on a schedule, or by hand, once a statement's already logged:
+
+| Script | When | Does |
+|---|---|---|
+| `mark_clean.py <client_key> <account_type> [date]` | QB entry confirmed after the fact | Finds the matching `IN_PROGRESS` entry, marks it `DONE`, updates the CSV, sheet, and pushes |
+| `mark_payroll_done.py <key> <check_date> <bank_credit>` | payroll bank credit confirmed later | Same idea as `mark_clean.py`, for `payroll_log.csv` |
+| `send_morning_digest.py [--date YYYY-MM-DD] [--scheduled] [--cc-due]` | every morning, cron-triggered | Builds and sends the color-coded tracker digest by Gmail SMTP |
+| `drive_archiver.py [--dry-run] <pdf> <client> <account_type> [date]` | called internally by Mode A/C/E/G on DONE | Uploads to `Bookkeeping/<Client>/<Account Type>/`, dedupes by filename, keeps the 2 most recent |
+| `tools/pii_scan.py [--staged \| --audit]` | pre-commit hook, and before any publish | Flags real names / account numbers not in `pii_allowlist.txt` |
+| `tools/backfill_status.py <old_status> <new_status>` | a status string gets renamed in code | Rewrites matching values across the private logs dir |
+| `tools/dedup_recon_log.py [--apply]` | log hygiene, run by hand | Dry-run by default — shows duplicate `recon_log.json` entries before removing them |
+| `alert_failure.py [subject]` | GitHub Actions `sync_tracker` workflow fails | Emails a failure alert — sender/recipient come from env, never hard-coded |
+
 ---
 
 ## Pipeline — Step by Step
@@ -255,6 +285,55 @@ python3 mark_clean.py <client_key> <account_type> [<statement_date>]
 21. Update `reconciliation_log.csv`
 22. Update Google Sheets
 23. Push to the private repo
+
+### Module call chain
+
+`reconcile_comprehensive.py` is the orchestrator — it never parses a statement itself. Everything statement-specific lives in `parsers/`; everything log/archive/sheet-specific lives in its own small module, each imported lazily (inside the function that needs it, not at the top of the file) so a missing credential for one integration never blocks the others.
+
+```
+reconcile_comprehensive.py
+│
+├─ detect_statement_type()        ~230-line, order-dependent text-sniffing chain,
+│                                  kept in this file on purpose — see
+│                                  parsers/registry.py's own docstring for why
+│
+├─ parsers/registry.py            parser_by_type() → {statement_type: ParserClass}
+│                                  (each parser module self-registers via
+│                                  register() at import time — see the
+│                                  bottom of parsers/bofa.py, parsers/amex.py, etc.)
+│
+├─ parsers/base.py                StatementParser (shared base class),
+│                                  ClientRegistry (reads clients/*.json),
+│                                  vendor normalization, CC-payment classification
+│
+├─ parsers/<bank>.py              ParserClass(pdf_path)
+│   │                               ├─ .parse()            extracts balances/
+│   │                               │                       transactions from PDF text
+│   │                               └─ .generate_report()  builds the printed report
+│   │                                                       via parsers/report.py's
+│   │                                                       shared section builders
+│   │
+│   └─ parsers/row_schema.py      TransactionRow — the shape a migrated parser's
+│                                  parse() builds internally (see
+│                                  REFACTORING_ROADMAP.md's Architecture Proposal)
+│
+├─ log_utils.py                   write_both_logs(), upsert_recon_log(),
+│                                  entry_status(), get_client_notes(),
+│                                  _assert_known_client / _assert_known_account_type
+│                                  — reads/writes recon_log.json + reconciliation_log.csv
+│
+├─ drive_archiver.py              archive_statement() — uploads the PDF to
+│                                  Google Drive, dedupes, keeps the 2 most recent
+│
+├─ sheets_updater.py              update_sheet() + append_recon_row() —
+│                                  writes the Reconciliation Tracker Google
+│                                  Sheet, only when the answer was "done"
+│
+└─ tools/github_clients.py        sync_up() — pushes the updated logs to the
+                                   private Bookkeeping-clients repo
+```
+
+Called once per statement, in this order: detect type → look up the parser class in the registry → `parser.parse()` → (credit cards only) Vision fallback if the balance doesn't tie → `parser.generate_report()` → balance-check gate (halts immediately on a FAILED check) → `recon_log.json` written as `IN_PROGRESS` and pushed → report printed, QB confirmation asked → `reconciliation_log.csv` + `recon_log.json` written with the final status → Drive archive → (only if `done`) Google Sheet update.
 
 ---
 
