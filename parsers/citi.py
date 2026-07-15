@@ -8,7 +8,10 @@ from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL
+from parsers.base import (
+    StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL,
+    _classify_cc_transaction,
+)
 from parsers.row_schema import TransactionRow
 from parsers.report import *
 from parsers.report import (
