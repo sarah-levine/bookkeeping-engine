@@ -6,12 +6,11 @@ companion to tests/dump_report.py for the Extract/Classify/Report pipeline
 refactor (see REFACTORING_ROADMAP.md's "Architecture Proposal").
 
 Unlike every other parser migrated in this rollout, the one real fixture
-(citi_visa_costco_jojo) provides almost no coverage of the transaction-
-extraction loop itself: it's OCR-garbled badly enough that no line ever
-reaches _store_transaction() (confirmed directly -- parse() didn't crash
-on it even before parsers/citi.py's missing _classify_cc_transaction
-import was fixed separately, meaning that call site was simply never
-reached). So this synthetic suite is the *primary* verification for this
+provides almost no coverage of the transaction-extraction loop itself:
+it's OCR-garbled badly enough that no line ever reaches
+_store_transaction() (confirmed directly -- parse() didn't crash on it
+even before parsers/citi.py's missing _classify_cc_transaction import was
+fixed separately, meaning that call site was simply never reached). So this synthetic suite is the *primary* verification for this
 migration, not a gap-filler -- it covers the inline-amount charge format,
 both continuation fallbacks (amount-only, and vendor+amount-with-no-date),
 the malformed partial-date payment fallback, payment/credit/charge
