@@ -149,15 +149,14 @@ class AmexStatementParser(StatementParser):
         into one state machine — they scan different line ranges for
         different reasons):
 
-        1. Payments & Credits pass, over ALL of `lines`. Extraction-native:
+        1. Payments & Credits pass, over `lines[:charges_start]` only (see
+           `charges_start` below, shared with pass 2). Extraction-native:
            the payment-keyword regex and the cardholder-aware `_credit_re`
            (scoped to `-$amount` lines only) decide type from raw text/sign
-           alone, no classifier call. NOTE: this pass is NOT scoped to stop
-           before the Charges section — a pre-existing quirk, not
-           introduced here (see REFACTORING_ROADMAP.md's "Open: Needs Root
-           Cause Fix"): a negative-amount line inside the Charges section
-           gets matched here AND independently by pass 2 below, producing
-           the same credit twice. Preserved byte-identically.
+           alone, no classifier call. Previously scanned ALL of `lines`
+           unscoped, which double-counted a negative-amount line inside the
+           Charges section (matched independently by both passes) — fixed
+           2026-07-14 (see REFACTORING_ROADMAP.md's "Closed: Fixed").
         2. Charges pass, over `lines[charges_start:]` only (starting at the
            standalone "New Charges" header — the earlier Payments/Credits
            block has a different inline-cardholder-prefix shape that would
@@ -199,8 +198,21 @@ class AmexStatementParser(StatementParser):
             re.IGNORECASE
         )
 
+        # Scope the Payments & Credits pass to stop before the Charges
+        # section (computed here so both passes can use it) — otherwise a
+        # negative-amount line inside "New Charges" gets matched by both
+        # this pass and the Charges pass below, double-counting the same
+        # credit. charges_start stays 0 (scan everything) if no "New
+        # Charges" header is found, same tolerance the Charges pass below
+        # already has for its own boundary.
+        charges_start = 0
+        for _i, _line in enumerate(lines):
+            if _line.strip() == 'New Charges':
+                charges_start = _i
+                break
+
         # Payments and Credits
-        for line in lines:
+        for line in (lines[:charges_start] if charges_start else lines):
             # Actual payments
             m = re.match(
                 r'(\d{2}/\d{2}/\d{2})\*?\s+.+?(?:AUTOPAY PAYMENT RECEIVED|ELECTRONIC PAYMENT RECEIVED|ONLINE PAYMENT|PAYMENT RECEIVED|PAYMENT - THANK YOU).+?-\$([0-9,]+\.\d{2})',
@@ -262,19 +274,15 @@ class AmexStatementParser(StatementParser):
         pending_date = None
         pending_vendor = None
 
-        # Scope this loop to the actual Charges Detail section (starting at
-        # the standalone "New Charges" section header). Otherwise it also
-        # walks the earlier Payments/Credits Detail block, where each row has
-        # an inline "CARDHOLDER   VENDOR" prefix (not a standalone cardholder
-        # header line like the Charges section uses) — the trailing-junk
-        # stripper below mis-splits those at the cardholder/vendor gap,
-        # producing spurious duplicate credits under the cardholder's name.
-        charges_start = 0
-        for _i, _line in enumerate(lines):
-            if _line.strip() == 'New Charges':
-                charges_start = _i
-                break
-
+        # charges_start was already computed above (needed by the
+        # Payments/Credits pass too, to stop before this section — see the
+        # comment there). Scoping this loop to start there, rather than
+        # scanning the whole statement, also avoids walking the earlier
+        # Payments/Credits Detail block, where each row has an inline
+        # "CARDHOLDER   VENDOR" prefix (not a standalone cardholder header
+        # line like the Charges section uses) — the trailing-junk stripper
+        # below mis-splits those at the cardholder/vendor gap, producing
+        # spurious duplicate credits under the cardholder's name.
         for line in lines[charges_start:]:
             stripped = line.strip()
             if not stripped:

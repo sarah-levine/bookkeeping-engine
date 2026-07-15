@@ -51,13 +51,10 @@ _TEXT = (
     "JANE DOE\n"
     "01/10/26   Contoso Vendor Supplies   $150.00\n"
     # Negative amount inside the New Charges section routes to self.credits
-    # via the charges pass -- but this is a PRE-EXISTING double-counting
-    # quirk, not something this migration introduces: the Payments/Credits
-    # pass scans ALL lines unscoped (no charges_start boundary), so it
-    # independently matches this same line via _credit_re too, producing
-    # the identical credit a second time. See REFACTORING_ROADMAP.md's
-    # "Open: Needs Root Cause Fix" -- preserved byte-identically here, not
-    # fixed (not requested).
+    # via the charges pass. Previously ALSO matched independently by the
+    # unscoped Payments/Credits pass, double-counting the same credit --
+    # fixed 2026-07-14 by bounding that pass to charges_start (see
+    # REFACTORING_ROADMAP.md's "Closed: Fixed").
     "01/11/26   Contoso Refund Adjustment   -$10.00\n"
     "01/12/26   Annual Fee   $95.00\n"
     # Separate-line-amount fallback format: date+vendor on one line, the
@@ -167,9 +164,10 @@ class AmexStatementSyntheticPipelineTest(unittest.TestCase):
         p.parse()
         self.assertFalse(any(c['vendor'] == 'Contoso Refund Adjustment' for c in p.charges))
         matching = [c for c in p.credits if c['description'] == 'Contoso Refund Adjustment']
-        # Pre-existing double-count (see module docstring): preserved
-        # byte-identically by this migration, not fixed.
-        self.assertEqual(len(matching), 2)
+        # Fixed 2026-07-14: the Payments/Credits pass now stops before the
+        # Charges section, so this line is matched exactly once (previously
+        # double-counted -- see REFACTORING_ROADMAP.md's "Closed: Fixed").
+        self.assertEqual(len(matching), 1)
 
     def test_fee_keyword_charge_excluded(self):
         p = self._parser()
@@ -188,7 +186,7 @@ class AmexStatementSyntheticPipelineTest(unittest.TestCase):
         p = self._parser()
         p.parse()
         self.assertEqual(len(p.payments), 1)
-        self.assertEqual(len(p.credits), 4)
+        self.assertEqual(len(p.credits), 3)
         self.assertEqual(len(p.charges), 2)
 
     def test_report_balances(self):
