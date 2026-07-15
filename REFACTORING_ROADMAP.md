@@ -19,66 +19,6 @@ following the pattern in `parsers/bofa.py`'s `_extract_closing_date()`.
 
 ---
 
-### `BankOfAmericaCreditCardParser.parse()` crashes on a real fee line — `self.fees` is never initialized
-
-Found 2026-07-14 while migrating this parser to the Extract/Classify pipeline
-(reading `parse()` closely, not something a report-diff would have caught).
-A `LATE PAYMENT FEE`, `RETURNED PAYMENT FEE`, or `ANNUAL FEE` line triggers
-`self.fees += Decimal(...)` (`parsers/bofa.py`), but `self.fees` is never
-initialized anywhere — not in this class's `__init__`, not unconditionally
-by `StatementParser`. The only place `parsers/base.py` ever sets `self.fees`
-is inside `_try_recover_balance()` — a separate, conditionally-invoked
-recovery path that only runs later, at `generate_report()` time, and only
-when the statement doesn't already tie out. `parse()` itself has no such
-fallback, so the first real statement containing one of those three fee
-lines will raise `AttributeError: 'BankOfAmericaCreditCardParser' object
-has no attribute 'fees'`.
-
-Confirmed dormant against both real fixtures for this format — neither
-contains any of the three trigger phrases. Not fixed as part of the pipeline migration (would have been an
-unrequested behavior change mid-migration) — preserved verbatim, crash
-risk and all.
-
-**Root cause fix:** add `self.fees = Decimal('0')` to `__init__`, matching
-every other attribute already initialized there.
-
----
-
-### `AmexStatementParser.parse()` double-counts a negative-amount line inside the Charges section
-
-Found 2026-07-14 while migrating this parser to the Extract/Classify
-pipeline (constructing synthetic test coverage, not something the real
-fixtures' report diffs would have caught — none of the 4 real fixtures
-happen to contain a negative-amount line inside `New Charges`). The
-Payments & Credits pass scans *all* of `lines` unconditionally — it has no
-awareness of where the Charges section starts. So when a genuine in-section
-credit adjustment appears after the `New Charges` header (a negative `-$`
-amount, matched by `_credit_re` just as readily as any Payments-section
-line), that same physical line is matched **twice**: once by the unscoped
-Payments/Credits pass, and again by the Charges pass (which explicitly
-routes any negative amount there to `self.credits` too). The result is the
-identical credit appearing twice in `self.credits` — visibly duplicated in
-the rendered `CREDITS / RETURNS` report section, inflating `total_credits`
-by the duplicated amount and, in turn, inflating `total_charges` (via the
-`_add_missing_row` reconciliation math in `generate_report()`, which pads
-charges to match `new_balance - previous_balance + payments + credits -
-fees - interest`).
-
-Confirmed via `tests/test_amex_statement_synthetic.py::
-test_negative_amount_in_charges_section_routes_to_credit_not_charge`.
-Not fixed as part of the pipeline migration (would have been an
-unrequested behavior change mid-migration) — preserved verbatim,
-double-count and all; `_extract_rows()` faithfully replicates both passes
-scanning the same lines, so the migration doesn't change this behavior
-either way.
-
-**Root cause fix:** scope the Payments & Credits pass to stop before
-`charges_start` (the same boundary the Charges pass already computes),
-mirroring the scoping comment already in the code for *why* the Charges
-pass is bounded the other direction.
-
----
-
 ## Open: Architecture Proposal — standardize the parser → report pipeline
 
 Not a bug, not started — captured 2026-07-07 from a design discussion, for
@@ -783,6 +723,51 @@ becomes available, the same 3-commit branch pattern applies:
 ---
 
 ## Closed: Fixed
+
+- `AmexStatementParser.parse()` double-counted a negative-amount line
+  inside the Charges section — fixed 2026-07-14. The Payments & Credits
+  pass scanned *all* of `lines` unconditionally, with no awareness of where
+  the Charges section starts, so a genuine in-section credit adjustment
+  (a negative `-$` amount, matched by `_credit_re` just as readily as any
+  Payments-section line) got matched twice: once by the unscoped
+  Payments/Credits pass, and again by the Charges pass. Fixed by computing
+  `charges_start` once (moved earlier, shared by both passes) and bounding
+  the Payments/Credits pass to `lines[:charges_start]`, falling back to the
+  whole list if no `New Charges` header is found — the same tolerance the
+  Charges pass already had for its own boundary. Found 2026-07-14 while
+  migrating this parser to the Extract/Classify pipeline (constructing
+  synthetic test coverage; none of the 4 real fixtures happen to contain a
+  negative-amount line inside `New Charges`, so all 4 remain byte-identical
+  after this fix). Updated
+  `tests/test_amex_statement_synthetic.py::test_negative_amount_in_charges_section_routes_to_credit_not_charge`
+  (now asserts exactly 1 match, not 2) and `test_bucket_counts_exhaustive`
+  (credits 3, not 4). Per `CLAUDE.md`'s patch-fix log scan: `recon_log.json`'s
+  11 `amex` entries all show `$0.00` difference, but that's not conclusive
+  either way — the bug inflates `total_credits` and the `_add_missing_row()`
+  padding symmetrically, so a balanced top-level difference doesn't rule
+  out any of these having been affected. Flagged to the user, not corrected
+  — resolving it would require re-parsing the historical statements, which
+  the log alone can't support.
+
+- `BankOfAmericaCreditCardParser.parse()` crashed on a real fee line —
+  fixed 2026-07-14. `self.fees` was never initialized anywhere except
+  inside the separate, conditionally-invoked `_try_recover_balance()`
+  recovery path (only reached at `generate_report()` time, and only when
+  the statement doesn't already tie out). Any real statement containing a
+  `LATE PAYMENT FEE`, `RETURNED PAYMENT FEE`, or `ANNUAL FEE` line raised
+  `AttributeError` the moment `parse()` reached it. Fixed by adding
+  `self.fees = Decimal('0')` to `__init__`, matching every other attribute
+  already initialized there. Found 2026-07-14 while migrating this parser
+  to the Extract/Classify pipeline; confirmed dormant against both real
+  fixtures (neither contains any of the three trigger phrases), so both
+  remain byte-identical after this fix. Added a regression test
+  (`tests/test_bofa_credit_synthetic.py::test_late_payment_fee_line_adds_to_fees_without_crashing`),
+  since neither real fixture exercises this path. Per `CLAUDE.md`'s
+  patch-fix log scan: `recon_log.json`'s 3 `bofa_credit` entries are all
+  `CLEAN`/`DONE` with `$0.00` difference — consistent with the crash never
+  having fired for these statements (a crash would prevent the run from
+  completing at all, not produce a silently-wrong log entry), so nothing
+  to correct there.
 
 - `NorthernTrustCheckingParser` had zero CC-payment classification at all —
   fixed 2026-07-07. Added the same `_is_known_cc_network_payment()` +
