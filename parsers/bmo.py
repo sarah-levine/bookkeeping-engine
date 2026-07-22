@@ -510,16 +510,24 @@ class BMOCreditCardParser(StatementParser):
             # (e.g. "Previous Balance $821.45 Credit Limit $60,000.00"), and
             # amounts[-1] silently grabbed the unrelated Credit Limit figure
             # on a real fixture instead of the actual previous balance.
+            # A trailing "CR" marks a CREDIT balance (the cardholder is owed
+            # money, not the other way around) — negate it, or the standard
+            # equation (previous - payments - credits + charges = new) can
+            # never tie, even with perfectly-read transactions. E.g. a real
+            # statement: $238.36 CR previous, three small purchases, $203.39
+            # CR new — only ties as -238.36 + 34.97 = -203.39.
             if 'PREVIOUS BALANCE' in upper and self.previous_balance is None:
                 idx = upper.index('PREVIOUS BALANCE') + len('PREVIOUS BALANCE')
-                m = re.search(r'\$?([\d,]+\.\d{2})', line[idx:])
+                m = re.search(r'\$?([\d,]+\.\d{2})\s*(\bCR\b)?', line[idx:], re.IGNORECASE)
                 if m:
-                    self.previous_balance = Decimal(m.group(1).replace(',', ''))
+                    amt = Decimal(m.group(1).replace(',', ''))
+                    self.previous_balance = -amt if m.group(2) else amt
             if 'NEW BALANCE' in upper and self.new_balance is None:
                 idx = upper.index('NEW BALANCE') + len('NEW BALANCE')
-                m = re.search(r'\$?([\d,]+\.\d{2})', line[idx:])
+                m = re.search(r'\$?([\d,]+\.\d{2})\s*(\bCR\b)?', line[idx:], re.IGNORECASE)
                 if m:
-                    self.new_balance = Decimal(m.group(1).replace(',', ''))
+                    amt = Decimal(m.group(1).replace(',', ''))
+                    self.new_balance = -amt if m.group(2) else amt
             # 'CLOSE DATE' alone (not 'STATEMENT CLOSE DATE') — tesseract
             # commonly misreads "Statement" as "Staternent" (m -> rn is one
             # of its most frequent confusions), which silently defeated the
