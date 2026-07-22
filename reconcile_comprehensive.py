@@ -1482,13 +1482,30 @@ def main():
             # line, halt immediately with a clear error rather than continuing.
             # Pass --force to bypass this gate (e.g. when called from qa_reconciliation.py)
             force = '--force' in sys.argv
-            if '✗ Balance verification: FAILED' in report and not force:
+            # Credit-card reports only emit a '✓ PASSED'/'✗ FAILED' marker at
+            # all when the parser has BOTH previous_balance and new_balance
+            # (see generate_report()'s `if self.previous_balance is not None
+            # and self.new_balance is not None` guard). When Vision itself
+            # fails its internal tie-out check, it raises without assigning
+            # any data back to the parser, so previous_balance can stay None
+            # even though new_balance (often extracted by a simpler, more
+            # robust regex) is set. That produces a report with NO marker at
+            # all — invisible to a check that only looks for the FAILED
+            # string. Confirmed live: this let a real reconciliation attempt
+            # write $0 payments/$0 charges to the log as if it had succeeded.
+            no_marker = (stmt_type in _cc_keys()
+                         and '✓ Balance verification: PASSED' not in report
+                         and '✗ Balance verification: FAILED' not in report)
+            if (('✗ Balance verification: FAILED' in report) or no_marker) and not force:
                 print()
                 print('!' * 80)
                 print('  BALANCE CHECK FAILED — halting.')
                 print(f'  Statement: {pdf_path}')
                 print(f'  Client:    {getattr(parser, "client_name", "unknown")}')
                 print(f'  Type:      {stmt_type}')
+                if no_marker:
+                    print(f'  Reason:    parser could not extract a previous balance '
+                          f'(no verification marker in report — Vision likely also failed)')
                 print()
                 print('  The report has been printed above. Do NOT enter this in QuickBooks.')
                 print('  Investigate the missing transactions before proceeding.')
