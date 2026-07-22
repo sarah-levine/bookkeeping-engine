@@ -1131,8 +1131,8 @@ def _ensure_pdf(path):
         photo_to_pdf(Path(path), Path(tmp.name))
     except Exception as e:
         print(f"[Photo→PDF] Failed to convert image input ({e}); "
-              f"HEIC photos need `pip3 install pillow-heif` to convert." if is_heic
-              else f"[Photo→PDF] Failed to convert image input: {e}", file=sys.stderr)
+              f"HEIC conversion needs macOS's `sips` (not found) or `pip3 install pillow-heif`."
+              if is_heic else f"[Photo→PDF] Failed to convert image input: {e}", file=sys.stderr)
         sys.exit(1)
     print(f"[Photo→PDF] Detected image input ({Path(path).name}); "
           f"wrapped into single-page PDF → {tmp.name}")
