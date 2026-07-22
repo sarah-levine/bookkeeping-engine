@@ -48,10 +48,12 @@ class NorthernTrustCheckingParser(StatementParser):
             from PIL import Image
             import pytesseract
             import io as _io
+            from parsers.ocr_support import zoom_for_target_width
             doc = fitz.open(self.pdf_path)
             pages = []
             for page in doc:
-                mat = fitz.Matrix(2, 2)
+                zoom = zoom_for_target_width(page, target_width=3200, max_zoom=6.0)
+                mat = fitz.Matrix(zoom, zoom)
                 pix = page.get_pixmap(matrix=mat)
                 img = Image.frombytes('RGB', [pix.width, pix.height], pix.samples)
                 pages.append(pytesseract.image_to_string(img))

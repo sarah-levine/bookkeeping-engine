@@ -85,7 +85,20 @@ def photo_to_pdf(photo_path: Path, pdf_path: Path) -> None:
         Path(tmp_png_path).unlink()
 
     img = _upright(img)
-    img.save(pdf_path)
+
+    # Pillow defaults to 72 DPI when saving as PDF if no resolution is given,
+    # which treats every pixel as a full point (1/72in). For a real phone
+    # photo (thousands of px wide) that claims a PDF page tens of inches
+    # across — e.g. a 5712x4284 photo becomes a "59.5x79.3 inch" page. When
+    # extractors/vision_helper.py then renders that page at a fixed 200 DPI
+    # for the Vision API, the compounded size (~12000x16000px) blows past
+    # the API's request-size limit (confirmed live: 413 request_too_large).
+    # Assume these are standard US Letter statements and derive a resolution
+    # from actual pixel count instead, so the PDF always claims a sane
+    # physical page size regardless of source resolution.
+    short_side_in = 8.5  # portrait Letter width; used as the short side either way
+    resolution = min(img.width, img.height) / short_side_in
+    img.save(pdf_path, resolution=resolution)
 
 
 def main() -> None:
