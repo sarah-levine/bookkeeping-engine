@@ -96,11 +96,22 @@ def check_fixture(entry) -> str:
     # in recon_log.json comes from whichever of these two attributes is set.
     # A parser that leaves both unset silently logs a blank date instead of
     # failing (this is how the BofA checking/savings bug went unnoticed).
+    #
+    # expect_parse_incomplete: true skips this (and only this) assertion for
+    # fixtures deliberately kept despite degraded raw-OCR quality — this test
+    # calls parser.parse() directly, never _try_vision_fallback(), so it can't
+    # exercise the recovery path real reconcile_comprehensive.py runs use for
+    # exactly these fixtures. See each entry's notes for why it's degraded
+    # (too low-resolution to OCR cleanly, or a genuinely incomplete statement).
     stmt_date = getattr(parser, "closing_date", None) or getattr(parser, "statement_date", None)
-    assert stmt_date, (
-        f"{entry['name']}: parser set neither closing_date nor statement_date — "
-        f"reconcile_comprehensive.py would log a blank statement_end_date"
-    )
+    if entry.get("expect_parse_incomplete"):
+        if not stmt_date:
+            return f"SKIP  {entry['name']}: no date extracted (expect_parse_incomplete: true)"
+    else:
+        assert stmt_date, (
+            f"{entry['name']}: parser set neither closing_date nor statement_date — "
+            f"reconcile_comprehensive.py would log a blank statement_end_date"
+        )
 
     expect = entry.get("expect_client")
     if expect:

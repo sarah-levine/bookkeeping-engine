@@ -5,17 +5,25 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
-### BMO checking/credit card parsers never set `closing_date`/`statement_date`
-`BMOCheckingParser` and `BMOCreditCardParser` never assign `self.closing_date`
-or `self.statement_date` during `parse()`, same failure mode as the BofA/Wells
-Fargo/Northern Trust bug fixed 2026-07-02. Any real reconciliation run through
-these two parsers silently logs a blank statement date. Not fixed here — no
-BMO fixture was available locally to verify a fix against. `tests/test_parsers.py`
-now asserts `closing_date`/`statement_date` is set, so this will surface as a
-real failure once BMO fixtures are wired into the manifest.
+### BMO checking parser never sets `closing_date`/`statement_date`
+`BMOCheckingParser` never assigns `self.closing_date` or `self.statement_date`
+during `parse()`, same failure mode as the BofA/Wells Fargo/Northern Trust bug
+fixed 2026-07-02. Any real reconciliation run through this parser silently
+logs a blank statement date.
 
-**Root cause fix:** add closing-date extraction to `parse()` in `parsers/bmo.py`,
-following the pattern in `parsers/bofa.py`'s `_extract_closing_date()`.
+`BMOCreditCardParser`'s half of this was fixed 2026-07-22 (`closing_date` now
+parsed from the "Statement Close Date <Month> <Day>, <Year>" line, verified
+against four real De Anza fixtures once `test_parsers.py`'s date-assertion
+check — added after this entry was written — surfaced it as a live failure,
+exactly as predicted below). The checking half is still open: no `bmo_checking`
+fixture exists locally to verify a fix against, and CLAUDE.md's testing policy
+requires real-fixture verification for parser changes, not a guess at
+untested regex for a statement layout no fixture confirms.
+
+**Root cause fix:** add closing-date extraction to `BMOCheckingParser.parse()`
+in `parsers/bmo.py`, mirroring the pattern just added to `BMOCreditCardParser`
+in the same file (or `parsers/bofa.py`'s `_extract_closing_date()`). Needs a
+real `bmo_checking` fixture uploaded via Mode H first.
 
 ---
 
