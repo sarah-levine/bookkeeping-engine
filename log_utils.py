@@ -226,7 +226,15 @@ def upsert_recon_log(
 
 
 def append_manual_issue(*, client: str, issue: str) -> None:
-    """Append a manual issue note to recon_log.json (idempotent by client+issue)."""
+    """Append a manual issue note to recon_log.json (idempotent by client+issue).
+
+    If a matching (client, issue) entry already exists and was resolved, its
+    resolved/resolved_time is preserved on the replacement (only run_time is
+    refreshed) — a later run re-detecting the exact same already-resolved
+    event must not silently reopen it. (manual_issue_covers_event() skips
+    resolved entries when deciding whether to re-flag, by design, so this is
+    the only place that can prevent the overwrite from clobbering resolution.)
+    """
     client = _normalize_client_name(client)
     _assert_known_client(client)
     entry = {
@@ -250,6 +258,9 @@ def append_manual_issue(*, client: str, issue: str) -> None:
         if e.get("type") == "manual" and (
             e.get("client"), e.get("issue")
         ) == key:
+            if e.get("resolved"):
+                entry["resolved"] = e["resolved"]
+                entry["resolved_time"] = e.get("resolved_time")
             existing[i] = entry
             replaced = True
             break
@@ -283,7 +294,13 @@ def manual_issue_covers_event(client: str, *substrings: str) -> bool:
 
 
 def resolve_manual_issue(*, client: str, issue: str) -> None:
-    """Mark a manual issue as resolved so it stops appearing in digests."""
+    """Mark a manual issue as resolved so it stops appearing in digests.
+
+    Normalizes `client` the same way append_manual_issue() does before
+    comparing — entries are stored with the canonical name, so comparing
+    against a raw alias here would silently match nothing.
+    """
+    client = _normalize_client_name(client)
     existing = _load_log()
     for e in existing:
         if e.get("type") == "manual" and e.get("client") == client and e.get("issue") == issue:
