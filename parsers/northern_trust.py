@@ -57,6 +57,7 @@ class NorthernTrustCheckingParser(StatementParser):
                 pages.append(pytesseract.image_to_string(img))
             doc.close()
             self._ocr_text = '\n'.join(pages)
+            self._used_ocr_fallback = True
             return self._ocr_text
         except Exception as e:
             return ''

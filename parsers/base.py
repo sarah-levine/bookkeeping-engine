@@ -662,7 +662,20 @@ class StatementParser:
         return abs(computed - new_d) < Decimal('0.01')
 
     def _pdf_is_text_based(self, min_chars: int = 300) -> bool:
-        """Return True if pdftotext extracted enough text to be trustworthy."""
+        """Return True if pdftotext extracted enough text to be trustworthy.
+
+        Parsers whose _extract_text() falls back to its own OCR pass (BMO,
+        Northern Trust) set self._used_ocr_fallback = True at the point OCR
+        actually ran — that always makes this return False, regardless of
+        how much text the OCR produced. Without this check, a long-but-
+        unreliable OCR transcript reads as "trustworthy digital text" by
+        length alone, which routes _try_vision_fallback() into "parser bug,
+        skip Vision" instead of "scanned page, Vision is appropriate" —
+        silently disabling the Vision safety net for every statement that
+        needed OCR in the first place.
+        """
+        if getattr(self, '_used_ocr_fallback', False):
+            return False
         return bool(getattr(self, 'text', None)) and len(self.text.strip()) >= min_chars
 
     def _tie_out_diagnostic(self):

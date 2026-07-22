@@ -80,6 +80,7 @@ class BMOCheckingParser(StatementParser):
                 pages.append(pytesseract.image_to_string(img))
             doc.close()
             self._ocr_text = '\n'.join(pages)
+            self._used_ocr_fallback = True
             return self._ocr_text
         except Exception:
             return ''
@@ -406,6 +407,7 @@ class BMOCreditCardParser(StatementParser):
         self.credits = []
         self.charges = []
         self.statement_period = ''
+        self.closing_date = None
 
         if pdf_path:
             self.text = self._extract_text()
@@ -443,6 +445,7 @@ class BMOCreditCardParser(StatementParser):
                 pages.append(pytesseract.image_to_string(img))
             doc.close()
             self._ocr_text = '\n'.join(pages)
+            self._used_ocr_fallback = True
             return self._ocr_text
         except Exception:
             return ''
@@ -514,6 +517,21 @@ class BMOCreditCardParser(StatementParser):
                               line, re.IGNORECASE)
                 if m and not self.statement_period:
                     self.statement_period = m.group(1)
+                    # reconcile_comprehensive.py logs statement_end_date from
+                    # closing_date/statement_date — this class never set
+                    # either, so every BMO credit card reconciliation has
+                    # been logging a blank date (parsers/{bofa,citi,chase,
+                    # wells_fargo,usbank,capital_one,northern_trust,amex}.py
+                    # all set closing_date; bmo.py never did, for either
+                    # class in this file).
+                    if self.closing_date is None:
+                        for _fmt in ('%B %d, %Y', '%b %d, %Y', '%B %d %Y', '%b %d %Y'):
+                            try:
+                                self.closing_date = datetime.strptime(
+                                    self.statement_period, _fmt).strftime('%m/%d/%y')
+                                break
+                            except ValueError:
+                                continue
 
         # Transaction rows: MM/DD  MM/DD  description  [ref]  amount [CR]
         txn_re = re.compile(
