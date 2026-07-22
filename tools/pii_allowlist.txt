@@ -61,7 +61,7 @@ native directly exactly multiline dotall ignorecase true false match initiate
 both after before last back only your this that see from order no not name type
 reference formats parse trans svcs streamlined warning confirmation checked agency
 admin returns none convert how it works basic usage field staff unknown other
-message messages visit
+message messages visit exception
 
 # ── Fonts / external products / file formats ───────────────────────
 ibm plex mono segoe ui roboto google sheet sheets drive gmail smtp api github
