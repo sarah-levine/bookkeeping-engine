@@ -33,6 +33,7 @@ Usage:
     python manual_statement_entry.py                 # active month -> stdout
     python manual_statement_entry.py output.txt      # active month -> file
     python manual_statement_entry.py --month KEY     # specific month
+    python manual_statement_entry.py --no-prompt     # auto-answers "later" at the QB prompt
 """
 
 import sys
@@ -70,7 +71,7 @@ def _decimalize(data: dict) -> dict:
     return out
 
 
-def run(month_key=None, output_path=None):
+def run(month_key=None, output_path=None, no_prompt=False):
     config = load_private_json("manual_statements.json")
     if not config or not config.get("statements"):
         print("No manual statement data found. Create manual_statements.json in "
@@ -117,6 +118,27 @@ def run(month_key=None, output_path=None):
     else:
         print(report)
 
+    # ── QB confirmation prompt ────────────────────────────────────────────
+    # README's binding Workflow Modes protocol: Mode G "follow[s] the same
+    # report/QB-confirmation/sync flow as Mode A" — this previously
+    # hardcoded status="DONE" unconditionally, with no confirmation step at
+    # all, silently marking a statement as entered into QuickBooks before
+    # anyone had actually seen the report. Caught live: a real manual entry
+    # got logged DONE before the user had any chance to review it.
+    print()
+    print('─' * 80)
+    if no_prompt:
+        answer = 'later'
+        print('  [--no-prompt] Auto-answered: later — log written, sheet update deferred.')
+    else:
+        while True:
+            answer = input('  Have you entered this into QuickBooks? (done / later): ').strip().lower()
+            if answer in ('done', 'later'):
+                break
+            print('  Please type "done" when finished, or "later" to log now and update the sheet when done.')
+    print('─' * 80)
+    status = 'DONE' if answer == 'done' else 'IN_PROGRESS'
+
     # ── Write reconciliation logs ────────────────────────────────────────────
     # account_type (optional, in the JSON entry) overrides stmt_type for the
     # LOG key only — stmt_type must stay the registry key for parser lookup
@@ -143,10 +165,15 @@ def run(month_key=None, output_path=None):
             beginning_balance  = f"{float(_beg):,.2f}" if _beg is not None else '—',
             ending_balance     = f"{float(_end):,.2f}" if _end is not None else '—',
             total_payments     = f"{float(_pay):.2f}" if _pay is not None else '',
-            status             = "DONE",
+            status             = status,
         )
     except Exception as _e:
         print(f"  ⚠ Log write failed: {_e}")
+        return 1
+
+    if status != 'DONE':
+        print('  ⊘ Skipping sheet update (not yet marked done)')
+        return 0
 
     # ── Auto-trigger Google Sheet update ────────────────────────────────────
     try:
@@ -179,10 +206,12 @@ if __name__ == '__main__':
     args = sys.argv[1:]
     month = None
     out = None
+    no_prompt = '--no-prompt' in args
+    args = [a for a in args if a != '--no-prompt']
     if '--month' in args:
         i = args.index('--month')
         month = args[i + 1]
         args = args[:i] + args[i + 2:]
     if args:
         out = args[0]
-    sys.exit(run(month_key=month, output_path=out))
+    sys.exit(run(month_key=month, output_path=out, no_prompt=no_prompt))
