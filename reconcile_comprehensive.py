@@ -1096,6 +1096,49 @@ def _ask_statement_types():
     return selected
 
 
+def _ensure_pdf(path):
+    """If `path` is an image (phone photo, screenshot, etc.) rather than a PDF,
+    wrap it into a single-page PDF and return the new path so the rest of the
+    pipeline — statement-type detection, then the normal parser's Vision/OCR
+    fallback for image-based PDFs — runs unchanged.  Detection is by file
+    signature, not extension, since --from-drive downloads always land with
+    a '.pdf' suffix regardless of the source file's real type.
+
+    Returns `path` unchanged for anything that isn't a recognized image.
+    """
+    try:
+        with open(path, 'rb') as f:
+            header = f.read(12)
+    except Exception:
+        return path
+
+    if header.startswith(b'%PDF'):
+        return path
+
+    _image_signatures = (
+        b'\xff\xd8\xff',        # JPEG
+        b'\x89PNG\r\n\x1a\n',   # PNG
+        b'RIFF',                # WEBP
+    )
+    is_heic = header[4:12] in (b'ftypheic', b'ftypheix', b'ftypmif1', b'ftypmsf1')
+    if not is_heic and not any(header.startswith(sig) for sig in _image_signatures):
+        return path  # not a recognized image — leave alone, let the normal PDF path error out
+
+    from tools.photo_to_pdf import photo_to_pdf
+    tmp = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False, prefix='photo2pdf_')
+    tmp.close()
+    try:
+        photo_to_pdf(Path(path), Path(tmp.name))
+    except Exception as e:
+        print(f"[Photo→PDF] Failed to convert image input ({e}); "
+              f"HEIC photos need `pip3 install pillow-heif` to convert." if is_heic
+              else f"[Photo→PDF] Failed to convert image input: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"[Photo→PDF] Detected image input ({Path(path).name}); "
+          f"wrapped into single-page PDF → {tmp.name}")
+    return tmp.name
+
+
 def main():
     if len(sys.argv) >= 2 and sys.argv[1] == '--sync-from-sheet':
         import importlib
@@ -1173,7 +1216,7 @@ def main():
         print("  BofA Business Savings                (any client)")
         sys.exit(1)
 
-    pdf_path = sys.argv[1]
+    pdf_path = _ensure_pdf(sys.argv[1])
     output_path = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith('--') else None
 
     # Parse --no-prompt flag — auto-answers 'later' at the QB confirmation prompt
