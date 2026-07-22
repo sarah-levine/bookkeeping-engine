@@ -118,6 +118,14 @@ def run(month_key=None, output_path=None):
         print(report)
 
     # ── Write reconciliation logs ────────────────────────────────────────────
+    # account_type (optional, in the JSON entry) overrides stmt_type for the
+    # LOG key only — stmt_type must stay the registry key for parser lookup
+    # above, but the registry has no per-cardholder variants (e.g.
+    # 'bmo_credit_roger'), so without this override multiple cardholders on
+    # the same base format/date would collide on (client, account_type,
+    # statement_end_date) and silently overwrite each other's log entry.
+    # Same fix as --account-type in reconcile_comprehensive.py.
+    log_account_type = data.get('account_type', stmt_type)
     try:
         _beg = getattr(parser, 'beginning_balance', None) or getattr(parser, 'previous_balance', None)
         _end = getattr(parser, 'ending_balance', None) or getattr(parser, 'new_balance', None)
@@ -129,7 +137,7 @@ def run(month_key=None, output_path=None):
         write_both_logs(
             client             = parser.client_name,
             client_name        = parser.client_name,
-            account_type       = stmt_type,
+            account_type       = log_account_type,
             statement_end_date = str(_date),
             statement          = key,
             beginning_balance  = f"{float(_beg):,.2f}" if _beg is not None else '—',
