@@ -1370,45 +1370,53 @@ def main():
                 # ── Flag unrecognized CC payments ──────────────────────────
                 # Any CC payment debit whose issuer has no CC statement in
                 # this session gets flagged (ASK CLIENT) and logged as an
-                # open manual issue in recon_log.json.
-                try:
-                    from log_utils import append_manual_issue as _flag, manual_issue_covers_event as _already_flagged
-                    cc_stmts_this_session = {
-                        s for s in [t[0] for t in _session_stmt_types]
-                        if s in _cc_keys()
-                    }
-                    cc_payments = getattr(parser, 'credit_card_payments', [])
-                    for pmt in cc_payments:
-                        vendor = pmt.get('vendor', '').upper()
-                        # Some parsers (e.g. CitiCheckingParser) store amount
-                        # as a str, not Decimal — normalize before formatting
-                        # so this flag check can't crash on a str amount.
-                        # abs() because sign convention differs by parser
-                        # (BofA stores checking debits negative, Citi positive) —
-                        # this message just needs the payment's magnitude.
-                        pmt_amount = abs(Decimal(str(pmt['amount'])))
-                        matched = any(
-                            kw.upper() in vendor
-                            for kw in (cfg.get('cc_keywords', []) if parser.client_name else [])
-                        )
-                        # Flag if vendor contains a known card issuer but no
-                        # statement for that issuer was reconciled this session
-                        if 'AMERICAN EXPRESS' in vendor and 'amex' not in cc_stmts_this_session:
-                            amt_str = f"${pmt_amount:,.2f}"
-                            issue = f"Unrecognized Amex payment {amt_str} on {pmt['date']} — no Amex statement on file (ASK CLIENT) — Not Recognized Account"
-                            print(f"  ⚠ {issue}")
-                            if parser.client_name and not _already_flagged(parser.client_name, amt_str, pmt['date']):
-                                _flag(client=parser.client_name, issue=issue)
-                        elif 'CHASE' in vendor and not any(
-                            s in cc_stmts_this_session for s in ('chase_ink', 'chase_united', 'chase_sapphire')
-                        ):
-                            amt_str = f"${pmt_amount:,.2f}"
-                            issue = f"Unrecognized Chase payment {amt_str} on {pmt['date']} — no Chase statement on file (ASK CLIENT) — Not Recognized Account"
-                            print(f"  ⚠ {issue}")
-                            if parser.client_name and not _already_flagged(parser.client_name, amt_str, pmt['date']):
-                                _flag(client=parser.client_name, issue=issue)
-                except Exception as _e:
-                    print(f"  ⚠ CC flag check failed: {_e}")
+                # open manual issue in recon_log.json. Skipped in --dry-run:
+                # this is a real write to the shared log, and --dry-run's
+                # contract (see its flag parsing above) is that it "skips
+                # all log writes." Without this guard, tests/smoke_all_
+                # fixtures.py's --dry-run runs against real fixtures write
+                # to production recon_log.json on every push — confirmed
+                # live: a bofa_checking_paintbox smoke-test run silently
+                # bumped a resolved manual issue's run_time via this path.
+                if not dry_run:
+                    try:
+                        from log_utils import append_manual_issue as _flag, manual_issue_covers_event as _already_flagged
+                        cc_stmts_this_session = {
+                            s for s in [t[0] for t in _session_stmt_types]
+                            if s in _cc_keys()
+                        }
+                        cc_payments = getattr(parser, 'credit_card_payments', [])
+                        for pmt in cc_payments:
+                            vendor = pmt.get('vendor', '').upper()
+                            # Some parsers (e.g. CitiCheckingParser) store amount
+                            # as a str, not Decimal — normalize before formatting
+                            # so this flag check can't crash on a str amount.
+                            # abs() because sign convention differs by parser
+                            # (BofA stores checking debits negative, Citi positive) —
+                            # this message just needs the payment's magnitude.
+                            pmt_amount = abs(Decimal(str(pmt['amount'])))
+                            matched = any(
+                                kw.upper() in vendor
+                                for kw in (cfg.get('cc_keywords', []) if parser.client_name else [])
+                            )
+                            # Flag if vendor contains a known card issuer but no
+                            # statement for that issuer was reconciled this session
+                            if 'AMERICAN EXPRESS' in vendor and 'amex' not in cc_stmts_this_session:
+                                amt_str = f"${pmt_amount:,.2f}"
+                                issue = f"Unrecognized Amex payment {amt_str} on {pmt['date']} — no Amex statement on file (ASK CLIENT) — Not Recognized Account"
+                                print(f"  ⚠ {issue}")
+                                if parser.client_name and not _already_flagged(parser.client_name, amt_str, pmt['date']):
+                                    _flag(client=parser.client_name, issue=issue)
+                            elif 'CHASE' in vendor and not any(
+                                s in cc_stmts_this_session for s in ('chase_ink', 'chase_united', 'chase_sapphire')
+                            ):
+                                amt_str = f"${pmt_amount:,.2f}"
+                                issue = f"Unrecognized Chase payment {amt_str} on {pmt['date']} — no Chase statement on file (ASK CLIENT) — Not Recognized Account"
+                                print(f"  ⚠ {issue}")
+                                if parser.client_name and not _already_flagged(parser.client_name, amt_str, pmt['date']):
+                                    _flag(client=parser.client_name, issue=issue)
+                    except Exception as _e:
+                        print(f"  ⚠ CC flag check failed: {_e}")
             else:
                 report = parser.generate_report()
 
