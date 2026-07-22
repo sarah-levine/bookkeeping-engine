@@ -377,28 +377,15 @@ def detect_statement_type(pdf_path):
     if 'NORTHERN' in fname:
         return 'northern_trust_checking'
 
-    def _ocr_zoom_for_target_width(page, target_width=1600, min_zoom=0.5, max_zoom=2.5):
-        """Zoom factor to render `page` at ~target_width px, not a fixed
-        multiplier. A fixed multiplier (e.g. 0.8x) shrinks an already-small
-        phone-photo PDF (e.g. 768px wide) down further, which is why a real
-        low-resolution photo failed every OCR bank-detection pass at every
-        fixed zoom tried here — the effective render was too small to read
-        the header text regardless of source quality. Large born-digital
-        scans still get scaled down for speed since target_width is a cap.
-        """
-        native_width = page.rect.width  # points, i.e. px at zoom=1.0
-        if native_width <= 0:
-            return 1.0
-        return max(min_zoom, min(max_zoom, target_width / native_width))
-
     # Try OCR detection for image-only PDFs
     try:
         import fitz
         from PIL import Image
         import pytesseract
+        from parsers.ocr_support import zoom_for_target_width as _ocr_zoom_for_target_width
         doc = fitz.open(pdf_path)
         page = doc[0]
-        zoom = _ocr_zoom_for_target_width(page)
+        zoom = _ocr_zoom_for_target_width(page, max_zoom=2.5)
         mat = fitz.Matrix(zoom, zoom)
         pix = page.get_pixmap(matrix=mat)
         img = Image.frombytes('RGB', [pix.width, pix.height], pix.samples)
@@ -414,9 +401,10 @@ def detect_statement_type(pdf_path):
         import fitz
         from PIL import Image
         import pytesseract
+        from parsers.ocr_support import zoom_for_target_width as _ocr_zoom_for_target_width
         doc = fitz.open(pdf_path)
         page = doc[0]
-        zoom = _ocr_zoom_for_target_width(page, target_width=1200)  # lower res for fast detection
+        zoom = _ocr_zoom_for_target_width(page, target_width=1200, max_zoom=2.5)  # lower res for fast detection
         mat = fitz.Matrix(zoom, zoom)
         pix = page.get_pixmap(matrix=mat)
         img = Image.frombytes('RGB', [pix.width, pix.height], pix.samples)
