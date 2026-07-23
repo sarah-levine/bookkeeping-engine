@@ -208,13 +208,14 @@ class ClientRegistry:
         return description
 
     def clean_and_normalize(self, client_name, description):
-        """Full client-tier pipeline: strip the client's configured
-        `description_strip_suffixes`, then apply its `vendor_rules`. This is the
-        single entry point parsers should use so suffix-stripping is consistent
-        across every bank (instead of each parser doing it inline)."""
         cfg = self.get_config(client_name) or {}
-        d = strip_client_suffixes(description, cfg.get('description_strip_suffixes'))
-        return self.normalize_vendor(client_name, d)
+        suffixes = cfg.get('description_strip_suffixes')
+        d = strip_client_suffixes(description, suffixes)
+        result = self.normalize_vendor(client_name, d)
+        if result != d:
+            return result
+        cleaned, _ = _auto_clean_vendor(d, suffixes)
+        return cleaned or d
 
     @property
     def KNOWN_CLIENTS(self):
