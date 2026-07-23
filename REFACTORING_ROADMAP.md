@@ -13,7 +13,7 @@ logs a blank statement date.
 
 `BMOCreditCardParser`'s half of this was fixed 2026-07-22 (`closing_date` now
 parsed from the "Statement Close Date <Month> <Day>, <Year>" line, verified
-against four real De Anza fixtures once `test_parsers.py`'s date-assertion
+against four real client fixtures once `test_parsers.py`'s date-assertion
 check — added after this entry was written — surfaced it as a live failure,
 exactly as predicted below). The checking half is still open: no `bmo_checking`
 fixture exists locally to verify a fix against, and CLAUDE.md's testing policy

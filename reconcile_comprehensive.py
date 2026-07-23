@@ -1227,7 +1227,7 @@ def main():
     # Parse --account-type override — detect_statement_type() only ever
     # returns the base parser format (e.g. 'bmo_credit'), never a per-
     # cardholder variant, so multiple cardholders on the same base format
-    # with the same statement date (e.g. De Anza's four BMO cards) would
+    # with the same statement date (e.g. one client's four BMO cards) would
     # otherwise collide on the (client, account_type, statement_end_date)
     # log key and silently overwrite each other's reconciliation entry.
     # Still validated against the client's statement_types by
