@@ -376,14 +376,17 @@ def detect_statement_type(pdf_path):
     fname = str(pdf_path).upper()
     if 'NORTHERN' in fname:
         return 'northern_trust_checking'
+
     # Try OCR detection for image-only PDFs
     try:
         import fitz
         from PIL import Image
         import pytesseract
+        from parsers.ocr_support import zoom_for_target_width as _ocr_zoom_for_target_width
         doc = fitz.open(pdf_path)
         page = doc[0]
-        mat = fitz.Matrix(1.5, 1.5)
+        zoom = _ocr_zoom_for_target_width(page, max_zoom=2.5)
+        mat = fitz.Matrix(zoom, zoom)
         pix = page.get_pixmap(matrix=mat)
         img = Image.frombytes('RGB', [pix.width, pix.height], pix.samples)
         ocr = pytesseract.image_to_string(img).upper()
@@ -398,9 +401,11 @@ def detect_statement_type(pdf_path):
         import fitz
         from PIL import Image
         import pytesseract
+        from parsers.ocr_support import zoom_for_target_width as _ocr_zoom_for_target_width
         doc = fitz.open(pdf_path)
         page = doc[0]
-        mat = fitz.Matrix(0.8, 0.8)  # lower res for fast detection
+        zoom = _ocr_zoom_for_target_width(page, target_width=1200, max_zoom=2.5)  # lower res for fast detection
+        mat = fitz.Matrix(zoom, zoom)
         pix = page.get_pixmap(matrix=mat)
         img = Image.frombytes('RGB', [pix.width, pix.height], pix.samples)
         ocr = pytesseract.image_to_string(img).upper()
@@ -1219,6 +1224,38 @@ def main():
     pdf_path = _ensure_pdf(sys.argv[1])
     output_path = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith('--') else None
 
+    # Parse --account-type override — detect_statement_type() only ever
+    # returns the base parser format (e.g. 'bmo_credit'), never a per-
+    # cardholder variant, so multiple cardholders on the same base format
+    # with the same statement date (e.g. one client's four BMO cards) would
+    # otherwise collide on the (client, account_type, statement_end_date)
+    # log key and silently overwrite each other's reconciliation entry.
+    # Still validated against the client's statement_types by
+    # _assert_known_account_type — an unlisted override is a hard stop,
+    # same as an unrecognized auto-detected type.
+    account_type_override = None
+    if '--account-type' in sys.argv:
+        _idx = sys.argv.index('--account-type')
+        if _idx + 1 >= len(sys.argv):
+            print("Error: --account-type requires a value, e.g. --account-type bmo_credit_roger", file=sys.stderr)
+            sys.exit(1)
+        account_type_override = sys.argv[_idx + 1]
+
+    # Parse --statement-type override — forces which parser to use, bypassing
+    # detect_statement_type() entirely. For when auto-detection returns
+    # 'unknown' (e.g. a low-resolution phone photo whose header OCRs too
+    # poorly to match the bank-detection keywords) but a human already knows
+    # what format it is. Only applies when the PDF has exactly one segment —
+    # ambiguous for combined/multi-statement PDFs, so those still require
+    # working auto-detection.
+    statement_type_override = None
+    if '--statement-type' in sys.argv:
+        _idx = sys.argv.index('--statement-type')
+        if _idx + 1 >= len(sys.argv):
+            print("Error: --statement-type requires a value, e.g. --statement-type bmo_credit", file=sys.stderr)
+            sys.exit(1)
+        statement_type_override = sys.argv[_idx + 1]
+
     # Parse --no-prompt flag — auto-answers 'later' at the QB confirmation prompt
     # so the script can run non-interactively (e.g. from Claude's environment).
     no_prompt = '--no-prompt' in sys.argv
@@ -1284,12 +1321,28 @@ def main():
     segments = split_combined_pdf(pdf_path)
     tmp_files = [p for (_, p) in segments if p != str(pdf_path)]
 
+    if statement_type_override:
+        if len(segments) != 1:
+            print(f"Error: --statement-type only applies to single-statement PDFs "
+                  f"(this one split into {len(segments)} segments).", file=sys.stderr)
+            sys.exit(1)
+        _orig_type, _seg_path = segments[0]
+        print(f"  --statement-type override: '{_orig_type}' → '{statement_type_override}'")
+        segments = [(statement_type_override, _seg_path)]
+
     all_reports = []
     _session_stmt_types = []  # tracks (stmt_type, client_name) for each statement processed
     _session_pushed = False   # set True if any sync_up() actually ran
     try:
         for stmt_type, seg_path in segments:
             print(f"[Step 4] Detected: {stmt_type}  ({Path(seg_path).name})")
+            # account_type used for LOG writes/reads only — parser selection
+            # below always uses the detected base format (stmt_type), since
+            # parsers aren't keyed by cardholder. See --account-type parsing
+            # above for why these two can differ.
+            log_account_type = account_type_override or stmt_type
+            if account_type_override:
+                print(f"  --account-type override: logging as '{log_account_type}'")
 
             if stmt_type not in parser_map:
                 print(f"  ⚠ Unrecognised statement type: {stmt_type}")
@@ -1311,7 +1364,7 @@ def main():
                     for _prev in reversed(_ll()):
                         if (_prev.get("type") == "recon"
                                 and _prev.get("client") == parser.client_name
-                                and _prev.get("account_type") == stmt_type):
+                                and _prev.get("account_type") == log_account_type):
                             if _prev.get("status") == "ERROR":
                                 print(f"  ⚠ Previous run ended with ERROR: {_prev.get('issue', '(no details)')}")
                                 print(f"    Retrying...")
@@ -1429,13 +1482,30 @@ def main():
             # line, halt immediately with a clear error rather than continuing.
             # Pass --force to bypass this gate (e.g. when called from qa_reconciliation.py)
             force = '--force' in sys.argv
-            if '✗ Balance verification: FAILED' in report and not force:
+            # Credit-card reports only emit a '✓ PASSED'/'✗ FAILED' marker at
+            # all when the parser has BOTH previous_balance and new_balance
+            # (see generate_report()'s `if self.previous_balance is not None
+            # and self.new_balance is not None` guard). When Vision itself
+            # fails its internal tie-out check, it raises without assigning
+            # any data back to the parser, so previous_balance can stay None
+            # even though new_balance (often extracted by a simpler, more
+            # robust regex) is set. That produces a report with NO marker at
+            # all — invisible to a check that only looks for the FAILED
+            # string. Confirmed live: this let a real reconciliation attempt
+            # write $0 payments/$0 charges to the log as if it had succeeded.
+            no_marker = (stmt_type in _cc_keys()
+                         and '✓ Balance verification: PASSED' not in report
+                         and '✗ Balance verification: FAILED' not in report)
+            if (('✗ Balance verification: FAILED' in report) or no_marker) and not force:
                 print()
                 print('!' * 80)
                 print('  BALANCE CHECK FAILED — halting.')
                 print(f'  Statement: {pdf_path}')
                 print(f'  Client:    {getattr(parser, "client_name", "unknown")}')
                 print(f'  Type:      {stmt_type}')
+                if no_marker:
+                    print(f'  Reason:    parser could not extract a previous balance '
+                          f'(no verification marker in report — Vision likely also failed)')
                 print()
                 print('  The report has been printed above. Do NOT enter this in QuickBooks.')
                 print('  Investigate the missing transactions before proceeding.')
@@ -1455,11 +1525,11 @@ def main():
                     _beg_f = f"{float(_beg):,.2f}" if _beg is not None else '—'
                     _end_f = f"{float(_end):,.2f}" if _end is not None else '—'
                     from log_utils import entry_status as _entry_status
-                    _existing = _entry_status(parser.client_name, stmt_type,
+                    _existing = _entry_status(parser.client_name, log_account_type,
                                               str(_date) if _date else '')
                     _upsert_log(
                         client             = parser.client_name,
-                        account_type       = stmt_type,
+                        account_type       = log_account_type,
                         statement_end_date = str(_date) if _date else '',
                         statement          = Path(pdf_path).name,
                         beginning_balance  = _beg_f,
@@ -1472,7 +1542,7 @@ def main():
                         print(f"  ⊘ Skipping push (already {_existing})")
                     else:
                         from tools.github_clients import sync_up as _sync_up
-                        _sync_up(f'digest: {parser.client_name} {stmt_type} IN_PROGRESS', dispatch=False)
+                        _sync_up(f'digest: {parser.client_name} {log_account_type} IN_PROGRESS', dispatch=False)
                         _session_pushed = True
                         print(f"  ✅ Pushed to GitHub")
                 except Exception as _e:
@@ -1483,7 +1553,7 @@ def main():
             if has_data and parser.client_name:
                 try:
                     from log_utils import get_client_notes
-                    _notes = get_client_notes(parser.client_name, stmt_type)
+                    _notes = get_client_notes(parser.client_name, log_account_type)
                     if _notes:
                         print('─' * 80)
                         print('  📋 Client notes:')
@@ -1517,7 +1587,7 @@ def main():
                 _raw_date = getattr(parser, 'closing_date',
                             getattr(parser, 'statement_date', ''))
                 _date_warn = _check_statement_date(
-                    str(_raw_date), parser.client_name, stmt_type)
+                    str(_raw_date), parser.client_name, log_account_type)
                 if _date_warn:
                     print(f"\n  {_date_warn}")
                     if no_prompt:
@@ -1551,12 +1621,12 @@ def main():
                             getattr(parser, 'statement_date', ''))
                     _status = "DONE" if answer == 'done' else "IN_PROGRESS"
                     from log_utils import entry_status as _entry_status
-                    _existing = _entry_status(parser.client_name, stmt_type,
+                    _existing = _entry_status(parser.client_name, log_account_type,
                                               str(_date) if _date else '')
                     _write_logs(
                         client             = parser.client_name,
                         client_name        = parser.client_name,
-                        account_type       = stmt_type,
+                        account_type       = log_account_type,
                         statement_end_date = str(_date) if _date else '',
                         statement          = Path(pdf_path).name,
                         beginning_balance  = f"{float(_beg):,.2f}" if _beg is not None else '—',
@@ -1568,7 +1638,7 @@ def main():
                         print(f"  ⊘ Skipping push (already {_existing})")
                     else:
                         from tools.github_clients import sync_up as _sync_up
-                        _sync_up(f'recon: {parser.client_name} {stmt_type} {_status}')
+                        _sync_up(f'recon: {parser.client_name} {log_account_type} {_status}')
                         _session_pushed = True
                         print(f"  ✅ Both logs pushed to GitHub")
                 except Exception as _e:
@@ -1585,7 +1655,7 @@ def main():
                     _archive(
                         pdf_path=seg_path,
                         client_name=parser.client_name,
-                        account_type=stmt_type,
+                        account_type=log_account_type,
                         statement_date=str(_date) if _date else '',
                         dry_run=dry_run,
                     )

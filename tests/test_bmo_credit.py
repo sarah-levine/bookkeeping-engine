@@ -190,17 +190,18 @@ def test_generate_report_credits_section():
     p = _make_parser(**data)
     report = p.generate_report()
     assert 'CREDITS' in report
-    assert 'RETURN CREDIT' in report
+    assert 'Return Credit' in report
     print("PASS  test_generate_report_credits_section")
 
 
 # ── vendor normalization (requires a client config) ───────────────────────────
 
 def test_normalize_vendor_no_config():
-    """Without a client config, normalize_vendor returns the vendor as-is."""
+    """Without a client config, an unmatched vendor still gets the generic
+    auto-clean fallback (title-casing here; no digits/location to strip)."""
     p = BMOCreditCardParser(client_name='Unknown Client XYZ')
     result = p.normalize_vendor('DELTA STORE INC')
-    assert result == 'DELTA STORE INC'
+    assert result == 'Delta Store Inc'
     print("PASS  test_normalize_vendor_no_config")
 
 
@@ -235,7 +236,9 @@ def test_normalize_vendor_with_config():
             p = BMOCreditCardParser(client_name='FABRIKAM LLC')
             assert p.normalize_vendor('ACME SUPPLY 12345') == 'Acme Supply Co'
             assert p.normalize_vendor('AMAZON MKTPL ORDER') == 'Amazon'
-            assert p.normalize_vendor('DELTA STORE INC') == 'DELTA STORE INC'
+            # No rule matches "DELTA STORE INC" — falls back to the generic
+            # auto-clean (title-casing here; no digits/location to strip).
+            assert p.normalize_vendor('DELTA STORE INC') == 'Delta Store Inc'
         finally:
             _bmo_mod._registry = old_bmo_registry
             _base_mod._registry = old_base_registry

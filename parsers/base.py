@@ -208,13 +208,14 @@ class ClientRegistry:
         return description
 
     def clean_and_normalize(self, client_name, description):
-        """Full client-tier pipeline: strip the client's configured
-        `description_strip_suffixes`, then apply its `vendor_rules`. This is the
-        single entry point parsers should use so suffix-stripping is consistent
-        across every bank (instead of each parser doing it inline)."""
         cfg = self.get_config(client_name) or {}
-        d = strip_client_suffixes(description, cfg.get('description_strip_suffixes'))
-        return self.normalize_vendor(client_name, d)
+        suffixes = cfg.get('description_strip_suffixes')
+        d = strip_client_suffixes(description, suffixes)
+        result = self.normalize_vendor(client_name, d)
+        if result != d:
+            return result
+        cleaned, _ = _auto_clean_vendor(d, suffixes)
+        return cleaned or d
 
     @property
     def KNOWN_CLIENTS(self):
@@ -540,7 +541,16 @@ class StatementParser:
         return None
 
     def normalize_vendor(self, description):
-        result = _registry.normalize_vendor(self.client_name or '', description)
+        # clean_and_normalize (not the bare normalize_vendor) — it also
+        # applies the client's description_strip_suffixes before rule-
+        # matching. Despite vendor_normalize.py's docstring claiming this
+        # two-tier system is "called by every parser", only
+        # WellsFargoCheckingParser (which overrides this method with its own
+        # _normalize()) actually applied description_strip_suffixes; every
+        # other parser routed through this bare method and silently skipped
+        # that tier. Confirmed live: a real client's description_strip_
+        # suffixes entries had no effect at all until this was fixed.
+        result = _registry.clean_and_normalize(self.client_name or '', description)
         if result != description:
             return result
         return description.strip()
@@ -662,7 +672,20 @@ class StatementParser:
         return abs(computed - new_d) < Decimal('0.01')
 
     def _pdf_is_text_based(self, min_chars: int = 300) -> bool:
-        """Return True if pdftotext extracted enough text to be trustworthy."""
+        """Return True if pdftotext extracted enough text to be trustworthy.
+
+        Parsers whose _extract_text() falls back to its own OCR pass (BMO,
+        Northern Trust) set self._used_ocr_fallback = True at the point OCR
+        actually ran — that always makes this return False, regardless of
+        how much text the OCR produced. Without this check, a long-but-
+        unreliable OCR transcript reads as "trustworthy digital text" by
+        length alone, which routes _try_vision_fallback() into "parser bug,
+        skip Vision" instead of "scanned page, Vision is appropriate" —
+        silently disabling the Vision safety net for every statement that
+        needed OCR in the first place.
+        """
+        if getattr(self, '_used_ocr_fallback', False):
+            return False
         return bool(getattr(self, 'text', None)) and len(self.text.strip()) >= min_chars
 
     def _tie_out_diagnostic(self):

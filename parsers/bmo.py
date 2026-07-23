@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from parsers.ocr_support import fitz, pytesseract, Image, _io, OCR_AVAILABLE
+from parsers.ocr_support import fitz, pytesseract, Image, _io, OCR_AVAILABLE, zoom_for_target_width
 from parsers.base import StatementParser, _registry, KNOWN_CLIENTS
 from parsers.report import *
 from parsers.report import _safe_date_key, _report_header, _summary_block, _balance_check, \
@@ -70,16 +70,19 @@ class BMOCheckingParser(StatementParser):
             doc = fitz.open(self.pdf_path)
             pages = []
             for page in doc:
-                mat = fitz.Matrix(1.0, 1.0)  # balance speed vs accuracy
+                # target_width=3200 already caps the render at the source —
+                # empirically the resolution real transaction-row/balance-
+                # label OCR needs (confirmed live: 1600px missed "PREVIOUS
+                # BALANCE" and 1 of 4 real transaction rows on an actual
+                # fixture; 3200px caught all of it, cleanly).
+                zoom = zoom_for_target_width(page, target_width=3200, max_zoom=6.0)
+                mat = fitz.Matrix(zoom, zoom)
                 pix = page.get_pixmap(matrix=mat)
                 img = Image.frombytes('RGB', [pix.width, pix.height], pix.samples)
-                # Resize to max 2000px wide to cap memory and OCR time
-                if img.width > 2000:
-                    ratio = 2000 / img.width
-                    img = img.resize((2000, int(img.height * ratio)), Image.LANCZOS)
                 pages.append(pytesseract.image_to_string(img))
             doc.close()
             self._ocr_text = '\n'.join(pages)
+            self._used_ocr_fallback = True
             return self._ocr_text
         except Exception:
             return ''
@@ -260,7 +263,7 @@ class BMOCheckingParser(StatementParser):
         check_date_map  = check_date_map  or {}
 
         def norm(desc):
-            return _registry.normalize_vendor(self.client_name or '', desc)
+            return _registry.clean_and_normalize(self.client_name or '', desc)
 
         def agg(txns):
             """Aggregate transactions by vendor — same pattern as BofA parser."""
@@ -406,6 +409,7 @@ class BMOCreditCardParser(StatementParser):
         self.credits = []
         self.charges = []
         self.statement_period = ''
+        self.closing_date = None
 
         if pdf_path:
             self.text = self._extract_text()
@@ -434,15 +438,14 @@ class BMOCreditCardParser(StatementParser):
             doc = fitz.open(self.pdf_path)
             pages = []
             for page in doc:
-                mat = fitz.Matrix(1.0, 1.0)
+                zoom = zoom_for_target_width(page, target_width=3200, max_zoom=6.0)
+                mat = fitz.Matrix(zoom, zoom)
                 pix = page.get_pixmap(matrix=mat)
                 img = Image.frombytes('RGB', [pix.width, pix.height], pix.samples)
-                if img.width > 2000:
-                    ratio = 2000 / img.width
-                    img = img.resize((2000, int(img.height * ratio)), Image.LANCZOS)
                 pages.append(pytesseract.image_to_string(img))
             doc.close()
             self._ocr_text = '\n'.join(pages)
+            self._used_ocr_fallback = True
             return self._ocr_text
         except Exception:
             return ''
@@ -501,23 +504,63 @@ class BMOCreditCardParser(StatementParser):
 
         for line in lines:
             upper = line.upper()
+            # Anchored to the text AFTER the keyword, taking the FIRST amount
+            # that follows — not amounts[-1] on the whole line. OCR commonly
+            # collapses this statement's two-column summary onto one line
+            # (e.g. "Previous Balance $821.45 Credit Limit $60,000.00"), and
+            # amounts[-1] silently grabbed the unrelated Credit Limit figure
+            # on a real fixture instead of the actual previous balance.
+            # A trailing "CR" marks a CREDIT balance (the cardholder is owed
+            # money, not the other way around) — negate it, or the standard
+            # equation (previous - payments - credits + charges = new) can
+            # never tie, even with perfectly-read transactions. E.g. a real
+            # statement: $238.36 CR previous, three small purchases, $203.39
+            # CR new — only ties as -238.36 + 34.97 = -203.39.
             if 'PREVIOUS BALANCE' in upper and self.previous_balance is None:
-                amounts = re.findall(r'\$?([\d,]+\.\d{2})', line)
-                if amounts:
-                    self.previous_balance = Decimal(amounts[-1].replace(',', ''))
+                idx = upper.index('PREVIOUS BALANCE') + len('PREVIOUS BALANCE')
+                m = re.search(r'\$?([\d,]+\.\d{2})\s*(\bCR\b)?', line[idx:], re.IGNORECASE)
+                if m:
+                    amt = Decimal(m.group(1).replace(',', ''))
+                    self.previous_balance = -amt if m.group(2) else amt
             if 'NEW BALANCE' in upper and self.new_balance is None:
-                amounts = re.findall(r'\$?([\d,]+\.\d{2})', line)
-                if amounts:
-                    self.new_balance = Decimal(amounts[-1].replace(',', ''))
-            if 'STATEMENT CLOSE DATE' in upper or 'STATEMENT PERIOD' in upper:
+                idx = upper.index('NEW BALANCE') + len('NEW BALANCE')
+                m = re.search(r'\$?([\d,]+\.\d{2})\s*(\bCR\b)?', line[idx:], re.IGNORECASE)
+                if m:
+                    amt = Decimal(m.group(1).replace(',', ''))
+                    self.new_balance = -amt if m.group(2) else amt
+            # 'CLOSE DATE' alone (not 'STATEMENT CLOSE DATE') — tesseract
+            # commonly misreads "Statement" as "Staternent" (m -> rn is one
+            # of its most frequent confusions), which silently defeated the
+            # exact-substring check on a real fixture. 'CLOSE DATE' is a
+            # reliable enough anchor on its own for this statement layout.
+            if 'CLOSE DATE' in upper or 'STATEMENT PERIOD' in upper:
                 m = re.search(r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2},?\s+\d{4})',
                               line, re.IGNORECASE)
                 if m and not self.statement_period:
                     self.statement_period = m.group(1)
+                    # reconcile_comprehensive.py logs statement_end_date from
+                    # closing_date/statement_date — this class never set
+                    # either, so every BMO credit card reconciliation has
+                    # been logging a blank date (parsers/{bofa,citi,chase,
+                    # wells_fargo,usbank,capital_one,northern_trust,amex}.py
+                    # all set closing_date; bmo.py never did, for either
+                    # class in this file).
+                    if self.closing_date is None:
+                        for _fmt in ('%B %d, %Y', '%b %d, %Y', '%B %d %Y', '%b %d %Y'):
+                            try:
+                                self.closing_date = datetime.strptime(
+                                    self.statement_period, _fmt).strftime('%m/%d/%y')
+                                break
+                            except ValueError:
+                                continue
 
         # Transaction rows: MM/DD  MM/DD  description  [ref]  amount [CR]
+        # \s+ (not \s{2,}) before the amount — real OCR spacing between the
+        # description/reference-number blob and the trailing amount doesn't
+        # reliably produce 2+ spaces; requiring that silently dropped 3 of 4
+        # real transaction rows on an actual fixture.
         txn_re = re.compile(
-            r'^(\d{2}/\d{2})\s+(\d{2}/\d{2})\s+(.+?)\s{2,}([\d,]+\.\d{2})\s*(CR)?\s*$'
+            r'^(\d{2}/\d{2})\s+(\d{2}/\d{2})\s+(.+?)\s+([\d,]+\.\d{2})\s*(CR)?\s*$'
         )
         for line in lines:
             m = txn_re.match(line.strip())
@@ -539,7 +582,7 @@ class BMOCreditCardParser(StatementParser):
 
     def generate_report(self, check_payee_map=None, check_date_map=None):
         def norm(v):
-            return _registry.normalize_vendor(self.client_name or '', v)
+            return _registry.clean_and_normalize(self.client_name or '', v)
 
         def agg(txns, key='vendor'):
             totals = defaultdict(lambda: {'amount': Decimal('0'), 'count': 0, 'date': ''})

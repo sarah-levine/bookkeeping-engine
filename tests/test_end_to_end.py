@@ -63,13 +63,19 @@ def test_router_matches_manifest():
     detect_statement_type, because one PDF can legitimately map to several
     account types — e.g. a bundled CitiBusiness statement reconciled as both
     checking and savings. The manifest format must be among the routed types.
+
+    Entries with expected_router_failure: true are skipped — these are
+    fixtures deliberately kept *because* they defeat auto-detection (e.g. a
+    phone photo too low-resolution for OCR to read the header text no matter
+    how much it's upscaled), specifically to test the --statement-type manual
+    override path (reconcile_comprehensive.py) rather than the router.
     """
     try:
         from reconcile_comprehensive import split_combined_pdf
     except ImportError as e:
         raise unittest.SkipTest(f"reconcile_comprehensive unavailable: {e}")
 
-    entries = _bank_fixtures()
+    entries = [e for e in _bank_fixtures() if not e.get("expected_router_failure")]
     if not entries:
         raise unittest.SkipTest("no bank fixtures configured")
 

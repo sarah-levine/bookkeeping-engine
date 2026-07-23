@@ -83,10 +83,10 @@ class WellsFargoCreditSyntheticPipelineTest(unittest.TestCase):
         p = self._parser()
         p.parse()
         self.assertEqual(len(p.credits), 1)
-        # No client config -> normalize_vendor()'s only effect is .strip()
-        # (see StatementParser.normalize_vendor's fallback), so this also
-        # confirms the call happens at all, not just that text is unchanged.
-        self.assertEqual(p.credits[0]['description'], 'CONTOSO CASH BACK CREDIT')
+        # No client config, no vendor_rule match -> falls back to the
+        # generic auto-cleaner (title-casing here; no digits/location to
+        # strip), confirming normalize_vendor() actually gets called.
+        self.assertEqual(p.credits[0]['description'], 'Contoso Cash Back Credit')
         self.assertEqual(p.credits[0]['amount'], _d('45.00'))
 
     def test_charges_stay_unnormalized_at_parse_time(self):

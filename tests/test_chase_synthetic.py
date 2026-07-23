@@ -132,8 +132,8 @@ class ChaseSyntheticPipelineTest(unittest.TestCase):
         report = p.generate_report()
         self.assertIn('Balance verification: PASSED', report)
         self.assertIn('FINANCE CHARGES', report)
-        self.assertIn('CONTOSO WIDGETS INC', report)
-        self.assertIn('INTEREST CHARGE ON PURCHASES', report)
+        self.assertIn('Contoso Widgets Inc', report)
+        self.assertIn('Interest Charge On Purchases', report)
 
 
 if __name__ == "__main__":

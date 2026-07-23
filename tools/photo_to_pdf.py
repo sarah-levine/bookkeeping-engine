@@ -14,10 +14,17 @@ statement bank-type detection (reconcile_comprehensive.detect_statement_type)
 and the Vision/OCR parsing fallback both expect right-side-up text, and
 phone photos of paper statements commonly aren't.
 
+Multiple photos (e.g. each page of a multi-page statement, photographed
+separately) can be merged into one ordered multi-page PDF:
+
+    python3 tools/photo_to_pdf.py <page1> <page2> [<page3> ...] --merge output.pdf
+
 Usage:
     python3 tools/photo_to_pdf.py <photo> [output.pdf]
+    python3 tools/photo_to_pdf.py <page1> <page2> ... --merge output.pdf
 
-If output.pdf is omitted, writes <photo-stem>.pdf next to the input file.
+If output.pdf is omitted (single-photo form), writes <photo-stem>.pdf next
+to the input file.
 """
 import shutil
 import subprocess
@@ -66,7 +73,10 @@ def _upright(img: Image.Image) -> Image.Image:
     return img.rotate(best_angle, expand=True)
 
 
-def photo_to_pdf(photo_path: Path, pdf_path: Path) -> None:
+def _load_upright_image(photo_path: Path) -> Image.Image:
+    """Open `photo_path` (converting HEIC via sips if needed) and return it
+    rotated upright. Shared by both the single-photo and multi-photo (merge)
+    paths."""
     try:
         img = Image.open(photo_path).convert("RGB")
     except UnidentifiedImageError:
@@ -84,21 +94,83 @@ def photo_to_pdf(photo_path: Path, pdf_path: Path) -> None:
         img = Image.open(tmp_png_path).convert("RGB")
         Path(tmp_png_path).unlink()
 
-    img = _upright(img)
-    img.save(pdf_path)
+    return _upright(img)
+
+
+def _save_with_sane_resolution(img: Image.Image, pdf_path: Path) -> None:
+    # Pillow defaults to 72 DPI when saving as PDF if no resolution is given,
+    # which treats every pixel as a full point (1/72in). For a real phone
+    # photo (thousands of px wide) that claims a PDF page tens of inches
+    # across — e.g. a 5712x4284 photo becomes a "59.5x79.3 inch" page. When
+    # extractors/vision_helper.py then renders that page at a fixed 200 DPI
+    # for the Vision API, the compounded size (~12000x16000px) blows past
+    # the API's request-size limit (confirmed live: 413 request_too_large).
+    # Assume these are standard US Letter statements and derive a resolution
+    # from actual pixel count instead, so the PDF always claims a sane
+    # physical page size regardless of source resolution.
+    short_side_in = 8.5  # portrait Letter width; used as the short side either way
+    resolution = min(img.width, img.height) / short_side_in
+    img.save(pdf_path, resolution=resolution)
+
+
+def photo_to_pdf(photo_path: Path, pdf_path: Path) -> None:
+    img = _load_upright_image(photo_path)
+    _save_with_sane_resolution(img, pdf_path)
+
+
+def photos_to_pdf(photo_paths: list[Path], pdf_path: Path) -> None:
+    """Merge multiple photos (e.g. each page of a multi-page statement,
+    photographed separately) into one ordered multi-page PDF. Each photo
+    goes through the same prep as photo_to_pdf() (HEIC conversion, upright
+    rotation, sane-resolution PDF encoding) before being appended in the
+    order given.
+
+    Uses fitz (PyMuPDF) rather than pypdf — pypdf isn't a guaranteed
+    dependency in this environment (not in requirements.txt; reconcile_
+    comprehensive.py's own pypdf usage already has an ImportError fallback
+    for exactly this reason), while fitz is used throughout this codebase's
+    OCR paths and is always available.
+    """
+    import fitz
+    merged = fitz.open()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i, photo_path in enumerate(photo_paths):
+            img = _load_upright_image(photo_path)
+            page_pdf = Path(tmpdir) / f"page_{i}.pdf"
+            _save_with_sane_resolution(img, page_pdf)
+            with fitz.open(page_pdf) as page_doc:
+                merged.insert_pdf(page_doc)
+    merged.save(pdf_path)
+    merged.close()
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
+    args = sys.argv[1:]
+    if not args:
         print(__doc__)
         sys.exit(1)
 
-    photo_path = Path(sys.argv[1])
+    if "--merge" in args:
+        idx = args.index("--merge")
+        if idx + 1 >= len(args) or idx == 0:
+            print("error: --merge requires photo(s) before it and an output path after it")
+            sys.exit(1)
+        photo_paths = [Path(p) for p in args[:idx]]
+        pdf_path = Path(args[idx + 1])
+        for p in photo_paths:
+            if not p.exists():
+                print(f"error: {p} not found")
+                sys.exit(1)
+        photos_to_pdf(photo_paths, pdf_path)
+        print(f"wrote {pdf_path} ({len(photo_paths)} pages)")
+        return
+
+    photo_path = Path(args[0])
     if not photo_path.exists():
         print(f"error: {photo_path} not found")
         sys.exit(1)
 
-    pdf_path = Path(sys.argv[2]) if len(sys.argv) > 2 else photo_path.with_suffix(".pdf")
+    pdf_path = Path(args[1]) if len(args) > 1 else photo_path.with_suffix(".pdf")
 
     photo_to_pdf(photo_path, pdf_path)
     print(f"wrote {pdf_path}")

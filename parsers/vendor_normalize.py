@@ -31,6 +31,13 @@ US_STATE_CODES = {
     'WV', 'WY', 'DC',
 }
 
+# State codes that collide with common business-name words/abbreviations
+# (CO = Colorado or "Company", OR = Oregon or "or", IN = Indiana or
+# "Inc"-adjacent, ME = Maine or "me", ...) — stripping these needs extra
+# evidence (a plausible city + digit/reference-number boundary) beyond just
+# "last word matches a state code". See auto_clean_vendor()'s step 1 and 6b.
+_AMBIGUOUS_STATE_CODES = {'CO', 'OR', 'IN', 'ME', 'HI', 'OK', 'MS', 'PA', 'ID'}
+
 # Raw descriptions that aren't real vendors — don't prompt to name these.
 VENDOR_PROMPT_BLOCKLIST = {
     'STATEMENT CREDIT',
@@ -80,17 +87,35 @@ def auto_clean_vendor(raw, strip_suffixes=None):
     #    name — otherwise we can't tell city words from vendor-name words, so
     #    e.g. "MDC*PARKING LOT NJ" keeps "PARKING LOT". No city names are
     #    hardcoded here, so this stays public-repo safe.
+    #
+    #    A handful of state codes collide with common business-name
+    #    abbreviations/words (CO = Colorado or "Company", OR = Oregon or
+    #    "or", IN = Indiana or "Inc"-adjacent, ME = Maine or "me", ...) — a
+    #    real vendor like "Contoso Widget Co" must not lose "Co" just
+    #    because it matches Colorado's code. For those specifically, require
+    #    the same city+digit-boundary evidence before dropping the state
+    #    code itself, not just the city; unambiguous codes (NJ, TX, CA, ...)
+    #    keep the original unconditional strip so later steps (phone/URL/
+    #    store-number stripping, all anchored on the string's true end)
+    #    still see the right boundary.
     parts = s.split()
     if len(parts) > 1 and parts[-1].upper() in US_STATE_CODES:
-        parts = parts[:-1]  # drop the state code
+        ambiguous = parts[-1].upper() in _AMBIGUOUS_STATE_CODES
+        candidate = parts[:-1]  # tentatively drop the state code
         city = []
-        while (len(parts) - len(city)) > 1 and len(city) < 3 \
-                and parts[-1 - len(city)].isalpha():
-            city.append(parts[-1 - len(city)])
-        if city:
-            before = parts[len(parts) - len(city) - 1]
-            if any(ch.isdigit() for ch in before) or '#' in before:
-                parts = parts[:len(parts) - len(city)]
+        while (len(candidate) - len(city)) > 1 and len(city) < 3 \
+                and candidate[-1 - len(city)].isalpha():
+            city.append(candidate[-1 - len(city)])
+        has_boundary = bool(city) and (
+            any(ch.isdigit() for ch in candidate[len(candidate) - len(city) - 1])
+            or '#' in candidate[len(candidate) - len(city) - 1]
+        )
+        if not ambiguous:
+            parts = candidate  # unambiguous code: drop it regardless
+            if has_boundary:
+                parts = candidate[:len(candidate) - len(city)]
+        elif has_boundary:
+            parts = candidate[:len(candidate) - len(city)]
     s = ' '.join(parts)
 
     # 2) Strip trailing phone numbers (800-XXX-XXXX, 8XX-XXX-XXXX, numeric runs)
@@ -118,8 +143,16 @@ def auto_clean_vendor(raw, strip_suffixes=None):
 
     # 6b) Re-strip a trailing state code exposed by store-number removal, e.g.
     #     "SALONCENTRIC CA ST5920 SAN JOSE CA" -> "SALONCENTRIC CA" -> drop CA.
+    #     No city/digit-boundary evidence gates this (unlike step 1) — it's a
+    #     context-free "last word looks like a state code" check, so it must
+    #     skip codes that collide with common business-name words/abbreviations
+    #     (CO = Colorado or "Company"; OR = Oregon or "or"; IN = Indiana or
+    #     "Inc"-ish; ME = Maine or "me"; HI = Hawaii or "hi"). A real vendor
+    #     like "Contoso Widget Co" must not lose "Co" here. Unambiguous codes
+    #     (NJ, TX, CA, ...) are unaffected.
     tail = s.split()
-    if len(tail) > 1 and tail[-1].upper() in US_STATE_CODES:
+    if (len(tail) > 1 and tail[-1].upper() in US_STATE_CODES
+            and tail[-1].upper() not in _AMBIGUOUS_STATE_CODES):
         s = ' '.join(tail[:-1])
 
     # 7) Strip leading payment-processor prefixes (SP, TST*, SQ *, MDC*, etc.)

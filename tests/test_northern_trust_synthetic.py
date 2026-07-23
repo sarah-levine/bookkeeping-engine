@@ -124,24 +124,24 @@ class NorthernTrustSyntheticPipelineTest(unittest.TestCase):
         p.parse()
         self.assertEqual(len(p.credit_card_payments), 2)
         vendors = {c['vendor'] for c in p.credit_card_payments}
-        self.assertIn('AMERICAN EXPRESS ACH PMT', vendors)
-        self.assertIn('CONTOSO CARD ONLINE PMT', vendors)
+        self.assertIn('American Express Ach Pmt', vendors)
+        self.assertIn('Contoso Card Online Pmt', vendors)
         amounts = {c['vendor']: c['amount'] for c in p.credit_card_payments}
-        self.assertEqual(amounts['AMERICAN EXPRESS ACH PMT'], _d(-3900))
-        self.assertEqual(amounts['CONTOSO CARD ONLINE PMT'], _d(-500))
+        self.assertEqual(amounts['American Express Ach Pmt'], _d(-3900))
+        self.assertEqual(amounts['Contoso Card Online Pmt'], _d(-500))
 
     def test_plain_debit_not_misclassified(self):
         p = self._parser()
         p.parse()
         debit_vendors = {d['vendor'] for d in p.debits}
-        self.assertIn('CONTOSO WIDGETS INC', debit_vendors)
-        self.assertNotIn('CONTOSO WIDGETS INC', {c['vendor'] for c in p.credit_card_payments})
+        self.assertIn('Contoso Widgets Inc', debit_vendors)
+        self.assertNotIn('Contoso Widgets Inc', {c['vendor'] for c in p.credit_card_payments})
 
     def test_plain_credit_classified(self):
         p = self._parser()
         p.parse()
         self.assertEqual(len(p.credits), 1)
-        self.assertEqual(p.credits[0]['vendor'], 'CONTOSO CUSTOMER PAYMENT')
+        self.assertEqual(p.credits[0]['vendor'], 'Contoso Customer Payment')
         self.assertEqual(p.credits[0]['amount'], _d(250))
 
     def test_square_position_mapping_applied_to_first_match_only(self):
@@ -154,8 +154,9 @@ class NorthernTrustSyntheticPipelineTest(unittest.TestCase):
         self.assertEqual(mapped['memo'], 'Weekly Square settlement')
         self.assertEqual(mapped['amount'], _d(-55))
         # Second Square transaction has no position-2 mapping -> falls through
-        # as a plain debit, vendor text unchanged.
-        self.assertIn('Square Inc SQ250310 T9ZQXF', debit_vendors)
+        # as a plain debit, vendor text unchanged (mixed-case tokens are left
+        # as-is by the generic auto-cleaner's title-casing).
+        self.assertIn('Square Inc Sq250310 T9zqxf', debit_vendors)
         # Neither Square transaction is a CC payment.
         self.assertFalse(any('Square' in c['vendor'] for c in p.credit_card_payments))
 

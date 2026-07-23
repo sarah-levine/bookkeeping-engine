@@ -111,7 +111,15 @@ Return a SINGLE valid JSON object — no markdown, no commentary, no code fences
 }
 
 CRITICAL RULES:
-1. All amounts are POSITIVE numbers. Payments and credits are tracked in their own arrays — do not use negative numbers.
+1. Transaction amounts (inside "payments"/"credits"/"charges") are always
+   POSITIVE numbers — sign is implied by which array they're in, do not use
+   negative numbers there.
+   EXCEPTION for previous_balance/new_balance specifically: if the statement
+   prints "CR" directly after the dollar amount (e.g. "$238.36 CR"), that
+   marks a CREDIT balance (the cardholder is owed money, not the other way
+   around) — use a NEGATIVE number for that field. Without this, the balance
+   equation in rule 5 can never tie for a statement in a credit state, even
+   with every transaction read correctly.
 2. Use the POST DATE for each transaction (the second date column if there are two), formatted MM/DD/YY with a 2-digit year inferred from the billing period end date.
 3. Vendor names: copy them EXACTLY as printed, including reference numbers and city codes (e.g. "AMAZON MKTPL*B51AOOK11 Amzn.com/billWA", "APPLE.COM/BILL 866-712-7753 CA"). Downstream code will normalize them — do not pre-clean.
 4. Distinguish transaction types:
@@ -120,6 +128,7 @@ CRITICAL RULES:
    - "charges" array: all positive purchase charges.
 5. The balance equation MUST tie to the penny:
    previous_balance + sum(charges) - total_payments - sum(credits) == new_balance
+   (previous_balance and/or new_balance negative if either is a CR/credit balance — see rule 1.)
 6. Ignore handwritten margin notes — they are NOT part of the statement data.
 7. Do NOT invent transactions. Only include what you can clearly read.
 
@@ -162,6 +171,39 @@ def _strip_code_fences(s: str) -> str:
     return s
 
 
+def _parse_json_response(raw: str) -> dict:
+    """Parse `raw` as JSON, tolerating a model that second-guesses itself
+    mid-response — e.g. outputs one JSON object, then prose like "Wait, let
+    me recalculate..." followed by a corrected second JSON object. Plain
+    json.loads() chokes on the trailing content ("Extra data") in that case.
+    Scans for every top-level JSON object in the text and returns the LAST
+    one that parses, since a self-correction is the model's final answer.
+    Confirmed live: this exact pattern hit a real BMO statement extraction.
+    """
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+    idx = 0
+    last_obj = None
+    while idx < len(raw):
+        brace = raw.find("{", idx)
+        if brace == -1:
+            break
+        try:
+            obj, end = decoder.raw_decode(raw, brace)
+            last_obj = obj
+            idx = end
+        except json.JSONDecodeError:
+            idx = brace + 1
+
+    if last_obj is None:
+        raise json.JSONDecodeError("No valid JSON object found", raw, 0)
+    return last_obj
+
+
 def extract(pdf_path: str) -> dict:
     """
     Extract parser-native data from a scanned PDF via Claude Vision.
@@ -184,7 +226,7 @@ def extract(pdf_path: str) -> dict:
     raw = _strip_code_fences(raw)
 
     try:
-        data = json.loads(raw)
+        data = _parse_json_response(raw)
     except json.JSONDecodeError as e:
         raise RuntimeError(
             f"Vision returned non-JSON output: {e}\nFirst 500 chars: {raw[:500]}"
@@ -318,7 +360,7 @@ def extract_check_payees(image_bytes_list: list[bytes]) -> list[str]:
     raw = _strip_code_fences(raw)
 
     try:
-        data = json.loads(raw)
+        data = _parse_json_response(raw)
     except json.JSONDecodeError as e:
         raise RuntimeError(
             f"Vision returned non-JSON output: {e}\nFirst 500 chars: {raw[:500]}"
