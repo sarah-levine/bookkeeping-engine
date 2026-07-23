@@ -125,6 +125,61 @@ def get_tracker_date(recon_dates, client_name, client_keys, acct):
     return "—"
 
 
+def acct_group(key):
+    """Classify an account key by closing-cycle shape — Bank Accounts/Payroll
+    close on the last day of the month (EOM); Credit Cards close mid-month on
+    a fixed day. Shared by both the tracker-card badges and the overdue-
+    accounts section so "current vs. overdue" is judged the same way
+    everywhere."""
+    k = key.lower()
+    if k == "payroll":
+        return "Payroll"
+    if "checking" in k or "savings" in k:
+        return "Bank Accounts"
+    # Known bank account keys that don't contain "checking"/"savings"
+    if k in ("northern",):
+        return "Bank Accounts"
+    cc_patterns = ["credit", "chase_ink", "chase_sapphire", "chase_united",
+                   "citi_visa", "citi_costco", "bmo_credit", "wells_fargo_credit",
+                   "wf_visa"]
+    if any(p in k for p in cc_patterns):
+        return "Credit Cards"
+    if "amex" in k and "checking" not in k:
+        return "Credit Cards"
+    # bmo_* accounts that aren't checking/savings are personal CC cards
+    if k.startswith("bmo_"):
+        return "Credit Cards"
+    return "Other"
+
+
+def is_reconciliation_current(last_date, group, today_date):
+    """True if `last_date` (the most recently reconciled statement's end
+    date) still covers the most recently CLOSED period for `group`, as of
+    `today_date`.
+
+    EOM accounts (Bank Accounts/Payroll) close on the last day of the
+    month, so until this month's own EOM passes, last month's statement is
+    still the most recently closed period — reconciling it keeps the
+    account "current" for all of this month, not just until the 1st.
+    CC accounts close mid-month on a fixed day, so the next closing date is
+    `last_date` + 1 month (same day). Without this distinction, an EOM
+    account reconciled through last month's close was flagged "overdue"
+    for the new month the instant the calendar month ticked over — days or
+    weeks before that new month's statement period had even ended.
+    """
+    if last_date is None:
+        return False
+    if group in ("Bank Accounts", "Payroll"):
+        prev = today_date.replace(day=1) - timedelta(days=1)
+        return (last_date.year, last_date.month) >= (prev.year, prev.month)
+    import calendar
+    next_yr  = last_date.year + (last_date.month == 12)
+    next_mo  = (last_date.month % 12) + 1
+    next_day = min(last_date.day, calendar.monthrange(next_yr, next_mo)[1])
+    next_close = date(next_yr, next_mo, next_day)
+    return today_date <= next_close + timedelta(days=1)
+
+
 
 CC_BLOCKING_RULES = _DIGEST_CFG.get("cc_blocking_rules", {})
 
@@ -355,27 +410,7 @@ def build_html(recon_entries, manual_entries, log_date):
     # ── Build tracker HTML — row-per-account card layout ──
     today_date = date.today()
 
-    def _acct_group(key):
-        k = key.lower()
-        if k == "payroll":
-            return "Payroll"
-        if "checking" in k or "savings" in k:
-            return "Bank Accounts"
-        # Known bank account keys that don't contain "checking"/"savings"
-        if k in ("northern",):
-            return "Bank Accounts"
-        cc_patterns = ["credit", "chase_ink", "chase_sapphire", "chase_united",
-                       "citi_visa", "citi_costco", "bmo_credit", "wells_fargo_credit",
-                       "wf_visa"]
-        if any(p in k for p in cc_patterns):
-            return "Credit Cards"
-        if "amex" in k and "checking" not in k:
-            return "Credit Cards"
-        # bmo_* accounts that aren't checking/savings are personal CC cards
-        if k.startswith("bmo_"):
-            return "Credit Cards"
-        return "Other"
-
+    _acct_group = acct_group
     _GROUP_ORDER = ["Credit Cards", "Bank Accounts", "Payroll", "Other"]
 
     def _tracker_badge(last_date_str, is_client_provided, group=""):
@@ -386,24 +421,8 @@ def build_html(recon_entries, manual_entries, log_date):
         d = parse_date(last_date_str)
         if d is None:
             return "⚫ Never", "#f3f4f6", "#6b7280"
-        # EOM accounts (bank accounts, payroll) close on the last day of the month.
-        # Until EOM passes, the prior month's statement is the most recently closed
-        # period — so "current" means reconciled in the previous month or later.
-        # CC accounts close mid-month on a fixed day. Overdue only once today is
-        # strictly past the next closing date (last_date + 1 month, same day).
-        import calendar
-        if group in ("Bank Accounts", "Payroll"):
-            prev = today_date.replace(day=1) - timedelta(days=1)
-            if (d.year, d.month) >= (prev.year, prev.month):
-                return "✅ Current", "#dcfce7", "#166534"
-        else:
-            next_yr  = d.year + (d.month == 12)
-            next_mo  = (d.month % 12) + 1
-            next_day = min(d.day, calendar.monthrange(next_yr, next_mo)[1])
-            from datetime import date as _date
-            next_close = _date(next_yr, next_mo, next_day)
-            if today_date <= next_close + timedelta(days=1):
-                return "✅ Current", "#dcfce7", "#166534"
+        if is_reconciliation_current(d, group, today_date):
+            return "✅ Current", "#dcfce7", "#166534"
         return "🔴 Overdue", "#fce7f3", "#9d174d"
 
     tracker_cards = ""
@@ -782,7 +801,8 @@ def build_cc_due_email(due_items, today=None):
                     d = parse_date(val)
                     if d and (last_date is None or d > last_date):
                         last_date = d
-            if last_date is None or (last_date.year, last_date.month) < (today.year, today.month):
+            group = acct_group(acct["key"])
+            if not is_reconciliation_current(last_date, group, today):
                 last_str = last_date.strftime("%m/%d/%y") if last_date else "Never"
                 overdue_by_client.setdefault(client_name, []).append({
                     "label":     acct["label"],
