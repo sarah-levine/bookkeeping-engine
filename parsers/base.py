@@ -540,7 +540,16 @@ class StatementParser:
         return None
 
     def normalize_vendor(self, description):
-        result = _registry.normalize_vendor(self.client_name or '', description)
+        # clean_and_normalize (not the bare normalize_vendor) — it also
+        # applies the client's description_strip_suffixes before rule-
+        # matching. Despite vendor_normalize.py's docstring claiming this
+        # two-tier system is "called by every parser", only
+        # WellsFargoCheckingParser (which overrides this method with its own
+        # _normalize()) actually applied description_strip_suffixes; every
+        # other parser routed through this bare method and silently skipped
+        # that tier. Confirmed live: a real client's description_strip_
+        # suffixes entries had no effect at all until this was fixed.
+        result = _registry.clean_and_normalize(self.client_name or '', description)
         if result != description:
             return result
         return description.strip()
