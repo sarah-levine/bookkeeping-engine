@@ -84,46 +84,122 @@ class IsReconciliationCurrentTest(unittest.TestCase):
         self.assertFalse(is_reconciliation_current(last_date, "Credit Cards", self.today))
 
 
+def _needs_attention_section(html):
+    """Slice out just the "Needs Attention" section's HTML. build_digest_email
+    always renders the full Reconciliation Tracker grid from the real,
+    live reconciliation_log.csv/TRACKER too (unrelated to the synthetic
+    due_items/overdue_by_client under test), so assertions must not scan
+    the whole html string — a real overdue/CC-current badge elsewhere in
+    the live tracker grid would make an assertion pass or fail for the
+    wrong reason. Returns "" if the section didn't render (self-closing
+    HTML comments bound it on both sides regardless of content)."""
+    start = html.find("<!-- Needs attention:")
+    end = html.find("<!-- Manual notes -->")
+    return html[start:end] if start != -1 and end != -1 else ""
+
+
 class BuildDigestEmailCombinedTest(unittest.TestCase):
     """The old separate --cc-due invocation is gone — one script run now
-    always computes both trigger conditions and builds one email."""
+    always computes both trigger conditions and builds one email. Uses a
+    real TRACKER client name — the merged "Needs Attention" section only
+    renders rows for clients build_digest_email finds in TRACKER (since
+    get_cc_due_today()/compute_overdue_accounts() are themselves always
+    built by iterating TRACKER, a synthetic/non-tracked client name would
+    silently produce no rows, which caught a bug in this exact test file
+    while implementing the merge)."""
 
     def setUp(self):
+        from send_morning_digest import TRACKER
+        self.client = TRACKER[0]["client"]
         self.today = date(2026, 7, 23)
         self.due_items = [{
-            "client": "Acme Appliance", "cc_key": "bofa_credit",
-            "cc_label": "BofA Credit Card", "closing_day": 23,
+            "client": self.client, "cc_key": "bofa_credit",
+            "cc_label": "BofA Credit Card", "closing_day": 23, "last_date": "06/23/26",
             "ready_accounts": ["BofA Checking", "BofA Savings"],
         }]
-        self.overdue = {"Acme Appliance": [{"label": "Chase Sapphire", "last_date": "06/06/26"}]}
+        self.overdue = {self.client: [{"label": "Zzz Test Card", "last_date": "06/06/26"}]}
 
-    def test_both_action_items_present_combines_subject_and_sections(self):
+    def test_both_action_items_present_combines_subject_and_section(self):
         subject, html = build_digest_email([], [], "2026-07-22", self.due_items,
                                             self.overdue, self.today)
+        section = _needs_attention_section(html)
         self.assertIn("CC Due Today", subject)
         self.assertIn("Past Due", subject)
-        self.assertIn("CC Statements Due Today", html)
-        self.assertIn("Overdue —", html)
+        self.assertIn("📅 Closes Today", section)
+        self.assertIn("🔴 Overdue", section)
+        self.assertIn("BofA Credit Card", section)
+        self.assertIn("Zzz Test Card", section)
 
-    def test_only_cc_due_omits_overdue_section(self):
+    def test_same_account_overdue_and_closing_today_gets_both_badges_one_row(self):
+        overdue = {self.client: [{"label": "BofA Credit Card", "last_date": "06/23/26"}]}
+        subject, html = build_digest_email([], [], "2026-07-22", self.due_items,
+                                            overdue, self.today)
+        section = _needs_attention_section(html)
+        # One row for BofA Credit Card carrying both badges, not two rows.
+        self.assertEqual(section.count("BofA Credit Card"), 1)
+        self.assertIn("📅 Closes Today", section)
+        self.assertIn("🔴 Overdue", section)
+
+    def test_cc_due_shows_unlocks_note(self):
         subject, html = build_digest_email([], [], "2026-07-22", self.due_items, {}, self.today)
+        self.assertIn("unlocks BofA Checking, BofA Savings", _needs_attention_section(html))
+
+    def test_only_cc_due_omits_overdue_badge(self):
+        subject, html = build_digest_email([], [], "2026-07-22", self.due_items, {}, self.today)
+        section = _needs_attention_section(html)
         self.assertIn("CC Due Today", subject)
         self.assertNotIn("Past Due", subject)
-        self.assertIn("CC Statements Due Today", html)
-        self.assertNotIn("Overdue —", html)
+        self.assertIn("📅 Closes Today", section)
+        self.assertNotIn("🔴 Overdue", section)
 
-    def test_only_overdue_omits_cc_due_section(self):
+    def test_only_overdue_omits_cc_due_badge(self):
         subject, html = build_digest_email([], [], "2026-07-22", [], self.overdue, self.today)
+        section = _needs_attention_section(html)
         self.assertIn("Past Due", subject)
         self.assertNotIn("CC Due Today", subject)
-        self.assertNotIn("CC Statements Due Today", html)
-        self.assertIn("Overdue —", html)
+        self.assertIn("🔴 Overdue", section)
+        self.assertNotIn("📅 Closes Today", section)
 
     def test_no_action_items_falls_back_to_plain_digest_subject(self):
         subject, html = build_digest_email([], [], "2026-07-22", [], {}, self.today)
         self.assertEqual(subject, "Reconciliation Digest — July 22, 2026")
-        self.assertNotIn("CC Statements Due Today", html)
-        self.assertNotIn("Overdue —", html)
+        self.assertNotIn("🔴 Needs Attention", _needs_attention_section(html))
+
+
+class ManualNotesInlineInTrackerTest(unittest.TestCase):
+    """Manual notes render inline inside their client's tracker card instead
+    of a separate standalone section — issue entries never carry a real
+    account_type, so a note can only be placed at the client level, not on
+    a specific account row. A note whose client doesn't match any tracker
+    card (a display_name gap, or the "General" fallback) must still be
+    visible somewhere rather than silently dropped."""
+
+    def setUp(self):
+        from send_morning_digest import TRACKER
+        self.client = TRACKER[0]["client"]
+        self.today = date(2026, 7, 23)
+
+    def test_note_renders_inside_its_clients_tracker_card(self):
+        manual_entries = [{"client": self.client, "issue": "Zzz test issue",
+                            "run_time": "2026-07-22T08:00:00"}]
+        subject, html = build_digest_email([], manual_entries, "2026-07-22", [], {}, self.today)
+        card_start = html.find(f">{self.client}<")
+        next_card = html.find('background:#1e3a5f', card_start + 1)
+        card_html = html[card_start:next_card if next_card != -1 else len(html)]
+        self.assertIn("Zzz test issue", card_html)
+
+    def test_no_standalone_manual_notes_section(self):
+        manual_entries = [{"client": self.client, "issue": "Zzz test issue",
+                            "run_time": "2026-07-22T08:00:00"}]
+        subject, html = build_digest_email([], manual_entries, "2026-07-22", [], {}, self.today)
+        self.assertNotIn("⚠️ Manual Notes</div>", html)
+
+    def test_note_for_untracked_client_falls_back_to_other_notes_block(self):
+        manual_entries = [{"client": "Not A Real Tracked Client", "issue": "Zzz stray issue",
+                            "run_time": "2026-07-22T08:00:00"}]
+        subject, html = build_digest_email([], manual_entries, "2026-07-22", [], {}, self.today)
+        self.assertIn("⚠️ Other Notes", html)
+        self.assertIn("Zzz stray issue", html)
 
 
 if __name__ == "__main__":
