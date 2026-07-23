@@ -27,7 +27,14 @@ class SchemaRegistryParityTest(unittest.TestCase):
     def test_every_registered_key_is_in_the_schema_enum(self):
         schema_path = Path(__file__).parent.parent / "clients" / "_schema.json"
         schema = json.loads(schema_path.read_text())
-        enum = set(schema["properties"]["statement_types"]["items"]["enum"])
+        # statement_types.items is an anyOf: one branch is the flat enum of
+        # base parser keys, another is a pattern for per-cardholder variants
+        # (e.g. bmo_credit_<cardholder>) that never appear in the parser
+        # registry itself (registry.keys() only has base types — cardholder
+        # is a log-key override applied downstream, not a registered parser).
+        enum = set()
+        for branch in schema["properties"]["statement_types"]["items"]["anyOf"]:
+            enum |= set(branch.get("enum", []))
 
         registered = set(registry.keys())
         missing = registered - enum

@@ -23,6 +23,7 @@ Exit code 0 = clean, 1 = findings (or error). Tune by editing
 tools/pii_allowlist.txt — adding a token there is a conscious "this is safe"
 decision that shows up in code review.
 """
+import json
 import os
 import re
 import subprocess
@@ -73,6 +74,16 @@ TITLE_MULTI = re.compile(r"\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,}){1,4}\b")
 STOPWORDS = {"of", "and", "the", "to", "for", "in", "on", "a", "an", "with",
              "by", "or", "at", "as", "per", "via"}
 
+# Known-safe substrings stripped before the client-name blocklist's substring
+# check only (not the CAPS/Titlecase name scanners). "sarah-levine" is the
+# project owner's own GitHub identity, recurring in repo URLs — its surname
+# happens to collide with a real, different cardholder (Philip S Levine) in
+# a private client config, so "levine" alone must stay in the blocklist. A
+# blanket allowlist entry for "levine" would have hidden that real name;
+# scrubbing this exact compound phrase first keeps a bare "levine" (or
+# "Philip Levine") elsewhere still flagged.
+_BLOCKLIST_SAFE_SUBSTRINGS = {"sarah-levine"}
+
 
 def load_allowlist():
     allow = set()
@@ -122,11 +133,20 @@ def _load_client_blocklist():
     ALLCAPS-only name scanner.
     """
     blocklist = set()
-    clients_dir = os.environ.get("BOOKKEEPING_CLIENTS_DIR", "")
-    if not clients_dir:
+    # log_utils.get_clients_dir()'s full fallback chain (env var ->
+    # ~/.bookkeeping/clients -> repo-local ./clients/), not just a raw env
+    # var check. The raw check silently returned an empty blocklist —
+    # disabling this entire mechanism — whenever BOOKKEEPING_CLIENTS_DIR
+    # happened to be unset or wrong in the calling shell, even though the
+    # private clients dir was sitting right there at its default location.
+    # Confirmed live: this is exactly how real client/cardholder names
+    # slipped past pre-commit on a real branch.
+    try:
+        sys.path.insert(0, ROOT)
+        from log_utils import get_clients_dir
+        cd = get_clients_dir()
+    except Exception:
         return blocklist
-    import json, pathlib
-    cd = pathlib.Path(clients_dir)
     if not cd.exists():
         return blocklist
     skip = {"sheets_config.json", "sheets_credentials.json", "digest_config.json",
@@ -151,6 +171,18 @@ def _load_client_blocklist():
         # Add aliases
         for alias in cfg.get("aliases", []):
             for w in re.split(r"[\s&,.']+", alias):
+                if len(w) >= 4:
+                    blocklist.add(w.lower())
+        # Add cardholder names (real people, e.g. multiple named cardholders
+        # on one business credit card account) — only consumed elsewhere by
+        # parsers/amex.py's per-cardholder attribution, so populating this
+        # for a non-Amex client is inert for parsing and safe to use purely
+        # as a blocklist source. Unlike aliases, which drive client
+        # auto-detection, cardholder names shouldn't go in aliases (a
+        # person's first name showing up in an unrelated document could
+        # misattribute it to this client).
+        for cardholder in cfg.get("cardholders", []):
+            for w in re.split(r"[\s&,.']+", cardholder):
                 if len(w) >= 4:
                     blocklist.add(w.lower())
     # Remove common English words that would cause false positives.
@@ -191,6 +223,8 @@ def scan_file(path, allow, audit=False, client_blocklist=None):
             # Client-name blocklist: catch lowercase/underscore references
             if client_blocklist and name_scan:
                 line_lower = line.lower()
+                for safe in _BLOCKLIST_SAFE_SUBSTRINGS:
+                    line_lower = line_lower.replace(safe, "")
                 for blocked in client_blocklist:
                     if blocked in line_lower:
                         findings.append((lineno, "client?", blocked))
@@ -205,6 +239,8 @@ def scan_file(path, allow, audit=False, client_blocklist=None):
         # Client-name blocklist (audit mode too)
         if client_blocklist:
             line_lower = line.lower()
+            for safe in _BLOCKLIST_SAFE_SUBSTRINGS:
+                line_lower = line_lower.replace(safe, "")
             for blocked in client_blocklist:
                 if blocked in line_lower:
                     findings.append((lineno, "client?", blocked))

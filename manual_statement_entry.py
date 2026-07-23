@@ -143,7 +143,7 @@ def run(month_key=None, output_path=None, no_prompt=False):
     # account_type (optional, in the JSON entry) overrides stmt_type for the
     # LOG key only — stmt_type must stay the registry key for parser lookup
     # above, but the registry has no per-cardholder variants (e.g.
-    # 'bmo_credit_roger'), so without this override multiple cardholders on
+    # 'bmo_credit_<cardholder>'), so without this override multiple cardholders on
     # the same base format/date would collide on (client, account_type,
     # statement_end_date) and silently overwrite each other's log entry.
     # Same fix as --account-type in reconcile_comprehensive.py.

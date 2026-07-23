@@ -1237,7 +1237,7 @@ def main():
     if '--account-type' in sys.argv:
         _idx = sys.argv.index('--account-type')
         if _idx + 1 >= len(sys.argv):
-            print("Error: --account-type requires a value, e.g. --account-type bmo_credit_roger", file=sys.stderr)
+            print("Error: --account-type requires a value, e.g. --account-type bmo_credit_<cardholder>", file=sys.stderr)
             sys.exit(1)
         account_type_override = sys.argv[_idx + 1]
 
@@ -1429,7 +1429,7 @@ def main():
                 # all log writes." Without this guard, tests/smoke_all_
                 # fixtures.py's --dry-run runs against real fixtures write
                 # to production recon_log.json on every push — confirmed
-                # live: a bofa_checking_paintbox smoke-test run silently
+                # live: a bofa_checking fixture's smoke-test run silently
                 # bumped a resolved manual issue's run_time via this path.
                 if not dry_run:
                     try:
