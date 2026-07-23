@@ -263,7 +263,7 @@ class BMOCheckingParser(StatementParser):
         check_date_map  = check_date_map  or {}
 
         def norm(desc):
-            return _registry.normalize_vendor(self.client_name or '', desc)
+            return _registry.clean_and_normalize(self.client_name or '', desc)
 
         def agg(txns):
             """Aggregate transactions by vendor — same pattern as BofA parser."""
@@ -582,7 +582,7 @@ class BMOCreditCardParser(StatementParser):
 
     def generate_report(self, check_payee_map=None, check_date_map=None):
         def norm(v):
-            return _registry.normalize_vendor(self.client_name or '', v)
+            return _registry.clean_and_normalize(self.client_name or '', v)
 
         def agg(txns, key='vendor'):
             totals = defaultdict(lambda: {'amount': Decimal('0'), 'count': 0, 'date': ''})
