@@ -421,7 +421,7 @@ def get_client_notes(client: str, account_type: str) -> list[str]:
 
     Reads the ``reconciliation_notes`` dict from the client's JSON config.
     Lookup order:
-      1. Exact ``account_type`` key  (e.g. ``"bmo_credit_roger"``)
+      1. Exact ``account_type`` key  (e.g. ``"bmo_credit_<cardholder>"``)
       2. Category key derived from account_type:
            ``credit_cards``  — any type containing "credit" or "visa"
            ``checking``      — any type containing "checking"
@@ -544,7 +544,7 @@ def _ensure_acct_type_mapped(account_type: str) -> None:
         acct_map = cfg.setdefault("acct_type_map", {})
         if account_type in acct_map:
             return
-        # Derive tracker key: bmo_credit_roger → bmo_roger, etc.
+        # Derive tracker key: bmo_credit_<cardholder> → bmo_<cardholder>, etc.
         tracker_key = re.sub(r'^(bmo)_credit_', r'\1_', account_type)
         tracker_key = re.sub(r'^(bofa|chase|citi|wells_fargo|amex|usbank)_credit_', r'\1_', tracker_key)
         acct_map[account_type] = tracker_key

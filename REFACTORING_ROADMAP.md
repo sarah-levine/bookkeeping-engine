@@ -575,9 +575,9 @@ Findings:
 ### Status: Amex (credit card) migration complete — parsers/amex.py fully closed out (2026-07-14)
 
 `AmexStatementParser` migrated on `refactor/amex-statement-pipeline`, 3
-commits, byte-identical against all 4 real fixtures (`amex_duran`,
-`amex_fcba`, `amex_silicon_valley_west_annual_fee`,
-`amex_silicon_valley_west_late_fee` — the most of any parser in this
+commits, byte-identical against all 4 real fixtures (`amex_bravo`,
+`amex_charlie`, `amex_delta_west_annual_fee`,
+`amex_delta_west_late_fee` — the most of any parser in this
 rollout except Chase). With `AmexCheckingParser` (done in the entry above)
 also migrated, `parsers/amex.py` is now fully on the pipeline, same
 milestone as `parsers/wells_fargo.py` and `parsers/bofa.py`.
@@ -626,7 +626,7 @@ Findings:
   — logged above under "Open: Needs Root Cause Fix", preserved
   byte-identically by this migration since both passes still scan exactly
   the same lines they did before.
-- **All 3 real fixture clients (`duran`, `fcba`, `silicon valley west`)
+- **All 3 real fixture clients (`bravo`, `charlie`, `delta west`)
   happen to have cardholders configured** — none exercises the
   no-cardholders-configured fallback (`cardholder_pattern = None`,
   `_cardholder_inner = '(?!)'`). Added synthetic coverage for it
@@ -660,7 +660,7 @@ Findings:
 
 - **The real fixture provides almost no coverage of the transaction-
   extraction loop itself** — the inverse of every other migration in this
-  rollout. `citi_visa_costco_jojo` is OCR-garbled badly enough that no line
+  rollout. `citi_visa_costco_echo` is OCR-garbled badly enough that no line
   ever reaches the transaction-classification call site, before or after
   this migration (confirmed both ways via `tests/dump_report.py`, same
   near-empty output each time). The 14-test synthetic suite added in
@@ -798,7 +798,7 @@ becomes available, the same 3-commit branch pattern applies:
   completely untestable here; `tests/test_parsers.py`'s Northern Trust
   case now runs instead of skipping (158 → previously 157 passed/1
   skipped). Verified live against the one real Northern Trust fixture that
-  exists anywhere (Needles Studio's, checked both the Drive test-fixtures
+  exists anywhere (Golf Studio's, checked both the Drive test-fixtures
   folder and the real statement archive — nothing else exists): report is
   byte-identical except the timestamp, since that statement happens to
   contain zero CC-payment lines — confirms no regression but can't itself
@@ -865,7 +865,7 @@ becomes available, the same 3-commit branch pattern applies:
     special case (`pdf_path=None` for the `load_from_dict()` manual-entry
     path) that the base `__init__` doesn't support at all; not a
     duplication bug, a real divergence in contract.
-  Verified live against both real Amex fixtures (FCBA, Duran) — reports
+  Verified live against both real Amex fixtures (Charlie, Bravo) — reports
   byte-identical except the timestamp. Northern Trust and BMO have no
   OCR-capable fixture in this sandbox, so verified by direct construction
   instead: both classes still build correctly end-to-end (extra attributes
@@ -951,13 +951,13 @@ becomes available, the same 3-commit branch pattern applies:
     that config populated would silently land in generic Withdrawals.
     Added `_is_known_cc_network_payment()` as an additional fallback
     alongside the existing `cc_payment_vendors` config (kept, not renamed —
-    backward compatible with clients already using it, e.g. Duran HCP).
-  Verified live: Duran HCP's real `usbank_checking` fixture now correctly
+    backward compatible with clients already using it, e.g. Bravo HCP).
+  Verified live: Bravo HCP's real `usbank_checking` fixture now correctly
   flags `⚠ Unrecognized Amex payment $2,000.00 on 04/03/26 — no Amex
   statement on file (ASK CLIENT) — Not Recognized Account`, where it
   silently never had before. Confirmed zero regression via before/after
-  diff against both real fixtures (Needles Studio's `wells_fargo_checking`,
-  Duran HCP's `usbank_checking`) — Wells Fargo's report is byte-identical
+  diff against both real fixtures (Golf Studio's `wells_fargo_checking`,
+  Bravo HCP's `usbank_checking`) — Wells Fargo's report is byte-identical
   (no bare-network debit in that particular statement to reclassify); US
   Bank's diff shows only the new flag line, nothing else changed. Northern
   Trust has no CC-payment classification logic at all yet (separate, larger
@@ -966,7 +966,7 @@ becomes available, the same 3-commit branch pattern applies:
 
 - Product decision made 2026-07-07 on the "checking account regularly pays a
   card-network bill with no corresponding reconciled account" item below:
-  decided NOT to add a new tracked account for the client involved (Paintbox
+  decided NOT to add a new tracked account for the client involved (Foxtrot
   Hair Studio's recurring $3,900/mo Amex bill payment from `bofa_checking`)
   — instead, strengthen the existing unrecognized-payment flag so it keeps
   catching this every month without needing a full Amex statement/account
@@ -976,7 +976,7 @@ becomes available, the same 3-commit branch pattern applies:
   the *only* parser that ever set `self.credit_card_payments` — BofA's
   checking parser computed the equivalent list purely as a local variable
   inside `aggregate_transactions()`, returned but never assigned to `self`.
-  This meant the flag could never have fired for the exact Paintbox case
+  This meant the flag could never have fired for the exact Foxtrot case
   that prompted this item — that `recon_log.json` entry was added manually
   by a human noticing it by eye, not by the automated check. Fixed in
   `parsers/bofa.py`: `aggregate_transactions()` now also sets
@@ -987,12 +987,12 @@ becomes available, the same 3-commit branch pattern applies:
   Citi as positive, and the message only needs the magnitude. Also appended
   "— Not Recognized Account" to both the Amex and Chase flag messages, per
   explicit request, so these are easy to spot/filter in `recon_log.json`
-  going forward. Verified live against the real Paintbox `bofa_checking`
-  statement (`PAINTBOX HAIR STUDIO LLC_bofa_checking_2026-06-30.pdf`): the
+  going forward. Verified live against the real Foxtrot `bofa_checking`
+  statement (`FOXTROT HAIR STUDIO LLC_bofa_checking_2026-06-30.pdf`): the
   flag now correctly fires — `⚠ Unrecognized Amex payment $3,900.00 on
   06/29/26 — no Amex statement on file (ASK CLIENT) — Not Recognized
   Account` — where it silently never had before. Confirmed no regression
-  against other real BofA checking/savings fixtures (JoJo, Paintbox
+  against other real BofA checking/savings fixtures (Echo, Foxtrot
   savings) — balances and reports unchanged. Wells Fargo/US Bank/Northern
   Trust have the same underlying gap, noted as a new open item above (out
   of scope here — today's incident was specifically a BofA case).
@@ -1005,7 +1005,7 @@ becomes available, the same 3-commit branch pattern applies:
   the "Sick" category drop, and merged without catching this because the
   fix's own regression test used clean, hand-built text lines. Found
   2026-07-07 running `payroll.py` end-to-end against real Drive fixtures
-  (JoJo Hair Studio's 6/15/2026 and 6/30/2026 payroll PDFs, pulled fresh
+  (Echo Hair Studio's 6/15/2026 and 6/30/2026 payroll PDFs, pulled fresh
   from Drive — not the older cached test fixture): pdfplumber flattens
   ADP's multi-column table into one text line per row, so a real earnings
   line has tax/deduction columns trailing on the same line (e.g. `"Regular
@@ -1074,7 +1074,7 @@ becomes available, the same 3-commit branch pattern applies:
   (`QualifiedTipPaid*`/`NonqualifiedCredit`) stay deliberately excluded
   from the generic sum, unchanged from before — they're tracked separately
   via `totals["all_tips"]` into their own pair of journal rows. No real
-  fixture exists locally for this format (`jojo_hair_studio.json` has no
+  fixture exists locally for this format (`echo_hair_studio.json` has no
   `payroll_format` set, and its manifest-listed fixture PDF isn't present
   in this checkout), so `tests/test_adp_payroll_details_earnings.py`
   verifies the extracted function directly against hand-built text
@@ -1155,15 +1155,15 @@ becomes available, the same 3-commit branch pattern applies:
   fixture availability.
 
   **Update 2026-07-07:** real fixtures for both formats are now committed
-  to `Bookkeeping-clients/fixtures/` (`fixture_adp_payroll_detail_deanza.pdf`
-  + `fixture_adp_payroll_liability_deanza.pdf` for De Anza;
-  `fixture_adp_labor_distribution_duran.pdf` for Duran HCP) and wired into
+  to `Bookkeeping-clients/fixtures/` (`fixture_adp_payroll_detail_acme.pdf`
+  + `fixture_adp_payroll_liability_acme.pdf` for Acme Appliance;
+  `fixture_adp_labor_distribution_bravo.pdf` for Bravo HCP) and wired into
   the local, gitignored `tests/payroll_fixtures_manifest.json`. The
   synthetic-only limitation above no longer applies —
   `test_payroll_end_to_end.py` now runs all three against real data:
-  `adp_payroll_departments_sample` (De Anza, 14-row journal, BALANCED
-  $26,691.94), `adp_labor_distribution_agency_sample` (Duran Div 50,
-  BALANCED $30,274.20), `adp_labor_distribution_admin_sample` (Duran Div
+  `adp_payroll_departments_sample` (Acme Appliance, 14-row journal, BALANCED
+  $26,691.94), `adp_labor_distribution_agency_sample` (Bravo Div 50,
+  BALANCED $30,274.20), `adp_labor_distribution_admin_sample` (Bravo Div
   10, BALANCED $4,140.38) — 7/7 payroll fixtures passing, 0 skipped.
 - `cc_keywords` was a manually-maintained per-client list with no fallback —
   fixed 2026-07-06. `parsers/bofa.py` and `parsers/amex.py`'s
@@ -1231,14 +1231,14 @@ becomes available, the same 3-commit branch pattern applies:
   visible to it. Full suite now passes 69/69 (10 skipped for missing private
   fixtures), verified order-independent and repeatable across multiple runs.
 - Every payroll client now has `payroll_key`/`payroll_format` set — fixed
-  2026-07-02. `fcba_academy` → `adp_payroll_1099` and `mp_cheng` →
+  2026-07-02. `charlie_academy` → `adp_payroll_1099` and `hotel_dental` →
   `adp_payroll_professional` verified by running the real fixtures
-  (`fixture_adp_payroll_detail_fcba.pdf`, `fixture_adp_payroll_detail.pdf`)
+  (`fixture_adp_payroll_detail_charlie.pdf`, `fixture_adp_payroll_detail.pdf`)
   through the parser and confirming a balanced journal entry.
-  `paintbox_hair_studio` → `adp_payroll_tipped` verified by confirming every
+  `foxtrot_hair_studio` → `adp_payroll_tipped` verified by confirming every
   config field `adp_payroll_tipped.py` reads (`workers_comp_credit`,
   `contractor_display_name`, `departments`, etc.) was already present in
-  `paintbox_hair_studio.json` — clearly written for that runner, no fixture
+  `foxtrot_hair_studio.json` — clearly written for that runner, no fixture
   needed. All three also match the legacy format-name-as-client-key mapping
   in `Bookkeeping-clients/repair_logs.py`'s `CLIENT_KEY_MAP`, an independent
   corroborating signal.
