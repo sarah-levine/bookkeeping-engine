@@ -125,6 +125,61 @@ def get_tracker_date(recon_dates, client_name, client_keys, acct):
     return "—"
 
 
+def acct_group(key):
+    """Classify an account key by closing-cycle shape — Bank Accounts/Payroll
+    close on the last day of the month (EOM); Credit Cards close mid-month on
+    a fixed day. Shared by both the tracker-card badges and the overdue-
+    accounts section so "current vs. overdue" is judged the same way
+    everywhere."""
+    k = key.lower()
+    if k == "payroll":
+        return "Payroll"
+    if "checking" in k or "savings" in k:
+        return "Bank Accounts"
+    # Known bank account keys that don't contain "checking"/"savings"
+    if k in ("northern",):
+        return "Bank Accounts"
+    cc_patterns = ["credit", "chase_ink", "chase_sapphire", "chase_united",
+                   "citi_visa", "citi_costco", "bmo_credit", "wells_fargo_credit",
+                   "wf_visa"]
+    if any(p in k for p in cc_patterns):
+        return "Credit Cards"
+    if "amex" in k and "checking" not in k:
+        return "Credit Cards"
+    # bmo_* accounts that aren't checking/savings are personal CC cards
+    if k.startswith("bmo_"):
+        return "Credit Cards"
+    return "Other"
+
+
+def is_reconciliation_current(last_date, group, today_date):
+    """True if `last_date` (the most recently reconciled statement's end
+    date) still covers the most recently CLOSED period for `group`, as of
+    `today_date`.
+
+    EOM accounts (Bank Accounts/Payroll) close on the last day of the
+    month, so until this month's own EOM passes, last month's statement is
+    still the most recently closed period — reconciling it keeps the
+    account "current" for all of this month, not just until the 1st.
+    CC accounts close mid-month on a fixed day, so the next closing date is
+    `last_date` + 1 month (same day). Without this distinction, an EOM
+    account reconciled through last month's close was flagged "overdue"
+    for the new month the instant the calendar month ticked over — days or
+    weeks before that new month's statement period had even ended.
+    """
+    if last_date is None:
+        return False
+    if group in ("Bank Accounts", "Payroll"):
+        prev = today_date.replace(day=1) - timedelta(days=1)
+        return (last_date.year, last_date.month) >= (prev.year, prev.month)
+    import calendar
+    next_yr  = last_date.year + (last_date.month == 12)
+    next_mo  = (last_date.month % 12) + 1
+    next_day = min(last_date.day, calendar.monthrange(next_yr, next_mo)[1])
+    next_close = date(next_yr, next_mo, next_day)
+    return today_date <= next_close + timedelta(days=1)
+
+
 
 CC_BLOCKING_RULES = _DIGEST_CFG.get("cc_blocking_rules", {})
 
@@ -328,7 +383,54 @@ def get_cell_style(client_name, acct_key, recon_dates, client_keys, today=None,
 
     return "#f9fafb", "#1f2937", "", None
 
-def build_html(recon_entries, manual_entries, log_date):
+def compute_overdue_accounts(recon_dates, today):
+    """Return {client_name: [{"label":..., "last_date":...}, ...]} for every
+    non-manual, non-client-provided account whose last reconciled statement
+    no longer covers the most recently closed period for its closing-cycle
+    group (see is_reconciliation_current)."""
+    overdue_by_client = {}
+    for client_entry in TRACKER:
+        client_name = client_entry["client"]
+        if client_entry.get("manual_client", False):
+            continue
+        client_keys = client_entry.get("client_keys", [])
+        for acct in client_entry.get("accounts", []):
+            if acct["key"] == "payroll":
+                continue
+            if acct.get("client_provided", False):
+                continue
+            last_date = None
+            for ck in client_keys:
+                val = recon_dates.get((ck, acct["key"]))
+                if val:
+                    d = parse_date(val)
+                    if d and (last_date is None or d > last_date):
+                        last_date = d
+            group = acct_group(acct["key"])
+            if not is_reconciliation_current(last_date, group, today):
+                last_str = last_date.strftime("%m/%d/%y") if last_date else "Never"
+                overdue_by_client.setdefault(client_name, []).append({
+                    "label":     acct["label"],
+                    "last_date": last_str,
+                })
+    return overdue_by_client
+
+
+def build_digest_email(recon_entries, manual_entries, log_date, due_items,
+                        overdue_by_client, today=None):
+    """Build the single combined morning email: CC-due-today action items,
+    overdue accounts, yesterday's reconciliation runs + manual notes, and
+    the full tracker grid. Each section renders only when it has content;
+    the subject line reflects whichever action-item sections are present.
+    due_items and overdue_by_client are computed by the caller (get_cc_due_
+    today() / compute_overdue_accounts()) — different trigger conditions
+    (a CC closing today vs. an account falling behind), one combined send.
+    """
+    from datetime import date as date_cls
+    if today is None:
+        today = date_cls.today()
+    friendly_today = today.strftime("%B %-d, %Y")
+
     dates = sorted(d.strip() for d in log_date.split(",") if d.strip())
     try:
         if len(dates) == 1:
@@ -340,42 +442,25 @@ def build_html(recon_entries, manual_entries, log_date):
     except Exception:
         friendly_date = log_date
 
-    has_manual_issues = len(manual_entries) > 0
-    has_error_entries = any(e.get("status") == "ERROR" for e in recon_entries)
-    has_any_issues    = has_manual_issues or has_error_entries
+    has_cc_due  = bool(due_items)
+    has_overdue = bool(overdue_by_client)
 
-    subject = f"Reconciliation Digest — {friendly_date}"
-
-    status_color = "#b45309" if has_any_issues else "#166534"
-    status_bg    = "#fef9c3" if has_any_issues else "#dcfce7"
-    status_text  = "⚠️ Issues Require Attention" if has_any_issues else "✅ All Clear"
+    subject_parts = []
+    if has_cc_due:
+        subject_parts.append("📋 CC Due Today")
+    if has_overdue:
+        subject_parts.append("🔴 Past Due")
+    if subject_parts:
+        subject = " + ".join(subject_parts) + f" — {friendly_today}"
+    else:
+        subject = f"Reconciliation Digest — {friendly_date}"
 
     recon_dates = load_reconciliation_log()
 
     # ── Build tracker HTML — row-per-account card layout ──
     today_date = date.today()
 
-    def _acct_group(key):
-        k = key.lower()
-        if k == "payroll":
-            return "Payroll"
-        if "checking" in k or "savings" in k:
-            return "Bank Accounts"
-        # Known bank account keys that don't contain "checking"/"savings"
-        if k in ("northern",):
-            return "Bank Accounts"
-        cc_patterns = ["credit", "chase_ink", "chase_sapphire", "chase_united",
-                       "citi_visa", "citi_costco", "bmo_credit", "wells_fargo_credit",
-                       "wf_visa"]
-        if any(p in k for p in cc_patterns):
-            return "Credit Cards"
-        if "amex" in k and "checking" not in k:
-            return "Credit Cards"
-        # bmo_* accounts that aren't checking/savings are personal CC cards
-        if k.startswith("bmo_"):
-            return "Credit Cards"
-        return "Other"
-
+    _acct_group = acct_group
     _GROUP_ORDER = ["Credit Cards", "Bank Accounts", "Payroll", "Other"]
 
     def _tracker_badge(last_date_str, is_client_provided, group=""):
@@ -386,24 +471,8 @@ def build_html(recon_entries, manual_entries, log_date):
         d = parse_date(last_date_str)
         if d is None:
             return "⚫ Never", "#f3f4f6", "#6b7280"
-        # EOM accounts (bank accounts, payroll) close on the last day of the month.
-        # Until EOM passes, the prior month's statement is the most recently closed
-        # period — so "current" means reconciled in the previous month or later.
-        # CC accounts close mid-month on a fixed day. Overdue only once today is
-        # strictly past the next closing date (last_date + 1 month, same day).
-        import calendar
-        if group in ("Bank Accounts", "Payroll"):
-            prev = today_date.replace(day=1) - timedelta(days=1)
-            if (d.year, d.month) >= (prev.year, prev.month):
-                return "✅ Current", "#dcfce7", "#166534"
-        else:
-            next_yr  = d.year + (d.month == 12)
-            next_mo  = (d.month % 12) + 1
-            next_day = min(d.day, calendar.monthrange(next_yr, next_mo)[1])
-            from datetime import date as _date
-            next_close = _date(next_yr, next_mo, next_day)
-            if today_date <= next_close + timedelta(days=1):
-                return "✅ Current", "#dcfce7", "#166534"
+        if is_reconciliation_current(d, group, today_date):
+            return "✅ Current", "#dcfce7", "#166534"
         return "🔴 Overdue", "#fce7f3", "#9d174d"
 
     tracker_cards = ""
@@ -453,6 +522,85 @@ def build_html(recon_entries, manual_entries, log_date):
             f'{table_body}'
             f'</table></div>'
         )
+
+    # ── Build CC-due-today HTML ──
+    cc_due_html = ""
+    if has_cc_due:
+        cc_by_client = {}
+        for item in due_items:
+            cc_by_client.setdefault(item["client"], []).append(item)
+        cc_client_blocks = ""
+        for client, items in cc_by_client.items():
+            cc_rows = ""
+            for item in items:
+                ready_list = "".join(
+                    f'<li style="padding:2px 0;font-size:13px;color:#374151">🔓 {acct}</li>'
+                    for acct in item["ready_accounts"]
+                )
+                cc_rows += f"""
+                <div style="padding:10px 0;border-top:1px solid #e5e7eb">
+                  <div style="font-weight:600;font-size:13px;color:#1e40af">
+                    {item['cc_label']} — closes today (day {item['closing_day']})
+                  </div>
+                  <div style="margin-top:6px;font-size:12px;color:#6b7280">
+                    Once reconciled, these accounts are ready:
+                  </div>
+                  <ul style="margin:4px 0 0 16px;padding:0;list-style:disc">
+                    {ready_list}
+                  </ul>
+                </div>"""
+            cc_client_blocks += f"""
+            <div style="border:1px solid #e5e7eb;border-radius:8px;margin-bottom:12px;overflow:hidden">
+              <div style="background:#eff6ff;padding:10px 14px;font-weight:700;font-size:14px;color:#1e40af">
+                {client}
+              </div>
+              <div style="padding:2px 14px 10px 14px">
+                {cc_rows}
+              </div>
+            </div>"""
+        cc_due_html = f"""
+        <div style="margin-bottom:24px">
+          <div style="font-weight:700;font-size:14px;color:#1f2937;margin-bottom:6px">📋 CC Statements Due Today</div>
+          <p style="font-size:13px;color:#374151;margin:0 0 10px">
+            The following credit card statements close today.
+            Reconcile these first — the accounts listed below will be ready once each CC is done.
+          </p>
+          {cc_client_blocks}
+        </div>"""
+
+    # ── Build overdue-accounts HTML ──
+    overdue_html = ""
+    if has_overdue:
+        month_name = today.strftime("%B")
+        overdue_rows = ""
+        for client_name, acct_list in overdue_by_client.items():
+            acct_items = "".join(
+                f'<tr style="border-top:1px solid #fecaca">'
+                f'<td style="padding:6px 12px;font-size:13px;color:#374151">{a["label"]}</td>'
+                f'<td style="padding:6px 12px;font-size:12px;color:#9d174d;white-space:nowrap">{a["last_date"]}</td>'
+                f'</tr>'
+                for a in acct_list
+            )
+            overdue_rows += f"""
+            <div style="padding:8px 0;border-top:1px solid #fecaca">
+              <div style="font-weight:600;font-size:13px;color:#9d174d;margin-bottom:4px">{client_name}</div>
+              <table style="width:100%;border-collapse:collapse">
+                <tr>
+                  <th style="text-align:left;padding:3px 12px;font-size:11px;color:#9ca3af;font-weight:600">Account</th>
+                  <th style="text-align:left;padding:3px 12px;font-size:11px;color:#9ca3af;font-weight:600">Last Reconciled</th>
+                </tr>
+                {acct_items}
+              </table>
+            </div>"""
+        overdue_html = f"""
+        <div style="margin-bottom:24px;border:1px solid #fecaca;border-radius:8px;overflow:hidden">
+          <div style="background:#fce7f3;padding:10px 14px;font-weight:700;font-size:14px;color:#9d174d">
+            🔴 Overdue — {month_name} Not Yet Reconciled
+          </div>
+          <div style="padding:2px 14px 10px 14px">
+            {overdue_rows}
+          </div>
+        </div>"""
 
     # ── Build manual notes HTML ──
     manual_html = ""
@@ -568,17 +716,23 @@ def build_html(recon_entries, manual_entries, log_date):
   <!-- Header -->
   <div style="background:#1e3a5f;padding:20px 24px">
     <div style="font-size:18px;font-weight:700;color:#fff">Reconciliation Morning Digest</div>
-    <div style="font-size:13px;color:#93c5fd;margin-top:2px">{friendly_date}</div>
+    <div style="font-size:13px;color:#93c5fd;margin-top:2px">{friendly_today}</div>
   </div>
 
   <div style="padding:20px 24px">
+
+    <!-- CC due today -->
+    {cc_due_html}
+
+    <!-- Overdue accounts -->
+    {overdue_html}
 
     <!-- Manual notes -->
     {manual_html}
 
     <!-- Reconciliation runs -->
     <div style="font-weight:700;font-size:14px;color:#1f2937;margin-bottom:10px">
-      Reconciliation Runs — {len(clients)} client(s)
+      Reconciliation Runs — {len(clients)} client(s) · activity from {friendly_date}
     </div>
     {runs_html}
 
@@ -714,180 +868,21 @@ def get_cc_due_today(today=None):
     return due
 
 
-def build_cc_due_email(due_items, today=None):
-    """Build subject + HTML for the CC-due action items email."""
-    from datetime import date as date_cls
-    if today is None:
-        today = date_cls.today()
-
-    friendly_date = today.strftime("%B %-d, %Y")
-    has_overdue = False  # set below after computing overdue accounts
-    subject = None       # set after overdue check
-
-    # Group by client
-    by_client = {}
-    for item in due_items:
-        by_client.setdefault(item["client"], []).append(item)
-
-    client_blocks = ""
-    for client, items in by_client.items():
-        rows = ""
-        for item in items:
-            ready_list = "".join(
-                f'<li style="padding:2px 0;font-size:13px;color:#374151">🔓 {acct}</li>'
-                for acct in item["ready_accounts"]
-            )
-            rows += f"""
-            <div style="padding:10px 0;border-top:1px solid #e5e7eb">
-              <div style="font-weight:600;font-size:13px;color:#1e40af">
-                {item['cc_label']} — closes today (day {item['closing_day']})
-              </div>
-              <div style="margin-top:6px;font-size:12px;color:#6b7280">
-                Once reconciled, these accounts are ready:
-              </div>
-              <ul style="margin:4px 0 0 16px;padding:0;list-style:disc">
-                {ready_list}
-              </ul>
-            </div>"""
-
-        client_blocks += f"""
-        <div style="border:1px solid #e5e7eb;border-radius:8px;margin-bottom:12px;overflow:hidden">
-          <div style="background:#eff6ff;padding:10px 14px;font-weight:700;font-size:14px;color:#1e40af">
-            {client}
-          </div>
-          <div style="padding:2px 14px 10px 14px">
-            {rows}
-          </div>
-        </div>"""
-
-    # ── Overdue accounts section ──────────────────────────────────────
-    recon_dates = load_reconciliation_log()
-    month_name = today.strftime("%B")
-
-    overdue_by_client = {}
-    for client_entry in TRACKER:
-        client_name = client_entry["client"]
-        if client_entry.get("manual_client", False):
-            continue
-        client_keys = client_entry.get("client_keys", [])
-        for acct in client_entry.get("accounts", []):
-            if acct["key"] == "payroll":
-                continue
-            if acct.get("client_provided", False):
-                continue
-            last_date = None
-            for ck in client_keys:
-                val = recon_dates.get((ck, acct["key"]))
-                if val:
-                    d = parse_date(val)
-                    if d and (last_date is None or d > last_date):
-                        last_date = d
-            if last_date is None or (last_date.year, last_date.month) < (today.year, today.month):
-                last_str = last_date.strftime("%m/%d/%y") if last_date else "Never"
-                overdue_by_client.setdefault(client_name, []).append({
-                    "label":     acct["label"],
-                    "last_date": last_str,
-                })
-
-    overdue_html = ""
-    has_overdue = bool(overdue_by_client)
-    if has_overdue:
-        subject = f"📋 CC Due Today + Past Due — {friendly_date}"
-    else:
-        subject = f"📋 CC Statements Due Today — {friendly_date}"
-
-    if has_overdue:
-        overdue_rows = ""
-        for client_name, acct_list in overdue_by_client.items():
-            acct_items = "".join(
-                f'<tr style="border-top:1px solid #fecaca">'
-                f'<td style="padding:6px 12px;font-size:13px;color:#374151">{a["label"]}</td>'
-                f'<td style="padding:6px 12px;font-size:12px;color:#9d174d;white-space:nowrap">{a["last_date"]}</td>'
-                f'</tr>'
-                for a in acct_list
-            )
-            overdue_rows += f"""
-            <div style="padding:8px 0;border-top:1px solid #fecaca">
-              <div style="font-weight:600;font-size:13px;color:#9d174d;margin-bottom:4px">{client_name}</div>
-              <table style="width:100%;border-collapse:collapse">
-                <tr>
-                  <th style="text-align:left;padding:3px 12px;font-size:11px;color:#9ca3af;font-weight:600">Account</th>
-                  <th style="text-align:left;padding:3px 12px;font-size:11px;color:#9ca3af;font-weight:600">Last Reconciled</th>
-                </tr>
-                {acct_items}
-              </table>
-            </div>"""
-
-        overdue_html = f"""
-        <div style="margin-top:20px;border:1px solid #fecaca;border-radius:8px;overflow:hidden">
-          <div style="background:#fce7f3;padding:10px 14px;font-weight:700;font-size:14px;color:#9d174d">
-            🔴 Overdue — {month_name} Not Yet Reconciled
-          </div>
-          <div style="padding:2px 14px 10px 14px">
-            {overdue_rows}
-          </div>
-        </div>"""
-
-    html = f"""
-<!DOCTYPE html>
-<html>
-<body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
-<div style="max-width:680px;margin:24px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
-
-  <div style="background:#1e3a5f;padding:20px 24px">
-    <div style="font-size:18px;font-weight:700;color:#fff">📋 CC Statements Due Today</div>
-    <div style="font-size:13px;color:#93c5fd;margin-top:2px">{friendly_date}</div>
-  </div>
-
-  <div style="padding:20px 24px">
-    <p style="font-size:13px;color:#374151;margin:0 0 16px">
-      The following credit card statements close today.
-      Reconcile these first — the accounts listed below will be ready once each CC is done.
-    </p>
-    {client_blocks}
-    {overdue_html}
-  </div>
-
-  <div style="background:#f9fafb;padding:12px 24px;font-size:11px;color:#9ca3af;border-top:1px solid #e5e7eb;text-align:center">
-    Sent automatically by Bookkeeping Digest · sarah-levine/Bookkeeping
-  </div>
-
-</div>
-</body>
-</html>
-"""
-    return subject, html
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", help="Log date YYYY-MM-DD. Defaults to yesterday.")
     parser.add_argument("--scheduled", action="store_true",
                         help="Pass this flag when run by the 8am cron schedule. "
                              "Only scheduled runs CC the configured cc_recipient.")
-    parser.add_argument("--cc-due", action="store_true",
-                        help="Check if any CC statements close today and send action items email if so.")
     args = parser.parse_args()
 
-    # ── CC-due trigger ──
-    if args.cc_due:
-        from datetime import date as date_cls
-        today = date_cls.today()
-        due_items = get_cc_due_today(today)
-        if not due_items:
-            print(f"No CC statements due today ({today}). Nothing to send.")
-            sys.exit(0)
-        subject, html = build_cc_due_email(due_items, today)
-        print(f"Subject: {subject}")
-        print(f"CC statements due: {[i['cc_label'] for i in due_items]}")
-        success = send_via_smtp(subject, html, include_cc=args.scheduled)
-        if success:
-            print(f"✅ CC-due email sent for {today}.")
-            sys.exit(0)
-        else:
-            print("❌ Failed to send.", file=sys.stderr)
-            sys.exit(1)
+    today = date.today()
 
+    # ── CC-due-today + overdue-accounts trigger (evaluated against today) ──
+    due_items = get_cc_due_today(today)
+    overdue_by_client = compute_overdue_accounts(load_reconciliation_log(), today)
+
+    # ── Reconciliation-digest trigger (evaluated against yesterday's activity) ──
     log_date = args.date or (datetime.now(ZoneInfo('America/Los_Angeles')).date() - timedelta(days=1)).isoformat()
     log_dates = [d.strip() for d in log_date.split(",") if d.strip()]
     include_cc = args.scheduled
@@ -911,13 +906,22 @@ def main():
     )
     accounts_due_yesterday = yesterday_was_eom or cc_due_yesterday
 
-    if not recon_entries and not manual_entries and not accounts_due_yesterday:
-        print("No reconciliations yesterday and no accounts due — nothing to send.")
+    has_digest_content = bool(recon_entries) or bool(manual_entries) or accounts_due_yesterday
+    has_action_items    = bool(due_items) or bool(overdue_by_client)
+    if not has_digest_content and not has_action_items:
+        print("Nothing to report — no reconciliations yesterday, no accounts due, "
+              "no CC due today, nothing overdue. Skipping.")
         sys.exit(0)
 
-    subject, html = build_html(recon_entries, manual_entries, log_date)
+    subject, html = build_digest_email(recon_entries, manual_entries, log_date,
+                                        due_items, overdue_by_client, today)
 
     print(f"Subject: {subject}")
+    if due_items:
+        print(f"CC statements due today: {[i['cc_label'] for i in due_items]}")
+    if overdue_by_client:
+        print(f"Overdue accounts: {sum(len(v) for v in overdue_by_client.values())} "
+              f"across {len(overdue_by_client)} client(s)")
     to_line = f"{RECIPIENT} + CC {CC_RECIPIENT}" if include_cc else RECIPIENT
     print(f"Sending HTML email to {to_line} via Gmail SMTP...")
 
