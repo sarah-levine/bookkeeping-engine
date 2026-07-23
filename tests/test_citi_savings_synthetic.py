@@ -97,16 +97,16 @@ class CitiSavingsSyntheticPipelineTest(unittest.TestCase):
         p = self._parser()
         p.parse()
         deposit_vendors = {d['vendor']: d for d in p.deposits}
-        self.assertIn('CONTOSO DEPOSIT SOURCE', deposit_vendors)
-        self.assertEqual(deposit_vendors['CONTOSO DEPOSIT SOURCE']['amount'], _d('100.00'))
-        self.assertEqual(deposit_vendors['CONTOSO DEPOSIT SOURCE']['date'], '05/05/26')
+        self.assertIn('Contoso Deposit Source', deposit_vendors)
+        self.assertEqual(deposit_vendors['Contoso Deposit Source']['amount'], _d('100.00'))
+        self.assertEqual(deposit_vendors['Contoso Deposit Source']['date'], '05/05/26')
 
     def test_ach_debit_classified_as_withdrawal(self):
         p = self._parser()
         p.parse()
         withdrawal_vendors = {w['vendor']: w for w in p.withdrawals}
-        self.assertIn('CONTOSO DEBIT VENDOR', withdrawal_vendors)
-        self.assertEqual(withdrawal_vendors['CONTOSO DEBIT VENDOR']['amount'], _d('50.00'))
+        self.assertIn('Contoso Debit Vendor', withdrawal_vendors)
+        self.assertEqual(withdrawal_vendors['Contoso Debit Vendor']['amount'], _d('50.00'))
 
     def test_check_synthesizes_vendor_label_and_lands_in_withdrawals(self):
         p = self._parser()
@@ -138,7 +138,7 @@ class CitiSavingsSyntheticPipelineTest(unittest.TestCase):
         report = p.generate_report()
         self.assertIn('Balance verification: PASSED', report)
         self.assertIn('Check #1042', report)
-        self.assertIn('CONTOSO DEBIT VENDOR', report)
+        self.assertIn('Contoso Debit Vendor', report)
 
 
 if __name__ == "__main__":
