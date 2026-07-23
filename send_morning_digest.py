@@ -523,82 +523,89 @@ def build_digest_email(recon_entries, manual_entries, log_date, due_items,
             f'</table></div>'
         )
 
-    # ── Build CC-due-today HTML ──
-    cc_due_html = ""
-    if has_cc_due:
-        cc_by_client = {}
+    # ── Build combined "Needs Attention" HTML — CC-due-today and overdue ──
+    # accounts share one table per client instead of two separate sections,
+    # distinguished by a Status column badge (an account can be both: a CC
+    # that's overdue from last cycle AND closing again today).
+    attention_html = ""
+    combined_by_client = {}
+    for client_entry in TRACKER:
+        cname = client_entry["client"]
+        rows, by_label = [], {}
+        for a in overdue_by_client.get(cname, []):
+            row = {"label": a["label"], "last_date": a["last_date"], "overdue": True,
+                   "closes_today": False, "closing_day": None, "unlocks": None}
+            rows.append(row)
+            by_label[a["label"]] = row
         for item in due_items:
-            cc_by_client.setdefault(item["client"], []).append(item)
-        cc_client_blocks = ""
-        for client, items in cc_by_client.items():
-            cc_rows = ""
-            for item in items:
-                ready_list = "".join(
-                    f'<li style="padding:2px 0;font-size:13px;color:#374151">🔓 {acct}</li>'
-                    for acct in item["ready_accounts"]
-                )
-                cc_rows += f"""
-                <div style="padding:10px 0;border-top:1px solid #e5e7eb">
-                  <div style="font-weight:600;font-size:13px;color:#1e40af">
-                    {item['cc_label']} — closes today (day {item['closing_day']})
-                  </div>
-                  <div style="margin-top:6px;font-size:12px;color:#6b7280">
-                    Once reconciled, these accounts are ready:
-                  </div>
-                  <ul style="margin:4px 0 0 16px;padding:0;list-style:disc">
-                    {ready_list}
-                  </ul>
-                </div>"""
-            cc_client_blocks += f"""
-            <div style="border:1px solid #e5e7eb;border-radius:8px;margin-bottom:12px;overflow:hidden">
-              <div style="background:#eff6ff;padding:10px 14px;font-weight:700;font-size:14px;color:#1e40af">
-                {client}
-              </div>
-              <div style="padding:2px 14px 10px 14px">
-                {cc_rows}
-              </div>
-            </div>"""
-        cc_due_html = f"""
-        <div style="margin-bottom:24px">
-          <div style="font-weight:700;font-size:14px;color:#1f2937;margin-bottom:6px">📋 CC Statements Due Today</div>
-          <p style="font-size:13px;color:#374151;margin:0 0 10px">
-            The following credit card statements close today.
-            Reconcile these first — the accounts listed below will be ready once each CC is done.
-          </p>
-          {cc_client_blocks}
-        </div>"""
+            if item["client"] != cname:
+                continue
+            label = item["cc_label"]
+            row = by_label.get(label)
+            if row is None:
+                row = {"label": label, "last_date": item["last_date"], "overdue": False,
+                       "closes_today": False, "closing_day": None, "unlocks": None}
+                rows.append(row)
+                by_label[label] = row
+            row["closes_today"] = True
+            row["closing_day"]  = item["closing_day"]
+            row["unlocks"]      = item["ready_accounts"]
+        if rows:
+            combined_by_client[cname] = rows
 
-    # ── Build overdue-accounts HTML ──
-    overdue_html = ""
-    if has_overdue:
+    if combined_by_client:
         month_name = today.strftime("%B")
-        overdue_rows = ""
-        for client_name, acct_list in overdue_by_client.items():
-            acct_items = "".join(
-                f'<tr style="border-top:1px solid #fecaca">'
-                f'<td style="padding:6px 12px;font-size:13px;color:#374151">{a["label"]}</td>'
-                f'<td style="padding:6px 12px;font-size:12px;color:#9d174d;white-space:nowrap">{a["last_date"]}</td>'
-                f'</tr>'
-                for a in acct_list
-            )
-            overdue_rows += f"""
+        attn_blocks = ""
+        for client_name, rows in combined_by_client.items():
+            row_html = ""
+            for r in rows:
+                badges = ""
+                if r["closes_today"]:
+                    badges += (
+                        '<span style="display:inline-block;border-radius:999px;padding:2px 8px;'
+                        'font-size:10px;font-weight:600;background:#dbeafe;color:#1e40af;'
+                        f'margin-left:4px;white-space:nowrap">📅 Closes Today</span>'
+                    )
+                if r["overdue"]:
+                    badges += (
+                        '<span style="display:inline-block;border-radius:999px;padding:2px 8px;'
+                        'font-size:10px;font-weight:600;background:#fce7f3;color:#9d174d;'
+                        'margin-left:4px;white-space:nowrap">🔴 Overdue</span>'
+                    )
+                unlocks_html = ""
+                if r["unlocks"]:
+                    unlocks_html = (
+                        f'<div style="margin-top:2px;font-size:11px;color:#6b7280">'
+                        f'→ unlocks {", ".join(r["unlocks"])} once reconciled</div>'
+                    )
+                row_html += f"""
+                <tr style="border-top:1px solid #fecaca">
+                  <td style="padding:6px 12px;font-size:13px;color:#374151">
+                    {r["label"]}
+                    {unlocks_html}
+                  </td>
+                  <td style="padding:6px 12px;font-size:12px;width:100px;color:#6b7280;white-space:nowrap">{r["last_date"]}</td>
+                  <td style="padding:6px 12px;width:170px;text-align:right">{badges}</td>
+                </tr>"""
+            attn_blocks += f"""
             <div style="padding:8px 0;border-top:1px solid #fecaca">
               <div style="font-weight:600;font-size:13px;color:#9d174d;margin-bottom:4px">{client_name}</div>
               <table style="width:100%;border-collapse:collapse">
                 <tr>
                   <th style="text-align:left;padding:3px 12px;font-size:11px;color:#9ca3af;font-weight:600">Account</th>
-                  <th style="text-align:left;padding:3px 12px;font-size:11px;color:#9ca3af;font-weight:600">Last Reconciled</th>
+                  <th style="text-align:left;padding:3px 12px;font-size:11px;width:100px;color:#9ca3af;font-weight:600">Last Reconciled</th>
+                  <th style="text-align:right;padding:3px 12px;font-size:11px;width:170px;color:#9ca3af;font-weight:600">Status</th>
                 </tr>
-                {acct_items}
+                {row_html}
               </table>
             </div>"""
-        overdue_html = f"""
+        attention_html = f"""
         <div style="margin-bottom:24px;border:1px solid #fecaca;border-radius:8px;overflow:hidden">
           <div style="background:#fce7f3;padding:10px 14px;font-weight:700;font-size:14px;color:#9d174d">
-            🔴 Overdue — {month_name} Not Yet Reconciled
+            🔴 Needs Attention — {month_name}
           </div>
           <div style="padding:2px 14px 10px 14px">
-            {overdue_rows}
+            {attn_blocks}
           </div>
         </div>"""
 
@@ -721,11 +728,8 @@ def build_digest_email(recon_entries, manual_entries, log_date, due_items,
 
   <div style="padding:20px 24px">
 
-    <!-- CC due today -->
-    {cc_due_html}
-
-    <!-- Overdue accounts -->
-    {overdue_html}
+    <!-- Needs attention: CC due today + overdue -->
+    {attention_html}
 
     <!-- Manual notes -->
     {manual_html}
@@ -823,8 +827,10 @@ def sync_sheet_to_log():
 def get_cc_due_today(today=None):
     """
     Returns a list of dicts for every CC blocker whose closing_day matches today.
-    Each dict: {client, cc_key, cc_label, closing_day, ready_accounts}
-    ready_accounts = list of account labels that are now unblocked (checking/savings/payroll).
+    Each dict: {client, cc_key, cc_label, closing_day, last_date, ready_accounts}
+    last_date = that CC's last reconciled statement date ("—" if never), so it
+    can render in the same Account/Last Reconciled table shape as the overdue
+    section. ready_accounts = list of account labels now unblocked.
     """
     from datetime import date as date_cls
     if today is None:
@@ -857,11 +863,14 @@ def get_cc_due_today(today=None):
                 label = next((a["label"] for a in accounts if a["key"] == acct_key), acct_key)
                 ready.append(label)
 
+            last_date = get_tracker_date(recon_dates, client_name, keys, {"key": blocker["key"]})
+
             due.append({
                 "client":        client_name,
                 "cc_key":        blocker["key"],
                 "cc_label":      cc_label,
                 "closing_day":   blocker["closing_day"],
+                "last_date":     last_date,
                 "ready_accounts": ready,
             })
 
