@@ -598,10 +598,9 @@ def build_digest_email(recon_entries, manual_entries, log_date, due_items,
 
     if combined_by_client:
         month_name = today.strftime("%B")
-        attn_blocks = ""
+        row_html = ""
         for client_name, rows in combined_by_client.items():
-            row_html = ""
-            for r in rows:
+            for i, r in enumerate(rows):
                 badges = ""
                 if r["closes_today"]:
                     badges += (
@@ -621,8 +620,13 @@ def build_digest_email(recon_entries, manual_entries, log_date, due_items,
                         f'<div style="margin-top:2px;font-size:11px;color:#6b7280">'
                         f'→ unlocks {", ".join(r["unlocks"])} once reconciled</div>'
                     )
+                # Client name only on each client's first row (rowspan-free —
+                # simpler across email clients than <td rowspan>), blank on
+                # the rest so repeated rows read as one visual group.
+                client_cell = client_name if i == 0 else ""
                 row_html += f"""
                 <tr style="border-top:1px solid #fecaca">
+                  <td style="padding:6px 12px;font-size:13px;font-weight:600;color:#9d174d;white-space:nowrap">{client_cell}</td>
                   <td style="padding:6px 12px;font-size:13px;color:#374151">
                     {r["label"]}
                     {unlocks_html}
@@ -630,26 +634,20 @@ def build_digest_email(recon_entries, manual_entries, log_date, due_items,
                   <td style="padding:6px 12px;font-size:12px;width:100px;color:#6b7280;white-space:nowrap">{r["last_date"]}</td>
                   <td style="padding:6px 12px;width:170px;text-align:right">{badges}</td>
                 </tr>"""
-            attn_blocks += f"""
-            <div style="padding:8px 0;border-top:1px solid #fecaca">
-              <div style="font-weight:600;font-size:13px;color:#9d174d;margin-bottom:4px">{client_name}</div>
-              <table style="width:100%;border-collapse:collapse">
-                <tr>
-                  <th style="text-align:left;padding:3px 12px;font-size:11px;color:#9ca3af;font-weight:600">Account</th>
-                  <th style="text-align:left;padding:3px 12px;font-size:11px;width:100px;color:#9ca3af;font-weight:600">Last Reconciled</th>
-                  <th style="text-align:right;padding:3px 12px;font-size:11px;width:170px;color:#9ca3af;font-weight:600">Status</th>
-                </tr>
-                {row_html}
-              </table>
-            </div>"""
         attention_html = f"""
         <div style="margin-bottom:24px;border:1px solid #fecaca;border-radius:8px;overflow:hidden">
           <div style="background:#fce7f3;padding:10px 14px;font-weight:700;font-size:14px;color:#9d174d">
             🔴 Needs Attention — {month_name}
           </div>
-          <div style="padding:2px 14px 10px 14px">
-            {attn_blocks}
-          </div>
+          <table style="width:100%;border-collapse:collapse">
+            <tr>
+              <th style="text-align:left;padding:6px 12px;font-size:11px;color:#9ca3af;font-weight:600;white-space:nowrap">Client</th>
+              <th style="text-align:left;padding:6px 12px;font-size:11px;color:#9ca3af;font-weight:600">Account</th>
+              <th style="text-align:left;padding:6px 12px;font-size:11px;width:100px;color:#9ca3af;font-weight:600">Last Reconciled</th>
+              <th style="text-align:right;padding:6px 12px;font-size:11px;width:170px;color:#9ca3af;font-weight:600">Status</th>
+            </tr>
+            {row_html}
+          </table>
         </div>"""
 
     # ── Group all entries by (display_client, account_type) — one card per group ──
