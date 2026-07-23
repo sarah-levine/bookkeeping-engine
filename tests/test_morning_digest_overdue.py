@@ -3,7 +3,9 @@ test_morning_digest_overdue.py
 -------------------------------
 Regression coverage for send_morning_digest.py's "current vs. overdue"
 classification (acct_group / is_reconciliation_current), shared by the
-tracker-card badges and the "Overdue — Not Yet Reconciled" email section.
+tracker-card badges and the "Overdue — Not Yet Reconciled" email section,
+plus the combined-email builder (build_digest_email) that replaced the old
+separate CC-due-today email.
 
 Bug this guards against: the overdue section used to compare a reconciled
 statement's (year, month) directly against today's (year, month), with no
@@ -14,12 +16,16 @@ ticked over, days or weeks before that new month's statement had even
 closed. Credit cards close mid-month on a fixed day and need the opposite
 check (last_date + 1 month, same day).
 
+Also covers the CC-due-today and reconciliation-digest emails being merged
+into one send with one subject line, instead of two separate script
+invocations each sending its own email.
+
 Synthetic dates only — no PDFs, no Drive, no network.
 """
 import unittest
 from datetime import date
 
-from send_morning_digest import acct_group, is_reconciliation_current
+from send_morning_digest import acct_group, is_reconciliation_current, build_digest_email
 
 
 class AcctGroupTest(unittest.TestCase):
@@ -76,6 +82,48 @@ class IsReconciliationCurrentTest(unittest.TestCase):
     def test_cc_account_stale_past_next_close_is_overdue(self):
         last_date = date(2026, 6, 6)
         self.assertFalse(is_reconciliation_current(last_date, "Credit Cards", self.today))
+
+
+class BuildDigestEmailCombinedTest(unittest.TestCase):
+    """The old separate --cc-due invocation is gone — one script run now
+    always computes both trigger conditions and builds one email."""
+
+    def setUp(self):
+        self.today = date(2026, 7, 23)
+        self.due_items = [{
+            "client": "Acme Appliance", "cc_key": "bofa_credit",
+            "cc_label": "BofA Credit Card", "closing_day": 23,
+            "ready_accounts": ["BofA Checking", "BofA Savings"],
+        }]
+        self.overdue = {"Acme Appliance": [{"label": "Chase Sapphire", "last_date": "06/06/26"}]}
+
+    def test_both_action_items_present_combines_subject_and_sections(self):
+        subject, html = build_digest_email([], [], "2026-07-22", self.due_items,
+                                            self.overdue, self.today)
+        self.assertIn("CC Due Today", subject)
+        self.assertIn("Past Due", subject)
+        self.assertIn("CC Statements Due Today", html)
+        self.assertIn("Overdue —", html)
+
+    def test_only_cc_due_omits_overdue_section(self):
+        subject, html = build_digest_email([], [], "2026-07-22", self.due_items, {}, self.today)
+        self.assertIn("CC Due Today", subject)
+        self.assertNotIn("Past Due", subject)
+        self.assertIn("CC Statements Due Today", html)
+        self.assertNotIn("Overdue —", html)
+
+    def test_only_overdue_omits_cc_due_section(self):
+        subject, html = build_digest_email([], [], "2026-07-22", [], self.overdue, self.today)
+        self.assertIn("Past Due", subject)
+        self.assertNotIn("CC Due Today", subject)
+        self.assertNotIn("CC Statements Due Today", html)
+        self.assertIn("Overdue —", html)
+
+    def test_no_action_items_falls_back_to_plain_digest_subject(self):
+        subject, html = build_digest_email([], [], "2026-07-22", [], {}, self.today)
+        self.assertEqual(subject, "Reconciliation Digest — July 22, 2026")
+        self.assertNotIn("CC Statements Due Today", html)
+        self.assertNotIn("Overdue —", html)
 
 
 if __name__ == "__main__":

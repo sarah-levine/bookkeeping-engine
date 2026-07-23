@@ -190,7 +190,7 @@ Not mode-selected — these run on a schedule, or by hand, once a statement's al
 |---|---|---|
 | `mark_clean.py <client_key> <account_type> [date]` | QB entry confirmed after the fact | Finds the matching `IN_PROGRESS` entry, marks it `DONE`, updates the CSV, sheet, and pushes |
 | `mark_payroll_done.py <key> <check_date> <bank_credit>` | payroll bank credit confirmed later | Same idea as `mark_clean.py`, for `payroll_log.csv` |
-| `send_morning_digest.py [--date YYYY-MM-DD] [--scheduled] [--cc-due]` | every morning, cron-triggered | Builds and sends the color-coded tracker digest by Gmail SMTP |
+| `send_morning_digest.py [--date YYYY-MM-DD] [--scheduled]` | every morning, cron-triggered | Builds and sends one combined email: CC-due-today action items, overdue accounts, yesterday's reconciliation runs, and the color-coded tracker digest, by Gmail SMTP |
 | `drive_archiver.py [--dry-run] <pdf> <client> <account_type> [date]` | called internally by Mode A/C/E/G on DONE | Uploads to `Bookkeeping/<Client>/<Account Type>/`, dedupes by filename, keeps the 2 most recent |
 | `tools/pii_scan.py [--staged \| --audit]` | pre-commit hook, and before any publish | Flags real names / account numbers not in `pii_allowlist.txt` |
 | `tools/backfill_status.py <old_status> <new_status>` | a status string gets renamed in code | Rewrites matching values across the private logs dir |
@@ -261,16 +261,19 @@ What the script does from the moment you hand it a PDF:
 
 **Next morning — `send_morning_digest.py`**
 
-16. **What got reconciled yesterday?** — Load yesterday's log entries.
+16. **What's due, overdue, and what got reconciled yesterday?** — Two independent checks, one combined email:
+    - Any CC statement closing today (`get_cc_due_today()`)
+    - Any account whose last reconciled statement no longer covers its most recently closed period (`compute_overdue_accounts()` — closing-cycle aware: EOM accounts like checking/savings are current through the whole month following their close, CC accounts are judged against their own next closing date)
+    - Yesterday's log entries
 
-17. **Build the email** — Assemble the digest: what ran, what's still pending, and a color-coded tracker grid.
+17. **Build the email** — Assemble one email with whichever sections have content: CC due today, overdue accounts, what ran yesterday, and a color-coded tracker grid.
     - 17a. Green — CC reconciled, checking unblocked, all good
     - 17b. Yellow — statement available but not reconciled yet
     - 17c. Orange — CC is pending and checking is blocked
     - 17d. Pink — overdue
     - 17e. Red — ERROR (technical failure, with error detail)
 
-18. **Send the email** — Deliver via Gmail SMTP.
+18. **Send the email** — Deliver via Gmail SMTP. Skipped only if nothing is due, overdue, or reconciled.
 
 ---
 
