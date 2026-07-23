@@ -166,5 +166,41 @@ class BuildDigestEmailCombinedTest(unittest.TestCase):
         self.assertNotIn("🔴 Needs Attention", _needs_attention_section(html))
 
 
+class ManualNotesInlineInTrackerTest(unittest.TestCase):
+    """Manual notes render inline inside their client's tracker card instead
+    of a separate standalone section — issue entries never carry a real
+    account_type, so a note can only be placed at the client level, not on
+    a specific account row. A note whose client doesn't match any tracker
+    card (a display_name gap, or the "General" fallback) must still be
+    visible somewhere rather than silently dropped."""
+
+    def setUp(self):
+        from send_morning_digest import TRACKER
+        self.client = TRACKER[0]["client"]
+        self.today = date(2026, 7, 23)
+
+    def test_note_renders_inside_its_clients_tracker_card(self):
+        manual_entries = [{"client": self.client, "issue": "Zzz test issue",
+                            "run_time": "2026-07-22T08:00:00"}]
+        subject, html = build_digest_email([], manual_entries, "2026-07-22", [], {}, self.today)
+        card_start = html.find(f">{self.client}<")
+        next_card = html.find('background:#1e3a5f', card_start + 1)
+        card_html = html[card_start:next_card if next_card != -1 else len(html)]
+        self.assertIn("Zzz test issue", card_html)
+
+    def test_no_standalone_manual_notes_section(self):
+        manual_entries = [{"client": self.client, "issue": "Zzz test issue",
+                            "run_time": "2026-07-22T08:00:00"}]
+        subject, html = build_digest_email([], manual_entries, "2026-07-22", [], {}, self.today)
+        self.assertNotIn("⚠️ Manual Notes</div>", html)
+
+    def test_note_for_untracked_client_falls_back_to_other_notes_block(self):
+        manual_entries = [{"client": "Not A Real Tracked Client", "issue": "Zzz stray issue",
+                            "run_time": "2026-07-22T08:00:00"}]
+        subject, html = build_digest_email([], manual_entries, "2026-07-22", [], {}, self.today)
+        self.assertIn("⚠️ Other Notes", html)
+        self.assertIn("Zzz stray issue", html)
+
+
 if __name__ == "__main__":
     unittest.main()

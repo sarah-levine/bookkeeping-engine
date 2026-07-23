@@ -460,6 +460,25 @@ def build_digest_email(recon_entries, manual_entries, log_date, due_items,
     # ── Build tracker HTML — row-per-account card layout ──
     today_date = date.today()
 
+    # Manual notes render inline inside each client's tracker card (below)
+    # instead of a separate standalone section — issue entries never carry
+    # a real account_type (always ""), so a note can only be placed at the
+    # client level, not on a specific account row.
+    notes_by_client = {}
+    for e in manual_entries:
+        notes_by_client.setdefault(display_name(e.get("client", "General")), []).append(e)
+    matched_note_clients = set()
+
+    def _notes_block(entries):
+        items = "".join(
+            f'<div style="padding:5px 12px;font-size:12px;color:#92400e;'
+            f'border-top:1px solid #fde68a">⚠️ {e.get("issue","")}'
+            f'<span style="color:#b45309;opacity:0.75;margin-left:6px">'
+            f'({e.get("run_time","")[:16].replace("T"," ")})</span></div>'
+            for e in entries
+        )
+        return f'<div style="background:#fffbeb">{items}</div>'
+
     _acct_group = acct_group
     _GROUP_ORDER = ["Credit Cards", "Bank Accounts", "Payroll", "Other"]
 
@@ -513,15 +532,39 @@ def build_digest_email(recon_entries, manual_entries, log_date, due_items,
                     f'</td></tr>'
                 )
 
+        notes_html = ""
+        if name in notes_by_client:
+            notes_html = _notes_block(notes_by_client[name])
+            matched_note_clients.add(name)
+
         tracker_cards += (
             f'<div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;'
             f'margin-bottom:12px;overflow:hidden">'
             f'<div style="background:#1e3a5f;padding:10px 14px;font-weight:700;'
             f'font-size:13px;color:#fff">{name}</div>'
+            f'{notes_html}'
             f'<table style="width:100%;border-collapse:collapse;font-size:13px">'
             f'{table_body}'
             f'</table></div>'
         )
+
+    # Any note whose client didn't match a TRACKER card (e.g. "General",
+    # or a client_display_names gap) still needs to be visible — never
+    # silently drop it.
+    unmatched_notes_html = ""
+    unmatched = {c: es for c, es in notes_by_client.items() if c not in matched_note_clients}
+    if unmatched:
+        blocks = "".join(
+            f'<div style="margin-bottom:10px">'
+            f'<div style="font-weight:700;font-size:13px;color:#92400e;margin-bottom:4px">{c}</div>'
+            f'{_notes_block(es)}</div>'
+            for c, es in unmatched.items()
+        )
+        unmatched_notes_html = f"""
+        <div style="margin-bottom:24px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px 16px">
+          <div style="font-weight:700;font-size:14px;color:#92400e;margin-bottom:10px">⚠️ Other Notes</div>
+          {blocks}
+        </div>"""
 
     # ── Build combined "Needs Attention" HTML — CC-due-today and overdue ──
     # accounts share one table per client instead of two separate sections,
@@ -608,39 +651,6 @@ def build_digest_email(recon_entries, manual_entries, log_date, due_items,
             {attn_blocks}
           </div>
         </div>"""
-
-    # ── Build manual notes HTML ──
-    manual_html = ""
-    if manual_entries:
-        # Group by client
-        grouped = {}
-        for e in manual_entries:
-            client = display_name(e.get("client", "General"))
-            grouped.setdefault(client, []).append(e)
-
-        client_blocks = ""
-        for client, entries in grouped.items():
-            items = "".join(
-                f'<li style="padding:4px 0;border-bottom:1px solid #fde68a;font-size:13px;color:#374151">'
-                f'{e.get("issue","")}'
-                f'<span style="color:#9ca3af;font-size:11px;margin-left:8px">({e.get("run_time","")[:16].replace("T"," ")})</span>'
-                f'</li>'
-                for e in entries
-            )
-            client_blocks += f"""
-            <div style="margin-bottom:12px">
-              <div style="font-weight:700;font-size:13px;color:#92400e;margin-bottom:4px">{client}</div>
-              <ul style="margin:0;padding:0 0 0 16px;list-style:disc">
-                {items}
-              </ul>
-            </div>
-            """
-        manual_html = f"""
-        <div style="margin-bottom:24px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px 16px">
-          <div style="font-weight:700;font-size:14px;color:#92400e;margin-bottom:10px">⚠️ Manual Notes</div>
-          {client_blocks}
-        </div>
-        """
 
     # ── Group all entries by (display_client, account_type) — one card per group ──
     # Deduplicate first by (client, account_type, statement_end_date) — keep latest run_time
@@ -732,7 +742,7 @@ def build_digest_email(recon_entries, manual_entries, log_date, due_items,
     {attention_html}
 
     <!-- Manual notes -->
-    {manual_html}
+    {unmatched_notes_html}
 
     <!-- Reconciliation runs -->
     <div style="font-weight:700;font-size:14px;color:#1f2937;margin-bottom:10px">
