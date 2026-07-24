@@ -25,7 +25,10 @@ Synthetic dates only — no PDFs, no Drive, no network.
 import unittest
 from datetime import date
 
-from send_morning_digest import acct_group, is_reconciliation_current, build_digest_email
+from send_morning_digest import (
+    acct_group, is_reconciliation_current, build_digest_email,
+    compute_overdue_accounts, has_newly_overdue_accounts,
+)
 
 
 class AcctGroupTest(unittest.TestCase):
@@ -200,6 +203,34 @@ class ManualNotesInlineInTrackerTest(unittest.TestCase):
         subject, html = build_digest_email([], manual_entries, "2026-07-22", [], {}, self.today)
         self.assertIn("⚠️ Other Notes", html)
         self.assertIn("Zzz stray issue", html)
+
+
+class HasNewlyOverdueAccountsTest(unittest.TestCase):
+    """An account overdue for 10 days straight shouldn't re-trigger a send
+    every one of those 10 days — only the day it actually crosses over.
+    Uses a real TRACKER client/account_key so is_reconciliation_current's
+    real closing-cycle math drives the transition, not a synthetic stand-in."""
+
+    def setUp(self):
+        from send_morning_digest import TRACKER
+        client = next(c for c in TRACKER
+                      if any(a["key"] == "bofa_credit" for a in c["accounts"]))
+        self.client_key = client["client_keys"][0]
+        # bofa_credit closes on the 6th each month (from last_date's day) —
+        # current through 07/07, overdue starting 07/08.
+        self.recon_dates = {(self.client_key, "bofa_credit"): "06/06/2026"}
+
+    def test_first_overdue_day_is_newly_overdue(self):
+        overdue = compute_overdue_accounts(self.recon_dates, date(2026, 7, 8))
+        self.assertTrue(has_newly_overdue_accounts(overdue, self.recon_dates, date(2026, 7, 8)))
+
+    def test_second_overdue_day_is_not_newly_overdue(self):
+        overdue = compute_overdue_accounts(self.recon_dates, date(2026, 7, 9))
+        self.assertFalse(has_newly_overdue_accounts(overdue, self.recon_dates, date(2026, 7, 9)))
+
+    def test_last_current_day_has_no_newly_overdue(self):
+        overdue = compute_overdue_accounts(self.recon_dates, date(2026, 7, 7))
+        self.assertFalse(has_newly_overdue_accounts(overdue, self.recon_dates, date(2026, 7, 7)))
 
 
 if __name__ == "__main__":

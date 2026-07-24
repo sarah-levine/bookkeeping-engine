@@ -416,6 +416,28 @@ def compute_overdue_accounts(recon_dates, today):
     return overdue_by_client
 
 
+def has_newly_overdue_accounts(overdue_today, recon_dates, today):
+    """True if any account in overdue_today wasn't already overdue as of
+    yesterday — i.e. it just crossed into overdue today, not something
+    that's been sitting overdue for a while. An account overdue for 10
+    days straight would otherwise re-trigger a send every single one of
+    those 10 days for no new reason; this gates the send decision to the
+    day something actually changes. overdue_today still renders in full
+    in the email whenever one *does* send (for another reason too) — this
+    only affects whether the overdue section causes the send by itself."""
+    yesterday_overdue = compute_overdue_accounts(recon_dates, today - timedelta(days=1))
+    already_overdue = {
+        (client, a["label"])
+        for client, accts in yesterday_overdue.items()
+        for a in accts
+    }
+    return any(
+        (client, a["label"]) not in already_overdue
+        for client, accts in overdue_today.items()
+        for a in accts
+    )
+
+
 def build_digest_email(recon_entries, manual_entries, log_date, due_items,
                         overdue_by_client, today=None):
     """Build the single combined morning email: CC-due-today action items,
@@ -899,7 +921,9 @@ def main():
 
     # ── CC-due-today + overdue-accounts trigger (evaluated against today) ──
     due_items = get_cc_due_today(today)
-    overdue_by_client = compute_overdue_accounts(load_reconciliation_log(), today)
+    recon_dates_for_overdue = load_reconciliation_log()
+    overdue_by_client = compute_overdue_accounts(recon_dates_for_overdue, today)
+    newly_overdue = has_newly_overdue_accounts(overdue_by_client, recon_dates_for_overdue, today)
 
     # ── Reconciliation-digest trigger (evaluated against yesterday's activity) ──
     log_date = args.date or (datetime.now(ZoneInfo('America/Los_Angeles')).date() - timedelta(days=1)).isoformat()
@@ -926,10 +950,14 @@ def main():
     accounts_due_yesterday = yesterday_was_eom or cc_due_yesterday
 
     has_digest_content = bool(recon_entries) or bool(manual_entries) or accounts_due_yesterday
-    has_action_items    = bool(due_items) or bool(overdue_by_client)
+    # An account that's been overdue for days shouldn't re-trigger a send
+    # every single one of those days — only the day it actually becomes
+    # overdue. It still renders in full in the email whenever one sends
+    # for another reason (CC due, recon activity, a newly-overdue sibling).
+    has_action_items = bool(due_items) or newly_overdue
     if not has_digest_content and not has_action_items:
         print("Nothing to report — no reconciliations yesterday, no accounts due, "
-              "no CC due today, nothing overdue. Skipping.")
+              "no CC due today, nothing newly overdue. Skipping.")
         sys.exit(0)
 
     subject, html = build_digest_email(recon_entries, manual_entries, log_date,
