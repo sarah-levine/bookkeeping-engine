@@ -8,12 +8,17 @@ Usage:
 
 Checks:
   1. PII scan (client name blocklist + ALLCAPS names + emails + account numbers)
-  2. Unit tests (log pipeline, config, parsers)
-  3. Client name normalization (all names in recon_log.json resolve)
-  4. Vendor normalization (global rules load, two-tier works)
-  5. Drive archiver import (dry-run, no uploads)
-  6. MCP server tools load
-  7. Fixture smoke tests (--dry-run against all manifested PDFs) [skipped with --quick]
+  2. PII scan, CI parity — same scan with no private clients dir reachable
+     at all, matching what the pii-scan GitHub Action actually runs under.
+     A developer machine with a real ~/.bookkeeping/clients dir never
+     exercises get_clients_dir()'s repo-local fallback branch, so bugs
+     specific to that branch are invisible to check_pii() above.
+  3. Unit tests (log pipeline, config, parsers)
+  4. Client name normalization (all names in recon_log.json resolve)
+  5. Vendor normalization (global rules load, two-tier works)
+  6. Drive archiver import (dry-run, no uploads)
+  7. MCP server tools load
+  8. Fixture smoke tests (--dry-run against all manifested PDFs) [skipped with --quick]
 """
 
 import os
@@ -53,6 +58,28 @@ def check_pii():
     r = subprocess.run(
         [sys.executable, str(ROOT / "tools" / "pii_scan.py")],
         capture_output=True, text=True, env={**os.environ, "BOOKKEEPING_CLIENTS_DIR": CLIENTS_DIR}
+    )
+    if r.returncode != 0:
+        return r.stdout.strip()
+    return True
+
+
+def check_pii_ci_parity():
+    """Same scan, but with no private clients dir reachable at all — no
+    BOOKKEEPING_CLIENTS_DIR, no ~/.bookkeeping/clients — which is exactly
+    what CI's runner looks like and what check_pii() above never exercises
+    (it always forces BOOKKEEPING_CLIENTS_DIR to something). A real client's
+    name/cardholder blocklist built from this repo's own clients/ dir (the
+    last fallback in get_clients_dir()) broke the pii-scan GitHub Action on
+    every push for several days before this check existed — a developer
+    machine with a real private clients dir never hits that fallback branch,
+    so this exact bug class is invisible without deliberately faking a
+    from-scratch environment."""
+    env = {k: v for k, v in os.environ.items() if k != "BOOKKEEPING_CLIENTS_DIR"}
+    env["HOME"] = "/tmp/bookkeeping_ci_parity_home"
+    r = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "pii_scan.py")],
+        capture_output=True, text=True, env=env,
     )
     if r.returncode != 0:
         return r.stdout.strip()
@@ -161,6 +188,7 @@ def main():
     print("Running pre-push checks...\n")
 
     check("PII scan", check_pii)
+    check("PII scan (CI parity — no private clients dir)", check_pii_ci_parity)
     check("Unit tests", check_unit_tests)
     check("Client name normalization", check_client_normalization)
     check("Vendor normalization (two-tier)", check_vendor_normalization)

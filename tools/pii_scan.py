@@ -28,6 +28,7 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ALLOWLIST_FILE = os.path.join(ROOT, "tools", "pii_allowlist.txt")
@@ -148,6 +149,17 @@ def _load_client_blocklist():
     except Exception:
         return blocklist
     if not cd.exists():
+        return blocklist
+    # get_clients_dir()'s last fallback (no env var, no ~/.bookkeeping/clients)
+    # is this repo's own repo-local clients/ dir — which by policy can never
+    # contain real client data (clients/README.md: real client files live in
+    # a private location). Reading it here would blocklist the fictional
+    # placeholder names in clients/example_client.json (Acme, Jane Doe, John
+    # Roe, ...) as if they were a real client, flagging every legitimate use
+    # of those adopted placeholders throughout the codebase. Confirmed live:
+    # this broke CI's pii-scan job on every push once a real private clients
+    # dir wasn't available to the runner.
+    if cd == Path(ROOT) / "clients":
         return blocklist
     skip = {"sheets_config.json", "sheets_credentials.json", "digest_config.json",
             "fixtures_manifest.json", "manual_statements.json", "recon_log.json",
