@@ -63,6 +63,20 @@ def load_manual_issues(log_date):
     return manual
 
 
+def filter_new_manual_entries(manual_entries, log_dates):
+    """manual_entries is every unresolved note regardless of date (by design
+    — log_utils.load_recon_log()'s docstring: "ALL unresolved manual notes",
+    used as-is by mcp_server.py's open_issues tool). A note left unresolved
+    for a week would otherwise look "new" every one of those days purely
+    because it's still sitting there — same class of bug as an account
+    staying overdue. Returns only the entries whose own run_time falls on
+    one of log_dates; the full unresolved list should still be shown in the
+    email whenever one sends for any reason, this is only for the send
+    decision."""
+    dates = set(log_dates)
+    return [e for e in manual_entries if e.get("run_time", "")[:10] in dates]
+
+
 def load_reconciliation_log():
     log_file = LOG_DIR / "reconciliation_log.csv"
     if not log_file.exists():
@@ -947,7 +961,9 @@ def main():
     )
     accounts_due_yesterday = yesterday_was_eom or cc_due_yesterday
 
-    has_digest_content = bool(recon_entries) or bool(manual_entries) or accounts_due_yesterday
+    new_manual_entries = filter_new_manual_entries(manual_entries, log_dates)
+
+    has_digest_content = bool(recon_entries) or bool(new_manual_entries) or accounts_due_yesterday
     # An account that's been overdue for days shouldn't re-trigger a send
     # every single one of those days — only the day it actually becomes
     # overdue. It still renders in full in the email whenever one sends

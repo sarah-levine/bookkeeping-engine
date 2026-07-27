@@ -28,6 +28,7 @@ from datetime import date
 from send_morning_digest import (
     acct_group, is_reconciliation_current, build_digest_email,
     compute_overdue_accounts, has_newly_overdue_accounts,
+    filter_new_manual_entries,
 )
 
 
@@ -231,6 +232,33 @@ class HasNewlyOverdueAccountsTest(unittest.TestCase):
     def test_last_current_day_has_no_newly_overdue(self):
         overdue = compute_overdue_accounts(self.recon_dates, date(2026, 7, 7))
         self.assertFalse(has_newly_overdue_accounts(overdue, self.recon_dates, date(2026, 7, 7)))
+
+
+class FilterNewManualEntriesTest(unittest.TestCase):
+    """load_recon_log() intentionally returns every unresolved manual note
+    regardless of date (mcp_server.py's open_issues tool needs that) — a
+    note left unresolved for a week would otherwise look "new" every one
+    of those days and re-trigger a send purely because it's still sitting
+    there. Only run_time falling on one of the target log_dates should
+    count as new for the send decision."""
+
+    def test_entry_from_target_date_is_new(self):
+        entries = [{"client": "X", "issue": "zzz", "run_time": "2026-07-26T09:00:00-07:00"}]
+        self.assertEqual(filter_new_manual_entries(entries, ["2026-07-26"]), entries)
+
+    def test_stale_unresolved_entry_from_prior_day_is_not_new(self):
+        entries = [{"client": "X", "issue": "zzz", "run_time": "2026-07-13T13:51:00-07:00"}]
+        self.assertEqual(filter_new_manual_entries(entries, ["2026-07-26"]), [])
+
+    def test_mixed_batch_keeps_only_matching_dates(self):
+        old = {"client": "X", "issue": "old", "run_time": "2026-07-13T13:51:00-07:00"}
+        new = {"client": "X", "issue": "new", "run_time": "2026-07-26T09:00:00-07:00"}
+        self.assertEqual(filter_new_manual_entries([old, new], ["2026-07-26"]), [new])
+
+    def test_matches_any_of_multiple_log_dates(self):
+        entries = [{"client": "X", "issue": "zzz", "run_time": "2026-07-25T09:00:00-07:00"}]
+        result = filter_new_manual_entries(entries, ["2026-07-24", "2026-07-25"])
+        self.assertEqual(result, entries)
 
 
 if __name__ == "__main__":
