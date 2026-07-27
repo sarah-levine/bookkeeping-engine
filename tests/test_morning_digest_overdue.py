@@ -28,6 +28,7 @@ from datetime import date
 from send_morning_digest import (
     acct_group, is_reconciliation_current, build_digest_email,
     compute_overdue_accounts, has_newly_overdue_accounts,
+    filter_new_manual_entries, should_send_digest,
 )
 
 
@@ -231,6 +232,106 @@ class HasNewlyOverdueAccountsTest(unittest.TestCase):
     def test_last_current_day_has_no_newly_overdue(self):
         overdue = compute_overdue_accounts(self.recon_dates, date(2026, 7, 7))
         self.assertFalse(has_newly_overdue_accounts(overdue, self.recon_dates, date(2026, 7, 7)))
+
+
+class FilterNewManualEntriesTest(unittest.TestCase):
+    """load_recon_log() intentionally returns every unresolved manual note
+    regardless of date (mcp_server.py's open_issues tool needs that) — a
+    note left unresolved for a week would otherwise look "new" every one
+    of those days and re-trigger a send purely because it's still sitting
+    there. Only run_time falling on one of the target log_dates should
+    count as new for the send decision."""
+
+    def test_entry_from_target_date_is_new(self):
+        entries = [{"client": "X", "issue": "zzz", "run_time": "2026-07-26T09:00:00-07:00"}]
+        self.assertEqual(filter_new_manual_entries(entries, ["2026-07-26"]), entries)
+
+    def test_stale_unresolved_entry_from_prior_day_is_not_new(self):
+        entries = [{"client": "X", "issue": "zzz", "run_time": "2026-07-13T13:51:00-07:00"}]
+        self.assertEqual(filter_new_manual_entries(entries, ["2026-07-26"]), [])
+
+    def test_mixed_batch_keeps_only_matching_dates(self):
+        old = {"client": "X", "issue": "old", "run_time": "2026-07-13T13:51:00-07:00"}
+        new = {"client": "X", "issue": "new", "run_time": "2026-07-26T09:00:00-07:00"}
+        self.assertEqual(filter_new_manual_entries([old, new], ["2026-07-26"]), [new])
+
+    def test_matches_any_of_multiple_log_dates(self):
+        entries = [{"client": "X", "issue": "zzz", "run_time": "2026-07-25T09:00:00-07:00"}]
+        result = filter_new_manual_entries(entries, ["2026-07-24", "2026-07-25"])
+        self.assertEqual(result, entries)
+
+
+class ShouldSendDigestTest(unittest.TestCase):
+    """The whole send decision, in one place, exercised by one test —
+    covers the exact scenario that slipped through in #34: the overdue
+    trigger was correctly fixed to stop re-firing, but the digest kept
+    sending daily anyway because a sibling trigger (stale unresolved
+    manual notes) had the same "still true, not actually new" bug and
+    nothing tested the combined decision. All five inputs here are
+    already-filtered "is this new" booleans/lists (filter_new_manual_
+    entries, has_newly_overdue_accounts, etc. do that filtering) —
+    should_send_digest's only job is combining them, so these tests use
+    plain synthetic values rather than real TRACKER data."""
+
+    def test_everything_stale_stays_silent(self):
+        # Old overdue accounts still overdue, old manual notes still
+        # unresolved, no new recon activity, no CC due today — exactly
+        # what reconciliation_log.csv/recon_log.json looked like on
+        # 07/25-07/27 while the digest kept sending anyway.
+        should_send, reasons = should_send_digest(
+            recon_entries=[], new_manual_entries=[], accounts_due_yesterday=False,
+            due_items=[], newly_overdue=False,
+        )
+        self.assertFalse(should_send)
+        self.assertEqual(reasons, [])
+
+    def test_recon_activity_alone_triggers_a_send(self):
+        should_send, reasons = should_send_digest(
+            recon_entries=[{"client": "X"}], new_manual_entries=[], accounts_due_yesterday=False,
+            due_items=[], newly_overdue=False,
+        )
+        self.assertTrue(should_send)
+        self.assertEqual(len(reasons), 1)
+
+    def test_new_manual_note_alone_triggers_a_send(self):
+        should_send, reasons = should_send_digest(
+            recon_entries=[], new_manual_entries=[{"issue": "x"}], accounts_due_yesterday=False,
+            due_items=[], newly_overdue=False,
+        )
+        self.assertTrue(should_send)
+        self.assertEqual(len(reasons), 1)
+
+    def test_account_due_yesterday_alone_triggers_a_send(self):
+        should_send, reasons = should_send_digest(
+            recon_entries=[], new_manual_entries=[], accounts_due_yesterday=True,
+            due_items=[], newly_overdue=False,
+        )
+        self.assertTrue(should_send)
+        self.assertEqual(len(reasons), 1)
+
+    def test_cc_due_today_alone_triggers_a_send(self):
+        should_send, reasons = should_send_digest(
+            recon_entries=[], new_manual_entries=[], accounts_due_yesterday=False,
+            due_items=[{"cc_label": "x"}], newly_overdue=False,
+        )
+        self.assertTrue(should_send)
+        self.assertEqual(len(reasons), 1)
+
+    def test_newly_overdue_alone_triggers_a_send(self):
+        should_send, reasons = should_send_digest(
+            recon_entries=[], new_manual_entries=[], accounts_due_yesterday=False,
+            due_items=[], newly_overdue=True,
+        )
+        self.assertTrue(should_send)
+        self.assertEqual(len(reasons), 1)
+
+    def test_multiple_simultaneous_triggers_all_named_in_reasons(self):
+        should_send, reasons = should_send_digest(
+            recon_entries=[{"client": "X"}], new_manual_entries=[{"issue": "x"}],
+            accounts_due_yesterday=False, due_items=[{"cc_label": "x"}], newly_overdue=True,
+        )
+        self.assertTrue(should_send)
+        self.assertEqual(len(reasons), 4)
 
 
 if __name__ == "__main__":
