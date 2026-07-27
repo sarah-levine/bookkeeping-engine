@@ -921,6 +921,44 @@ def get_cc_due_today(today=None):
     return due
 
 
+def should_send_digest(recon_entries, new_manual_entries, accounts_due_yesterday,
+                        due_items, newly_overdue):
+    """Single source of truth for whether the digest should send at all.
+    Returns (should_send, reasons) — reasons names every trigger that
+    fired (empty list if should_send is False), so a caller can log
+    exactly *why* a send happened instead of just that it did.
+
+    Every trigger here must represent something NEW as of this run, not
+    something merely still-true. An account overdue for 10 days straight,
+    or a manual note left unresolved for a week, must not each re-trigger
+    a send every one of those days for no new reason — that's what
+    new_manual_entries/newly_overdue already encode (see
+    filter_new_manual_entries / has_newly_overdue_accounts).
+
+    This function exists specifically so every trigger condition lives in
+    one place and gets exercised by one test, instead of several
+    independent inline booleans in main() that can regress individually
+    without anyone noticing: the overdue trigger was correctly fixed once
+    (a stale account no longer re-sends), but the digest kept sending
+    daily anyway because a sibling condition — stale unresolved manual
+    notes — had the exact same bug and nothing tested the *combined*
+    decision. One function, one test, covering the whole decision closes
+    that gap.
+    """
+    reasons = []
+    if recon_entries:
+        reasons.append(f"{len(recon_entries)} reconciliation(s) ran")
+    if new_manual_entries:
+        reasons.append(f"{len(new_manual_entries)} new manual note(s)")
+    if accounts_due_yesterday:
+        reasons.append("an account's statement period closed yesterday")
+    if due_items:
+        reasons.append(f"{len(due_items)} CC statement(s) due today")
+    if newly_overdue:
+        reasons.append("an account newly went overdue")
+    return bool(reasons), reasons
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", help="Log date YYYY-MM-DD. Defaults to yesterday.")
@@ -963,16 +1001,13 @@ def main():
 
     new_manual_entries = filter_new_manual_entries(manual_entries, log_dates)
 
-    has_digest_content = bool(recon_entries) or bool(new_manual_entries) or accounts_due_yesterday
-    # An account that's been overdue for days shouldn't re-trigger a send
-    # every single one of those days — only the day it actually becomes
-    # overdue. It still renders in full in the email whenever one sends
-    # for another reason (CC due, recon activity, a newly-overdue sibling).
-    has_action_items = bool(due_items) or newly_overdue
-    if not has_digest_content and not has_action_items:
-        print("Nothing to report — no reconciliations yesterday, no accounts due, "
-              "no CC due today, nothing newly overdue. Skipping.")
+    should_send, reasons = should_send_digest(
+        recon_entries, new_manual_entries, accounts_due_yesterday, due_items, newly_overdue)
+    if not should_send:
+        print("Nothing new to report — no reconciliations, no new manual notes, "
+              "no account newly due, no CC due today, nothing newly overdue. Skipping.")
         sys.exit(0)
+    print(f"Sending because: {', '.join(reasons)}")
 
     subject, html = build_digest_email(recon_entries, manual_entries, log_date,
                                         due_items, overdue_by_client, today)
