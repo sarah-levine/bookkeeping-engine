@@ -22,9 +22,13 @@ invocations each sending its own email.
 
 Synthetic dates only — no PDFs, no Drive, no network.
 """
+import csv
+import tempfile
 import unittest
 from datetime import date
+from pathlib import Path
 
+import send_morning_digest as smd
 from send_morning_digest import (
     acct_group, is_reconciliation_current, build_digest_email,
     compute_overdue_accounts, has_newly_overdue_accounts,
@@ -332,6 +336,65 @@ class ShouldSendDigestTest(unittest.TestCase):
         )
         self.assertTrue(should_send)
         self.assertEqual(len(reasons), 4)
+
+
+class LoadReconciliationLogMixedDateFormatTest(unittest.TestCase):
+    """load_reconciliation_log()'s CSV loader picks the most-recent
+    statement_date per (client, account_type). Real production data has
+    had rows for the same key written in different formats (MM/DD/YY vs
+    YYYY-MM-DD, from mark_clean.py vs write_both_logs() disagreeing before
+    that was fixed) — a naive string comparison sorts "2026-06-22" ahead
+    of "07/22/26" ('2' > '0' lexicographically) even though July is
+    chronologically later, silently hiding a newer reconciliation behind
+    a stale one. Uses a temp CSV file — no real client data."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.csv_path = Path(self.tmpdir.name) / "reconciliation_log.csv"
+        self._orig_log_dir = smd.LOG_DIR
+        smd.LOG_DIR = Path(self.tmpdir.name)
+
+    def tearDown(self):
+        smd.LOG_DIR = self._orig_log_dir
+        self.tmpdir.cleanup()
+
+    def _write_csv(self, rows):
+        fields = ["client", "client_name", "account_type", "account_ending",
+                  "statement_date", "beginning_balance", "ending_balance",
+                  "total_payments", "run_timestamp", "source"]
+        with open(self.csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fields)
+            writer.writeheader()
+            for r in rows:
+                writer.writerow(r)
+
+    def _row(self, statement_date):
+        return {"client": "TEST_CLIENT_XYZ", "client_name": "Test Client Xyz",
+                "account_type": "chase_ink", "account_ending": "",
+                "statement_date": statement_date, "beginning_balance": "1",
+                "ending_balance": "2", "total_payments": "0",
+                "run_timestamp": "2026-07-01 00:00:00", "source": "test"}
+
+    def test_iso_row_does_not_hide_a_later_mm_dd_yy_row(self):
+        # Exactly the real scenario: ISO-formatted mid-month row followed
+        # by a chronologically later MM/DD/YY row for the same key.
+        self._write_csv([
+            self._row("05/22/26"),
+            self._row("2026-06-22"),
+            self._row("07/22/26"),
+        ])
+        recon_dates = smd.load_reconciliation_log()
+        self.assertEqual(recon_dates[("TEST_CLIENT_XYZ", "chase_ink")], "07/22/26")
+
+    def test_all_same_format_still_picks_latest(self):
+        self._write_csv([self._row("05/22/26"), self._row("07/22/26"), self._row("06/22/26")])
+        recon_dates = smd.load_reconciliation_log()
+        self.assertEqual(recon_dates[("TEST_CLIENT_XYZ", "chase_ink")], "07/22/26")
+
+    def test_unparseable_existing_gets_replaced_by_any_parseable_row(self):
+        self._write_csv([self._row("not-a-date"), self._row("07/22/26")])
+        recon_dates = smd.load_reconciliation_log()
+        self.assertEqual(recon_dates[("TEST_CLIENT_XYZ", "chase_ink")], "07/22/26")
 
 
 if __name__ == "__main__":

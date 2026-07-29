@@ -168,7 +168,15 @@ def update_csv(entry: dict):
         "client_name":       entry.get("client", ""),
         "account_type":      account_type,
         "account_ending":    existing[match_idx].get("account_ending", "") if match_idx is not None else "",
-        "statement_date":    stmt_date,
+        # ISO (YYYY-MM-DD), matching write_both_logs()'s convention for this
+        # same CSV column ("for consistent ISO-sortable storage"). Writing
+        # stmt_date (MM/DD/YY) here — as opposed to stmt_date_iso, already
+        # computed above for the match key — made send_morning_digest.py's
+        # naive string "most recent" comparison pick a stale prior date over
+        # a real newer one: "2026-06-22" sorts ahead of "07/22/26"
+        # lexicographically even though July is chronologically later.
+        # Confirmed live against real production data.
+        "statement_date":    stmt_date_iso,
         "beginning_balance": entry.get("beginning_balance", ""),
         "ending_balance":    entry.get("ending_balance", ""),
         "total_payments":    existing[match_idx].get("total_payments", "") if match_idx is not None else "",
