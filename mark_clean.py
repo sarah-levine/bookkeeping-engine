@@ -123,52 +123,71 @@ def upgrade_to_clean(idx: int, entry: dict):
 
 
 def update_csv(entry: dict):
-    """Upsert the entry into reconciliation_log.csv (statement_date column)."""
-    import csv
-    from log_utils import _normalize_client_key, _now_pst
+    """Upsert the entry into reconciliation_log.csv (statement_date column).
 
-    client_key   = _normalize_client_key(entry.get("client", ""))
-    account_type = entry.get("account_type", "")
-    stmt_date    = _normalize_date(entry.get("statement_end_date", ""))
-    ts           = _now_pst().strftime("%Y-%m-%d %H:%M:%S")
+    Matches on (client, account_type, statement_date) — the same three-part
+    key write_both_logs() uses — not just (client, account_type). Matching
+    without the date used to replace whatever row happened to be first for
+    that client+account, silently destroying a *different* statement's row
+    (e.g. clobbering a prior month's entry when marking the current month
+    clean). `entry` (a recon_log.json row) also has no reliable
+    `total_payments` field — the old code substituted `difference` (the
+    balance-verification delta, not the payments total), writing wrong
+    figures into the tracker. total_payments is now preserved from the
+    existing CSV row when one is found, and left blank only when this is a
+    genuinely new row with no prior data to preserve.
+    """
+    import csv
+    from log_utils import _normalize_client_key, _normalize_date_iso, _now_pst
+
+    client_key    = _normalize_client_key(entry.get("client", ""))
+    account_type  = entry.get("account_type", "")
+    stmt_date     = _normalize_date(entry.get("statement_end_date", ""))
+    stmt_date_iso = _normalize_date_iso(entry.get("statement_end_date", ""))
+    ts            = _now_pst().strftime("%Y-%m-%d %H:%M:%S")
 
     fields = ["client", "client_name", "account_type", "account_ending",
               "statement_date", "beginning_balance", "ending_balance",
               "total_payments", "run_timestamp", "source"]
-
-    row = {
-        "client":            client_key,
-        "client_name":       entry.get("client", ""),
-        "account_type":      account_type,
-        "account_ending":    "",
-        "statement_date":    stmt_date,
-        "beginning_balance": entry.get("beginning_balance", ""),
-        "ending_balance":    entry.get("ending_balance", ""),
-        "total_payments":    entry.get("difference", ""),
-        "run_timestamp":     ts,
-        "source":            "mark_clean",
-    }
 
     existing = []
     if CSV_PATH.exists():
         with open(CSV_PATH, newline="") as f:
             existing = list(csv.DictReader(f))
 
-    replaced = False
+    match_idx = None
     for i, r in enumerate(existing):
-        if r.get("client") == client_key and r.get("account_type") == account_type:
-            existing[i] = row
-            replaced = True
+        if (r.get("client") == client_key
+                and r.get("account_type") == account_type
+                and _normalize_date_iso(r.get("statement_date", "")) == stmt_date_iso):
+            match_idx = i
             break
-    if not replaced:
+
+    row = {
+        "client":            client_key,
+        "client_name":       entry.get("client", ""),
+        "account_type":      account_type,
+        "account_ending":    existing[match_idx].get("account_ending", "") if match_idx is not None else "",
+        "statement_date":    stmt_date,
+        "beginning_balance": entry.get("beginning_balance", ""),
+        "ending_balance":    entry.get("ending_balance", ""),
+        "total_payments":    existing[match_idx].get("total_payments", "") if match_idx is not None else "",
+        "run_timestamp":     ts,
+        "source":            "mark_clean",
+    }
+
+    if match_idx is not None:
+        existing[match_idx] = row
+        verb = "Updated"
+    else:
         existing.append(row)
+        verb = "Appended"
 
     with open(CSV_PATH, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         writer.writerows(existing)
 
-    verb = "Updated" if replaced else "Appended"
     print(f"  📋 {verb} → reconciliation_log.csv  ({stmt_date}  ending ${row['ending_balance']})")
 
 

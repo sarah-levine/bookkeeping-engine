@@ -27,6 +27,43 @@ real `bmo_checking` fixture uploaded via Mode H first.
 
 ---
 
+### `reconciliation_log.csv` has historical gaps from a `mark_clean.py` upsert bug (code fixed 2026-07-28; data backfill still open)
+
+Found while reconciling a Paintbox statement: `mark_clean.py`'s `update_csv()`
+matched existing CSV rows on `(client, account_type)` only — no
+`statement_date` — unlike `log_utils.write_both_logs()`'s correct three-part
+`(client, account_type, statement_date)` match. Every time `mark_clean.py`
+ran for a client+account that already had *any* row in the CSV, it
+overwrote that row in place regardless of which statement it belonged to,
+silently destroying whichever statement's data was there before. It also
+sourced `total_payments` from the JSON entry's `difference` field (the
+balance-verification delta) instead of the actual payments total, which
+doesn't exist on `recon_log.json` entries — writing wrong dollar figures
+into the tracker on every overwrite, not just dropping rows.
+
+**Code root cause fixed 2026-07-28** in `mark_clean.py`: `update_csv()` now
+matches on the same three-part key as `write_both_logs()` (via
+`_normalize_date_iso`), and preserves `total_payments`/`account_ending`
+from the existing matched row instead of guessing from the wrong field.
+
+**Data backfill still open.** Auditing `recon_log.json` (source of truth,
+never lost data) against `reconciliation_log.csv` on 2026-07-28 found 18
+`(client, account_type)` pairs — excluding `payroll`, which lives in
+`payroll_log.csv` and isn't affected — with more distinct CLEAN/DONE
+statement dates in the JSON than rows in the CSV, e.g. `NEEDLES_STUDIO_LLC
+wells_fargo_checking` (6 JSON dates, 0 CSV rows), `DE_ANZA... bmo_checking`
+(2 dates, 0 rows), `DURAN_HUMAN_CAPITAL_PARTNERS_INC amex` (4 dates, 0
+rows) — this predates today's fix and reflects real, already-committed
+tracker gaps, not something this session introduced beyond the one Paintbox
+row (recovered manually the same day). `recon_log.json` has
+`beginning_balance`/`ending_balance` for these but no `total_payments`, so
+a mechanical backfill would still leave that column blank for every
+recovered row — needs a decision (backfill blank, or re-derive from
+statement PDFs/Drive archives) before writing anything, not a silent guess.
+Do not run a bulk CSV rewrite against this list without that decision.
+
+---
+
 ## Closed: Architecture Proposal — standardize the parser → report pipeline (complete, 2026-07-14)
 
 Captured 2026-07-07 from a design discussion, not a bug. Motivation:
