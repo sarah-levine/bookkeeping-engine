@@ -96,10 +96,21 @@ def load_reconciliation_log():
             ck, at, sd = row.get("client","").strip(), row.get("account_type","").strip(), row.get("statement_date","").strip()
             if ck and at and sd:
                 at = _at_aliases.get(at, at)
-                # Keep the most recent date if duplicate keys
+                # Keep the most recent date if duplicate keys. Parse before
+                # comparing — different write paths have put different date
+                # formats into this column (MM/DD/YY vs YYYY-MM-DD), and a
+                # raw string comparison sorts "2026-06-22" ahead of
+                # "07/22/26" (lexicographic '2' > '0') even though July is
+                # chronologically later. Confirmed live: this made a real
+                # newly-reconciled statement invisible to the tracker,
+                # silently reverting to a stale prior date.
                 existing = latest.get((ck, at))
-                if not existing or sd > existing:
+                if existing is None:
                     latest[(ck, at)] = sd
+                else:
+                    new_d, old_d = parse_date(sd), parse_date(existing)
+                    if new_d and (old_d is None or new_d > old_d):
+                        latest[(ck, at)] = sd
     return latest
 
 
