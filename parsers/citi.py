@@ -344,12 +344,16 @@ class CitiVisaCostcoParser(StatementParser):
         # ── Balances ─────────────────────────────────────────────────────────
         self.statement_new_charges = Decimal('0')
         for line in raw_lines:
-            if re.search(r'Previous [Bb]alance', line) and self.previous_balance == Decimal('0'):
+            if re.search(r'Previous\s+[Bb]alance', line) and self.previous_balance == Decimal('0'):
                 m = re.search(r'-?\$?\s*([\d,]+\.\d{2})', line)
                 if m:
                     self.previous_balance = abs(Decimal(m.group(1).replace(',', '')))
-            # "New balance as of MM/DD/YY: $XXX" or "New Balance  $XXX"
-            if re.search(r'New [Bb]alance', line) and self.new_balance == Decimal('0'):
+            # "New balance as of MM/DD/YY: $XXX" or "New Balance  $XXX" — the
+            # -layout column gap between "New" and "balance" can be many
+            # spaces wide (not always one), e.g. "New    balance    $4,098.16"
+            # in the Account Summary box vs "New balance as of..." in the
+            # rewards sidebar, so match on \s+ not a literal single space.
+            if re.search(r'New\s+[Bb]alance', line) and self.new_balance == Decimal('0'):
                 if not re.search(r'Minimum|minimum', line):
                     m = re.search(r'\$?\s*([\d,]+\.\d{2})', line)
                     if m:
