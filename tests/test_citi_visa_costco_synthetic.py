@@ -203,5 +203,122 @@ class CitiVisaCostcoSyntheticPipelineTest(unittest.TestCase):
         self.assertIn('446.44', report)
 
 
+_ORPHAN_TEXT = (
+    "Billing Period: 06/19/26-07/20/26\n"
+    "Previous Balance $446.44\n"
+    "New Balance $4,098.16\n"
+    "\n"
+    # (a) amount-above-date-line displacement (charges): a real
+    # pdftotext -layout artifact seen on a two-cardholder statement where a
+    # long vendor description line shifts the amount column onto the row
+    # above the date+description it actually belongs to, instead of
+    # trailing it. Fixed via a forward-lookahead: a bare amount line with no
+    # backward-continuation state peeks ahead past blanks for the next
+    # date-only line and defers its value there.
+    "04/12  Contoso Prior Charge   $19.99\n"
+    "                    $77.50\n"
+    "04/13  Contoso Utility Co\n"
+    "\n"
+    # (b) same displacement, but in the Payments/Credits section (negative
+    # amount) -- confirms the sign is preserved through the lookahead path,
+    # not just the unsigned charge case above.
+    "                    -$88.00\n"
+    "04/15  ONLINE PAYMENT, THANK YOU\n"
+    "\n"
+    # (c) partially letter-spaced PAYMENT keyword: only part of the word is
+    # OCR/-layout letter-spaced ('PAY M E N T', not every letter), which the
+    # old fixed-length-only despacing regex never fired on, and even after
+    # despacing can still leave one ordinary-looking space between the
+    # two recombined halves of the word. _classify_cc_transaction's
+    # whitespace-stripped fallback match is what actually makes this
+    # classify correctly, independent of how clean the display text ends up.
+    "04/16  ONLINE PAY M E N T, THANK YOU  -$55.00\n"
+    "\n"
+    # (d) bare AUTOPAY autopay-debit line: never spells out \"PAYMENT\" in
+    # full ('AUTOPAY <ref> AUTO-PMT'), and is itself partially letter-spaced
+    # ('A U T O PAY'). Needs both the despacing generalization and the
+    # explicit AUTOPAY keyword added to _classify_cc_transaction's
+    # negative-amount fallback.
+    "04/17  A U T O PAY REF12345 AUTO-PMT  -$16.41\n"
+    "\n"
+    # (e) two-cardholder subtable structure: a standalone NAME header line
+    # followed by its own \"Standard Purchases\" header shouldn't bleed
+    # state into (or drop) the next cardholder's transactions.
+    "CONTOSO CARDHOLDER ONE\n"
+    "Standard Purchases\n"
+    "04/18  Contoso One Charge   $12.34\n"
+    "CONTOSO CARDHOLDER TWO\n"
+    "Standard Purchases\n"
+    "04/19  Contoso Two Charge   $56.78\n"
+)
+
+
+class CitiVisaCostcoOrphanedAmountAndSpacingTest(unittest.TestCase):
+    """Covers the transaction-row bug logged in REFACTORING_ROADMAP.md
+    against a real citi_visa_costco statement (closing 07/20/26):
+    undercounted charges, dropped payments entirely, even though the
+    balance-header half of that same bug (fixed separately in #37) was
+    already resolved. No real client data -- fictional Contoso placeholders,
+    same convention as the class above."""
+
+    def _parser(self):
+        p = CitiVisaCostcoParser.__new__(CitiVisaCostcoParser)
+        p.client_name = None
+        p.previous_balance = Decimal('0')
+        p.new_balance = Decimal('0')
+        p.total_payments = Decimal('0')
+        p.finance_charge = Decimal('0')
+        p.payments = []
+        p.credits = []
+        p.charges = []
+        p.closing_date = None
+        p.text = _ORPHAN_TEXT
+        return p
+
+    def test_amount_above_date_line_charge(self):
+        p = self._parser()
+        p.parse()
+        by_vendor = {c['vendor']: c for c in p.charges}
+        self.assertIn('Contoso Utility Co', by_vendor)
+        self.assertEqual(by_vendor['Contoso Utility Co']['amount'], _d('77.50'))
+        # The unrelated charge before it must still parse normally --
+        # confirms the lookahead didn't consume the wrong amount.
+        self.assertIn('Contoso Prior Charge', by_vendor)
+        self.assertEqual(by_vendor['Contoso Prior Charge']['amount'], _d('19.99'))
+
+    def test_amount_above_date_line_payment_preserves_sign(self):
+        p = self._parser()
+        p.parse()
+        matching = [pmt for pmt in p.payments if pmt['date'] == '04/15/26']
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]['amount'], _d('88.00'))
+
+    def test_partially_spaced_payment_keyword_still_classifies_as_payment(self):
+        p = self._parser()
+        p.parse()
+        matching = [pmt for pmt in p.payments if pmt['date'] == '04/16/26']
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]['amount'], _d('55.00'))
+
+    def test_bare_autopay_line_classifies_as_payment_not_credit(self):
+        p = self._parser()
+        p.parse()
+        matching = [pmt for pmt in p.payments if pmt['date'] == '04/17/26']
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]['amount'], _d('16.41'))
+        # Must not have landed in credits instead (the pre-fix behavior).
+        credit_dates = [c['date'] for c in p.credits]
+        self.assertNotIn('04/17/26', credit_dates)
+
+    def test_two_cardholder_sections_both_captured(self):
+        p = self._parser()
+        p.parse()
+        by_vendor = {c['vendor']: c for c in p.charges}
+        self.assertIn('Contoso One Charge', by_vendor)
+        self.assertEqual(by_vendor['Contoso One Charge']['amount'], _d('12.34'))
+        self.assertIn('Contoso Two Charge', by_vendor)
+        self.assertEqual(by_vendor['Contoso Two Charge']['amount'], _d('56.78'))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
