@@ -812,6 +812,47 @@ payment-side lookahead, the partially-spaced PAYMENT keyword, the bare
 AUTOPAY line, and that a two-cardholder subtable structure doesn't bleed
 state across sections. Full suite (335 tests) and `pii_scan.py` both clean.
 
+**Follow-up, same day: added the missing balance-verification block.**
+Dry-running `reconcile_comprehensive.py` against the real 07/20/26 statement
+directly (not just calling the parser in isolation) surfaced a separate,
+pre-existing gap: `CitiVisaCostcoParser.generate_report()` was the only
+parser in the whole rollout with no `_balance_check`/`_is_balanced` call at
+all (confirmed in this file's own migration notes above), so it never
+printed a `✓ PASSED`/`✗ FAILED` marker. `reconcile_comprehensive.py`'s
+generic CLI gate treats a report with no marker at all as a failure
+(`no_marker`, same gate that exists specifically because a report with no
+marker once let a real run silently log $0 payments/$0 charges as
+"succeeded") — so this statement type could never pass the normal flow
+without `--force`, independent of whether extraction was correct. Almost
+certainly why the 07/20/26 statement went through Mode G manual entry in
+the first place rather than auto-parsing, even after the fix above.
+
+Added the same `calc`/`_is_balanced`/`_balance_check` pattern every other
+parser uses: `calc = previous_balance - payments - credits + charges +
+finance_charge`, checked against `new_balance`. Deliberately computed
+against the *raw* extracted `total_charges`, captured before
+`_add_missing_row()`'s padding below it — checking the padded total would
+make the check trivially pass whenever the gap happened to be covered by
+the statement's own "New Charges" subtotal (`statement_charges`), which is
+exactly the failure mode this check exists to catch.
+
+Neither real fixture currently reaches PASSED with this check — not a
+regression, both were already known-bad for unrelated reasons: the older
+`citi_visa_costco_jojo` fixture is heavily OCR-garbled (`calc` off by
+~$1,318, consistent with this file's existing notes on that fixture's
+extraction quality) and has no matching `recon_log.json` entry at all (see
+above — its provenance was already unclear before today); the 07/20/26
+statement has the one genuinely-unrecoverable `REPUBLIC SERVICES TRASH`
+line, so it's expected to keep showing FAILED until that line is filled in
+by hand. Both correctly show `✗ FAILED` now instead of silently passing
+through `--force` with no signal either way — a strict improvement even
+though neither happens to demonstrate the PASSED path. Added dedicated
+synthetic coverage instead (`CitiVisaCostcoBalanceCheckTest`, 3 tests) with
+hand-built figures constructed to reconcile (or deliberately not) on
+purpose, including one modeled directly on this statement's own real
+numbers to confirm the check would have caught the original bug. Full
+suite (338 tests) and `pii_scan.py` both clean.
+
 ### Rollout playbook
 
 **Nothing scheduled.** The Architecture Proposal rollout is complete —

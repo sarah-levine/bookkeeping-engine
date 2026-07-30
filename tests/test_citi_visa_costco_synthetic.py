@@ -23,10 +23,17 @@ The synthetic text below was constructed and verified against the real
 (pre-migration, post-import-fix) parser directly, since the OCR-repair-
 then-stateful-fallback-chain structure needs exact structural matching.
 
-Note: CitiVisaCostcoParser.generate_report() has no balance-verification
-block at all (no _balance_check/_is_balanced call), unlike every other
-parser in this rollout -- confirmed directly, there's no "Balance
-verification: PASSED" line to assert on here.
+Note: generate_report() gained a balance-verification block on 2026-07-30
+(see REFACTORING_ROADMAP.md), closing the gap with every other parser in
+this rollout -- reconcile_comprehensive.py's generic CLI gate previously
+couldn't tell a genuine failure from a report that never emits a marker at
+all, and always required --force for this statement type as a result. The
+`_TEXT` fixture below predates that change and was hand-built purely to
+exercise extraction mechanics (each fallback path, one figure at a time) --
+its numbers were never made to reconcile against each other, so its own
+report shows FAILED. See CitiVisaCostcoBalanceCheckTest further down for
+dedicated PASSED/FAILED coverage against figures built to reconcile
+(or not) on purpose.
 
 No real client data -- client_name is left unset (None), vendor names use
 the Contoso/Acme-style fictional placeholders.
@@ -191,9 +198,11 @@ class CitiVisaCostcoSyntheticPipelineTest(unittest.TestCase):
         self.assertEqual(len(p.charges), 4)
 
     def test_report_generates_without_error(self):
-        # No balance-verification block exists on this parser (unlike every
-        # other parser in this rollout) -- just confirm the report renders
-        # and the key summary figures appear.
+        # This module's _TEXT fixture predates the balance-verification
+        # block and was never built to reconcile against itself (see the
+        # module docstring) -- just confirm the report renders and the key
+        # summary figures appear. See CitiVisaCostcoBalanceCheckTest for
+        # PASSED/FAILED coverage.
         p = self._parser()
         p.parse()
         report = p.generate_report()
@@ -318,6 +327,54 @@ class CitiVisaCostcoOrphanedAmountAndSpacingTest(unittest.TestCase):
         self.assertEqual(by_vendor['Contoso One Charge']['amount'], _d('12.34'))
         self.assertIn('Contoso Two Charge', by_vendor)
         self.assertEqual(by_vendor['Contoso Two Charge']['amount'], _d('56.78'))
+
+
+class CitiVisaCostcoBalanceCheckTest(unittest.TestCase):
+    """Dedicated coverage for the balance-verification block added
+    2026-07-30 (see REFACTORING_ROADMAP.md and CLAUDE.md's balance-check
+    gate in reconcile_comprehensive.py, which previously could never pass
+    for this statement type -- the report never emitted a marker at all).
+    Builds parser state directly rather than through parse(), so the
+    figures can be constructed to reconcile (or deliberately not) on
+    purpose, independent of any real or synthetic statement text."""
+
+    def _parser(self, previous_balance, total_payments, credit_amount,
+                charge_amount, finance_charge, new_balance):
+        p = CitiVisaCostcoParser.__new__(CitiVisaCostcoParser)
+        p.client_name = None
+        p.closing_date = '04/20/26'
+        p.statement_date = ''
+        p.previous_balance = _d(previous_balance)
+        p.new_balance = _d(new_balance)
+        p.total_payments = _d(total_payments)
+        p.finance_charge = _d(finance_charge)
+        p.statement_new_charges = Decimal('0')
+        p.payments = ([{'date': '04/05/26', 'description': 'PAYMENT - THANK YOU',
+                         'amount': _d(total_payments)}] if _d(total_payments) else [])
+        p.credits = ([{'date': '04/06/26', 'description': 'Contoso Refund',
+                        'amount': _d(credit_amount)}] if _d(credit_amount) else [])
+        p.charges = ([{'date': '04/07/26', 'vendor': 'Contoso Vendor',
+                        'amount': _d(charge_amount)}] if _d(charge_amount) else [])
+        return p
+
+    def test_passes_when_figures_reconcile(self):
+        # 100.00 - 20.00 payments - 5.00 credits + 30.00 charges = 105.00
+        p = self._parser('100.00', '20.00', '5.00', '30.00', '0.00', '105.00')
+        report = p.generate_report()
+        self.assertIn('✓ Balance verification: PASSED', report)
+
+    def test_fails_when_figures_dont_reconcile(self):
+        p = self._parser('100.00', '20.00', '5.00', '30.00', '0.00', '999.00')
+        report = p.generate_report()
+        self.assertIn('✗ Balance verification: FAILED', report)
+
+    def test_fails_when_extraction_undercounts_charges(self):
+        # Mirrors the real bug this whole fix addresses: extraction that
+        # silently drops a transaction must show FAILED, not a report with
+        # no marker at all that a CLI gate can't tell apart from success.
+        p = self._parser('446.44', '1776.47', '0.00', '5158.17', '0.00', '4098.16')
+        report = p.generate_report()
+        self.assertIn('✗ Balance verification: FAILED', report)
 
 
 if __name__ == "__main__":

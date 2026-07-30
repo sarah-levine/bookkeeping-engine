@@ -736,6 +736,19 @@ class CitiVisaCostcoParser(StatementParser):
         total_charges = sum(r['amount'] for r in aggregated)
         total_credits = sum(c['amount'] for c in self.credits)
 
+        # Balance check runs against the raw extracted total, captured here
+        # BEFORE _add_missing_row() below folds any shortfall into a
+        # synthetic "*** MISSING ***" row. Checking against the padded
+        # total would make this trivially pass whenever the gap was covered
+        # by the statement's own "New Charges" subtotal (statement_charges,
+        # below) -- exactly the case this check exists to catch (see
+        # REFACTORING_ROADMAP.md's 2026-07-30 entry: a real statement's
+        # payments were silently dropped to $0 with no marker ever printed
+        # to say so).
+        calc = (self.previous_balance - self.total_payments - total_credits
+                + total_charges + self.finance_charge)
+        ok = _is_balanced(calc, self.new_balance)
+
         # Use parsed statement new charges directly; fall back to balance calculation
         statement_charges = None
         if self.statement_new_charges > Decimal('0'):
@@ -755,6 +768,7 @@ class CitiVisaCostcoParser(StatementParser):
             ('Finance Charges',   self.finance_charge if self.finance_charge else None),
             ('New Balance',       self.new_balance),
         ])
+        report += _balance_check(ok, calc)
         if self.payments:
             report += _payments_section(self.payments, self.total_payments)
         if self.credits:
