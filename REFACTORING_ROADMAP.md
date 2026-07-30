@@ -5,6 +5,58 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
+### `CitiVisaCostcoParser` mis-extracts the transaction table on some statements (balance-header half fixed 2026-07-30; transaction-row half still open)
+
+Found reconciling a real JoJo Hair Studio `citi_visa_costco` statement
+(closing 07/20/26) that failed balance verification: parser diagnostic showed
+`Previous balance: 0`, `Statement says: 0` (both should have been $446.44 and
+$4,098.16), plus charges undercounted by $763.77 and the full $1,776.47 of
+payments missing entirely, even though this is a genuine text-based PDF, not
+a scanned one.
+
+**Balance-header half — root cause found and fixed 2026-07-30.**
+`parse()`'s "Previous Balance" / "New Balance" line matching used
+`re.search(r'Previous [Bb]alance', line)` / `r'New [Bb]alance'` — a literal
+single space between the two words. `pdftotext -layout`'s column alignment
+put many spaces between them on this statement (`"Previous ...
+balance ... $446.44"`, `"New    balance    $4,098.16"`), so the regex
+silently never matched and both balances stayed at their `Decimal('0')`
+default. Fixed to `\s+` (verified: both balances now extract correctly from
+the same statement).
+
+**Transaction-row half — root cause NOT found, still open.** Even after the
+balance-header fix, `_extract_rows()` still undercounts purchases by
+$763.77 and drops the $1,776.47 of payments to $0 on this same statement.
+Reading the actual PDF pages as images (not pdftotext output) shows the
+real structure: this statement has **two cardholders** (a `citi_visa_costco`
+format the parser doesn't appear to expect), each with their own "Standard
+Purchases" subtable under a `NAME` header line, and separately, a
+"Payments, Credits and Adjustments" section with 3 rows where the layout
+places at least one row's dollar amount on the line *above* its
+date+description instead of trailing it (`pdftotext -layout` artifact — an
+"AutoPay ... -$16.41" row is immediately followed by a standalone
+"-$1,330.03" line, then *that* amount's actual date+description
+("07/14  ONLINE PAYMENT, THANKYOU") on the next line down). Several vendor
+names are also letter-spaced inconsistently ("O N L I N E PAY M E N T" —
+partial spacing, not every letter, so it doesn't match
+`fix_ocr_line()`'s existing 5/6/7-letter-run despacing regexes).
+
+Did not attempt a blind fix: CLAUDE.md's testing policy requires real-fixture
+verification for parser changes, and a fixture exists
+(`citi_visa_costco_jojo` in `fixtures_manifest.json`, stored on Drive) but
+wasn't reachable from this sandbox (no Drive credentials). Given the parser
+already correctly handles a "New Charges" running-subtotal-bleed-through case
+for this same statement type (see the `statement_new_charges` accumulation
+in `parse()`), the two-cardholder-subtable structure and the
+amount-before-date-line displacement are the two concrete things to
+reproduce against the real fixture before touching `_extract_rows()`.
+
+This statement was entered via Mode G (manual entry, transcribed from the
+statement image, all totals verified to the penny) rather than blocked on
+this fix — see `manual_statements.json` → `jojo_citi_jul2026` in
+`Bookkeeping-clients` for the transcribed data if it's useful as a second
+real fixture alongside the Drive one.
+
 ### BMO checking parser never sets `closing_date`/`statement_date`
 `BMOCheckingParser` never assigns `self.closing_date` or `self.statement_date`
 during `parse()`, same failure mode as the BofA/Wells Fargo/Northern Trust bug
