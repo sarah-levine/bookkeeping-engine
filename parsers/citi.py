@@ -442,10 +442,17 @@ class CitiVisaCostcoParser(StatementParser):
             line = re.sub(r'\^MAZON', 'AMAZON', line)
             # Strip leading noise characters before dates: 'f01/14' -> '01/14', 'a01/20' -> '01/20'
             line = re.sub(r'(?<!\d)[a-z](\d{2}/\d{2})', r' \1', line)
-            # Fix spaced-out single-letter words: 'T M O B I L E' -> 'TMOBILE' (7, 6, 5 letters)
-            line = re.sub(r'\b([A-Z])\s([A-Z])\s([A-Z])\s([A-Z])\s([A-Z])\s([A-Z])\s([A-Z])\b', r'\1\2\3\4\5\6\7', line)
-            line = re.sub(r'\b([A-Z])\s([A-Z])\s([A-Z])\s([A-Z])\s([A-Z])\s([A-Z])\b', r'\1\2\3\4\5\6', line)
-            line = re.sub(r'\b([A-Z])\s([A-Z])\s([A-Z])\s([A-Z])\s([A-Z])\b', r'\1\2\3\4\5', line)
+            # Fix spaced-out uppercase runs: 'T M O B I L E' -> 'TMOBILE'. Any
+            # run of 3+ single letters individually space-separated collapses
+            # — generalized from a fixed 5/6/7-letter-only version, which
+            # silently skipped every other run length. That gap mattered on a
+            # real statement where only *part* of a word was letter-spaced
+            # ('PAY M E N T', 'A U T O PAY') — a 4-letter fragment the old
+            # regex never fired on, which in turn made the "PAYMENT"/"AUTOPAY"
+            # keyword lookups in _classify_cc_transaction miss entirely (see
+            # that function's own note about tolerating leftover word-internal
+            # spacing this can't fully undo).
+            line = re.sub(r'\b(?:[A-Z]\s){2,}[A-Z]\b', lambda m: m.group(0).replace(' ', ''), line)
             # Fix spaced dates like '1 2 / 2 3' -> '12/23'
             line = re.sub(r'\b(\d)\s+(\d)\s*/\s*(\d)\s+(\d)\b', r'\1\2/\3\4', line)
             # Collapse spaces around slash in date context
@@ -513,6 +520,12 @@ class CitiVisaCostcoParser(StatementParser):
 
         pending_date   = None
         pending_vendor = None
+        # Set when a standalone amount line is found with no backward
+        # continuation to attach to (see the lookahead block below) — an
+        # amount waiting for a date+description line that hasn't appeared
+        # yet, consumed the next time a dateline with no amount of its own
+        # is parsed.
+        pending_lookahead_amount = None
 
         for idx, line in enumerate(lines):
             stripped = line.strip()
@@ -523,7 +536,7 @@ class CitiVisaCostcoParser(StatementParser):
             # (sidebar text after the transaction amount should not trigger a skip)
             check_portion = stripped[:len(stripped)//2 + 20].upper()
             if any(kw in check_portion for kw in skip_keywords):
-                pending_date = pending_vendor = None
+                pending_date = pending_vendor = pending_lookahead_amount = None
                 continue
 
             # Check if line is just an amount — continuation of previous
@@ -534,7 +547,40 @@ class CitiVisaCostcoParser(StatementParser):
                     _make_row(pending_date, pending_vendor, amount)
                 except Exception:
                     pass
-                pending_date = pending_vendor = None
+                pending_date = pending_vendor = pending_lookahead_amount = None
+                continue
+
+            if amt_only:
+                # A bare amount line with no backward-continuation state to
+                # attach to. On some real statements (pdftotext -layout
+                # column drift — seen on a two-cardholder citi_visa_costco
+                # statement where a long vendor description line pushes the
+                # amount column) the amount for the NEXT date+description
+                # row prints on its own line above that row instead of
+                # trailing it, e.g.:
+                #   06/21   APPLE.COM/BILL ...            $19.99
+                #                                          $493.75
+                #   06/22   COMCAST/XFINITY ...
+                # Peek ahead past blank lines; if the next content line has
+                # a date and no amount of its own, defer this amount to be
+                # picked up when that line is parsed below, rather than
+                # silently dropping it (the previous behavior).
+                sign_m = re.match(r'^\s*(-)?\$?([\d,]+\.\d{2})', line)
+                amt_val = Decimal(sign_m.group(2).replace(',', ''))
+                if sign_m.group(1):
+                    amt_val = -amt_val
+                j = idx + 1
+                while j < len(lines) and not lines[j].strip():
+                    j += 1
+                if j < len(lines):
+                    next_line = lines[j]
+                    next_stripped = next_line.strip()
+                    next_date_m = re.search(DATE_PAT, next_line)
+                    next_check_portion = next_stripped[:len(next_stripped)//2 + 20].upper()
+                    if (next_date_m
+                            and not any(kw in next_check_portion for kw in skip_keywords)
+                            and not p_amt.search(next_line[next_date_m.end():])):
+                        pending_lookahead_amount = amt_val
                 continue
 
             # Check if line is a vendor+amount continuation (no date, has $ amount)
@@ -562,7 +608,7 @@ class CitiVisaCostcoParser(StatementParser):
                         _make_row(pending_date, pending_vendor, amount)
                     except Exception:
                         pass
-                    pending_date = pending_vendor = None
+                    pending_date = pending_vendor = pending_lookahead_amount = None
                     continue
 
             # Find first date on this line (MM/DD not followed by /YY)
@@ -578,7 +624,7 @@ class CitiVisaCostcoParser(StatementParser):
                 # No date — if line looks like a header/footer, reset pending
                 # otherwise keep pending (vendor or amount may follow)
                 if re.search(r'^\s*[A-Z][a-z]|Page \d|Statement|Account|Citi', stripped):
-                    pending_date = pending_vendor = None
+                    pending_date = pending_vendor = pending_lookahead_amount = None
                 continue
 
             date_str = date_m.group()
@@ -593,8 +639,17 @@ class CitiVisaCostcoParser(StatementParser):
             # fall back to last amount (end-of-line amounts without sidebar)
             amt_matches = list(p_amt.finditer(after_first_date))
             if not amt_matches:
-                # No amount on this line — store as pending (amount may be on next line)
+                # No amount on this line — either it trails on the next line
+                # (store as pending), or it was already captured above this
+                # line by the lookahead block earlier in the loop.
                 vendor_raw = clean_vendor(re.sub(r'\s+', ' ', after_first_date.strip()))
+                if (pending_lookahead_amount is not None and len(vendor_raw) >= 2
+                        and not any(kw in vendor_raw.upper() for kw in skip_keywords)):
+                    _make_row(date_str, vendor_raw, pending_lookahead_amount)
+                    pending_lookahead_amount = None
+                    pending_date = pending_vendor = None
+                    continue
+                pending_lookahead_amount = None
                 if not any(kw in vendor_raw.upper() for kw in skip_keywords):
                     pending_date   = date_str
                     # vendor_raw may be empty if this line was just two dates — that's OK,
@@ -614,15 +669,15 @@ class CitiVisaCostcoParser(StatementParser):
             vendor_raw = clean_vendor(re.sub(r'\s+', ' ', vendor_section))
 
             if len(vendor_raw) < 2:
-                pending_date = pending_vendor = None
+                pending_date = pending_vendor = pending_lookahead_amount = None
                 continue
 
             try:
                 amount = Decimal(amt_str)
                 _make_row(date_str, vendor_raw, amount)
-                pending_date = pending_vendor = None
+                pending_date = pending_vendor = pending_lookahead_amount = None
             except Exception:
-                pending_date = pending_vendor = None
+                pending_date = pending_vendor = pending_lookahead_amount = None
 
         return rows
 
@@ -681,6 +736,19 @@ class CitiVisaCostcoParser(StatementParser):
         total_charges = sum(r['amount'] for r in aggregated)
         total_credits = sum(c['amount'] for c in self.credits)
 
+        # Balance check runs against the raw extracted total, captured here
+        # BEFORE _add_missing_row() below folds any shortfall into a
+        # synthetic "*** MISSING ***" row. Checking against the padded
+        # total would make this trivially pass whenever the gap was covered
+        # by the statement's own "New Charges" subtotal (statement_charges,
+        # below) -- exactly the case this check exists to catch (see
+        # REFACTORING_ROADMAP.md's 2026-07-30 entry: a real statement's
+        # payments were silently dropped to $0 with no marker ever printed
+        # to say so).
+        calc = (self.previous_balance - self.total_payments - total_credits
+                + total_charges + self.finance_charge)
+        ok = _is_balanced(calc, self.new_balance)
+
         # Use parsed statement new charges directly; fall back to balance calculation
         statement_charges = None
         if self.statement_new_charges > Decimal('0'):
@@ -700,6 +768,7 @@ class CitiVisaCostcoParser(StatementParser):
             ('Finance Charges',   self.finance_charge if self.finance_charge else None),
             ('New Balance',       self.new_balance),
         ])
+        report += _balance_check(ok, calc)
         if self.payments:
             report += _payments_section(self.payments, self.total_payments)
         if self.credits:

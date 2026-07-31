@@ -5,58 +5,6 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
-### `CitiVisaCostcoParser` mis-extracts the transaction table on some statements (balance-header half fixed 2026-07-30; transaction-row half still open)
-
-Found reconciling a real JoJo Hair Studio `citi_visa_costco` statement
-(closing 07/20/26) that failed balance verification: parser diagnostic showed
-`Previous balance: 0`, `Statement says: 0` (both should have been $446.44 and
-$4,098.16), plus charges undercounted by $763.77 and the full $1,776.47 of
-payments missing entirely, even though this is a genuine text-based PDF, not
-a scanned one.
-
-**Balance-header half — root cause found and fixed 2026-07-30.**
-`parse()`'s "Previous Balance" / "New Balance" line matching used
-`re.search(r'Previous [Bb]alance', line)` / `r'New [Bb]alance'` — a literal
-single space between the two words. `pdftotext -layout`'s column alignment
-put many spaces between them on this statement (`"Previous ...
-balance ... $446.44"`, `"New    balance    $4,098.16"`), so the regex
-silently never matched and both balances stayed at their `Decimal('0')`
-default. Fixed to `\s+` (verified: both balances now extract correctly from
-the same statement).
-
-**Transaction-row half — root cause NOT found, still open.** Even after the
-balance-header fix, `_extract_rows()` still undercounts purchases by
-$763.77 and drops the $1,776.47 of payments to $0 on this same statement.
-Reading the actual PDF pages as images (not pdftotext output) shows the
-real structure: this statement has **two cardholders** (a `citi_visa_costco`
-format the parser doesn't appear to expect), each with their own "Standard
-Purchases" subtable under a `NAME` header line, and separately, a
-"Payments, Credits and Adjustments" section with 3 rows where the layout
-places at least one row's dollar amount on the line *above* its
-date+description instead of trailing it (`pdftotext -layout` artifact — an
-"AutoPay ... -$16.41" row is immediately followed by a standalone
-"-$1,330.03" line, then *that* amount's actual date+description
-("07/14  ONLINE PAYMENT, THANKYOU") on the next line down). Several vendor
-names are also letter-spaced inconsistently ("O N L I N E PAY M E N T" —
-partial spacing, not every letter, so it doesn't match
-`fix_ocr_line()`'s existing 5/6/7-letter-run despacing regexes).
-
-Did not attempt a blind fix: CLAUDE.md's testing policy requires real-fixture
-verification for parser changes, and a fixture exists
-(`citi_visa_costco_jojo` in `fixtures_manifest.json`, stored on Drive) but
-wasn't reachable from this sandbox (no Drive credentials). Given the parser
-already correctly handles a "New Charges" running-subtotal-bleed-through case
-for this same statement type (see the `statement_new_charges` accumulation
-in `parse()`), the two-cardholder-subtable structure and the
-amount-before-date-line displacement are the two concrete things to
-reproduce against the real fixture before touching `_extract_rows()`.
-
-This statement was entered via Mode G (manual entry, transcribed from the
-statement image, all totals verified to the penny) rather than blocked on
-this fix — see `manual_statements.json` → `jojo_citi_jul2026` in
-`Bookkeeping-clients` for the transcribed data if it's useful as a second
-real fixture alongside the Drive one.
-
 ### BMO checking parser never sets `closing_date`/`statement_date`
 `BMOCheckingParser` never assigns `self.closing_date` or `self.statement_date`
 during `parse()`, same failure mode as the BofA/Wells Fargo/Northern Trust bug
@@ -786,6 +734,124 @@ Findings:
   bucket stores `abs(amount)` regardless of type, consistent with
   `CitiCheckingParser`/`CitiSavingsParser` (already migrated earlier in
   this rollout) and unlike BofA's mixed-sign charges bucket.
+
+### Status: `CitiVisaCostcoParser` transaction-row bug fixed (2026-07-30)
+
+Follow-up to the balance-header fix earlier the same day (#37, above): on
+the same real JoJo Hair Studio statement (closing 07/20/26), `_extract_rows()`
+undercounted purchases by $763.77 and dropped the full $1,776.47 of payments
+to $0. Root cause was two independent bugs, not one:
+
+1. **Amount-before-date-line displacement** — on a `pdftotext -layout`
+   two-cardholder statement, a long vendor-description line can push a
+   transaction's dollar amount onto its own line *above* the date+description
+   it belongs to, rather than trailing it (e.g. an Apple.com charge's amount
+   is immediately followed by a standalone `$493.75` line, then *that*
+   amount's actual `06/22  COMCAST/XFINITY ...` row below it, with no amount
+   of its own). The old loop only ever looked *backward* for a pending
+   date+vendor to attach a bare amount line to; an amount with nothing
+   pending before it was silently dropped. Fixed by adding a forward
+   lookahead: a bare amount line with no backward-continuation state peeks
+   past blank lines for the next line; if that line has a date and no
+   amount of its own, the value is deferred (`pending_lookahead_amount`) and
+   consumed when that line is reached. Same mechanism fixed the identical
+   pattern in the Payments section (`-$1,330.03` displaced above its
+   `07/14  ONLINE PAYMENT, THANKYOU` row).
+2. **Partially letter-spaced keywords broke classification, not just
+   display** — `fix_ocr_line()`'s despacing regexes only fired on a run
+   where *every* letter of a word was individually spaced, at exactly
+   5/6/7 letters. Two real lines were only *partially* spaced ("ONLINE
+   PAY M E N T, THANK YOU", "A U T O PAY ... AUTO-PMT"), which the fixed
+   list never matched, so `_classify_cc_transaction()`'s `'PAYMENT' in v`
+   check failed and both a real online payment and the AutoPay debit line
+   landed in `credits` instead of `payments`. Generalized the despacing
+   regex to any run of 3+ individually-spaced letters (was hardcoded to
+   3 fixed lengths) — but even after despacing, a single ordinary-looking
+   space can be left between two now-recombined fragments ("PAY" + "MENT"),
+   indistinguishable from a real word boundary at the regex level. Fixed
+   the actual classification risk at its source instead:
+   `_classify_cc_transaction()` now also checks keywords against a
+   whitespace-stripped copy of the vendor text, and gained an explicit
+   `AUTOPAY` keyword (gated on a negative amount, same as `PAYMENT`) since
+   Citi's own AutoPay debit line never spells out "PAYMENT" in full.
+
+**Verified**: both real fixtures this parser has. `citi_visa_costco_jojo`
+(the older, still heavily OCR-mangled real fixture) — the before/after
+diff is *not* byte-identical, but the change is a correctness fix, not a
+regression: all 6 "ONLINE PAY M E N T" payment rows on that fixture had the
+exact same misclassification bug (`Payments: $0.00` / `Credits: $5,366.74`
+before this fix, `Payments: $5,306.18` / `Credits: $60.56` after) — a
+real, previously-undiscovered defect this fix also resolves there. Checked
+`recon_log.json` and `reconciliation_log.csv` for a historical entry
+covering that fixture's statement period (03/22–04/19/26) per CLAUDE.md's
+patch-fix policy: none exists for JoJo under either the `citi_costco` or
+`citi_visa_costco` account-type key, so this misclassification does not
+appear to have reached a real reconciled statement — flagged to the user
+rather than assumed clean, since the fixture's provenance (was it ever run
+through a real reconciliation under some other key?) isn't fully known from
+the logs alone.
+
+Second verification point: the real 07/20/26 statement PDF itself,
+cross-checked against the verified-to-the-penny `manual_statements.json` →
+`jojo_citi_jul2026` entry (that statement's actual reconciliation, already
+`DONE` in `recon_log.json` — this fix doesn't touch it). Post-fix parser
+output matches that ground truth exactly: `Previous Balance $446.44`,
+3/3 payments totaling $1,776.47, 0 credits, 29/30 charges totaling
+$5,158.17. The one uncaptured charge (`07/18/26  REPUBLIC SERVICES TRASH`,
+$270.02) has no recoverable dollar amount anywhere in the PDF's text layer
+on either `pdftotext -layout` or plain `pdftotext` output, across a page
+break — not a parser bug, the text genuinely isn't there (likely an
+image/overlay artifact in the source PDF). `_add_missing_row()` surfaces
+this correctly as a `*** MISSING — enter manually ***` line for the exact
+remaining $270.02, so the report still balances to the statement's real
+`New Charges` total ($5,428.19) rather than silently under-reporting.
+
+Added 5 new synthetic tests (`CitiVisaCostcoOrphanedAmountAndSpacingTest` in
+`tests/test_citi_visa_costco_synthetic.py`) covering both the charge- and
+payment-side lookahead, the partially-spaced PAYMENT keyword, the bare
+AUTOPAY line, and that a two-cardholder subtable structure doesn't bleed
+state across sections. Full suite (335 tests) and `pii_scan.py` both clean.
+
+**Follow-up, same day: added the missing balance-verification block.**
+Dry-running `reconcile_comprehensive.py` against the real 07/20/26 statement
+directly (not just calling the parser in isolation) surfaced a separate,
+pre-existing gap: `CitiVisaCostcoParser.generate_report()` was the only
+parser in the whole rollout with no `_balance_check`/`_is_balanced` call at
+all (confirmed in this file's own migration notes above), so it never
+printed a `✓ PASSED`/`✗ FAILED` marker. `reconcile_comprehensive.py`'s
+generic CLI gate treats a report with no marker at all as a failure
+(`no_marker`, same gate that exists specifically because a report with no
+marker once let a real run silently log $0 payments/$0 charges as
+"succeeded") — so this statement type could never pass the normal flow
+without `--force`, independent of whether extraction was correct. Almost
+certainly why the 07/20/26 statement went through Mode G manual entry in
+the first place rather than auto-parsing, even after the fix above.
+
+Added the same `calc`/`_is_balanced`/`_balance_check` pattern every other
+parser uses: `calc = previous_balance - payments - credits + charges +
+finance_charge`, checked against `new_balance`. Deliberately computed
+against the *raw* extracted `total_charges`, captured before
+`_add_missing_row()`'s padding below it — checking the padded total would
+make the check trivially pass whenever the gap happened to be covered by
+the statement's own "New Charges" subtotal (`statement_charges`), which is
+exactly the failure mode this check exists to catch.
+
+Neither real fixture currently reaches PASSED with this check — not a
+regression, both were already known-bad for unrelated reasons: the older
+`citi_visa_costco_jojo` fixture is heavily OCR-garbled (`calc` off by
+~$1,318, consistent with this file's existing notes on that fixture's
+extraction quality) and has no matching `recon_log.json` entry at all (see
+above — its provenance was already unclear before today); the 07/20/26
+statement has the one genuinely-unrecoverable `REPUBLIC SERVICES TRASH`
+line, so it's expected to keep showing FAILED until that line is filled in
+by hand. Both correctly show `✗ FAILED` now instead of silently passing
+through `--force` with no signal either way — a strict improvement even
+though neither happens to demonstrate the PASSED path. Added dedicated
+synthetic coverage instead (`CitiVisaCostcoBalanceCheckTest`, 3 tests) with
+hand-built figures constructed to reconcile (or deliberately not) on
+purpose, including one modeled directly on this statement's own real
+numbers to confirm the check would have caught the original bug. Full
+suite (338 tests) and `pii_scan.py` both clean.
 
 ### Rollout playbook
 

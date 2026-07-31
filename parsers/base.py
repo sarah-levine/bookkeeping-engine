@@ -436,16 +436,32 @@ def _classify_cc_transaction(vendor, amount):
     """
     Classify a credit card transaction as 'payment', 'credit', or 'charge'.
     Returns one of: 'payment', 'credit', 'charge'
+
+    Keyword checks also run against a whitespace-stripped copy of `vendor`
+    (`v_compact`). A real Citi Costco statement had 'ONLINE PAY M E N T,
+    THANK YOU' — OCR/pdftotext letter-spacing that only hits part of a word,
+    so even after fix_ocr_line()'s despacing repair a single ordinary space
+    can be left between the two now-recombined halves of the word. That
+    space is indistinguishable from a real word boundary at the regex level,
+    so matching is the more robust fix here rather than chasing every spacing
+    variant in fix_ocr_line().
     """
     v = vendor.upper()
+    v_compact = re.sub(r'\s+', '', v)
     # Actual payments to the card account
-    if any(kw in v for kw in [
+    if any(kw in v or kw.replace(' ', '') in v_compact for kw in [
         'AUTOMATIC PAYMENT', 'PAYMENT - THANK YOU', 'ELECTRONIC PAYMENT',
         'ONLINE PAYMENT', 'AUTOPAY PAYMENT', 'PAYMENT RECEIVED',
     ]):
         return 'payment'
-    # Also treat negative amounts with PAYMENT keyword as payments
-    if amount < 0 and 'PAYMENT' in v:
+    # Also treat negative amounts with a PAYMENT/AUTOPAY keyword as payments
+    # — AUTOPAY covers Citi Costco's own "AUTOPAY <ref> AUTO-PMT" autopay
+    # debit line, which never spells out "PAYMENT" in full. Gated on a
+    # negative amount (same as the PAYMENT check) so it can't catch an
+    # ordinary positive-amount charge from a merchant with "autopay" in its
+    # name.
+    if amount < 0 and ('PAYMENT' in v or 'PAYMENT' in v_compact
+                        or 'AUTOPAY' in v or 'AUTOPAY' in v_compact):
         return 'payment'
     # Credits / refunds / returns
     if any(kw in v for kw in [
