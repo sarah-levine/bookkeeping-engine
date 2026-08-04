@@ -538,19 +538,44 @@ class BankOfAmericaCheckingParser(StatementParser):
 
         try:
             pdf = fitz.open(self.pdf_path)
-            # One check image per "Check images" page — the last embedded
-            # image on each such page is the actual check (earlier images on
-            # the page are logos/headers). Checks appear in the same order
-            # as their images across pages.
-            check_image_xrefs = []
+            # Multiple checks can share one "Check images" page (e.g. a
+            # 2-column grid) — a page isn't always exactly one check. Each
+            # check image is preceded by a "Check number: NNNN | Amount:
+            # $X.XX" text caption directly above it, so build the mapping
+            # from that instead of assuming one image per page / sequential
+            # order: find every caption's check number, then pick the
+            # non-logo image on the same page positioned just below it and
+            # left-aligned with it (logo/header images sit above the first
+            # caption and aren't below any of them).
+            check_number_to_xref = {}
             for page_num in range(len(pdf)):
                 page = pdf[page_num]
-                if 'Check images' in page.get_text():
-                    images = page.get_images()
-                    if images:
-                        check_image_xrefs.append(images[-1][0])
+                if 'Check images' not in page.get_text():
+                    continue
+                captions = []
+                for block in page.get_text('dict')['blocks']:
+                    for line in block.get('lines', []):
+                        for span in line['spans']:
+                            m = re.match(r'Check number:\s*(\d+)', span['text'])
+                            if m:
+                                captions.append((m.group(1), span['bbox']))
+                if not captions:
+                    continue
+                image_rects = []
+                for xref, *_ in page.get_images():
+                    for rect in page.get_image_rects(xref):
+                        image_rects.append((xref, rect))
+                for check_num, (cx0, _cy0, _cx1, cy1) in captions:
+                    best = min(
+                        (r for r in image_rects if r[1].y0 >= cy1 and abs(r[1].x0 - cx0) < 10),
+                        key=lambda r: r[1].y0,
+                        default=None,
+                    )
+                    if best:
+                        check_number_to_xref[check_num] = best[0]
 
-            pairs = list(zip(unmapped, check_image_xrefs))
+            pairs = [(c, check_number_to_xref[c['check_number']])
+                     for c in unmapped if c.get('check_number') in check_number_to_xref]
 
             # Opt-in Vision extraction — calls the real Anthropic API, which
             # costs money per statement with check images, so this is off
