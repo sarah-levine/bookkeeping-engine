@@ -649,13 +649,16 @@ class BankOfAmericaCheckingParser(StatementParser):
         return ''
 
     def _clean_ocr_payee(self, text):
+        # No word-count cap here — real payee names are routinely 3+ words
+        # ("Franchise Tax Board", "State Farm Insurance"). A prior version
+        # truncated to the first 2 words, silently corrupting any longer
+        # real payee name; every test fixture at the time happened to use a
+        # 2-word name, so it went uncaught. Confirmed live against a real
+        # BofA checking statement.
         cleaned = re.sub(r'^[^A-Za-z]+', '', text.strip())
         cleaned = re.sub(r'[^A-Za-z\s\-\.]+$', '', cleaned)
         cleaned = re.sub(r'[^A-Za-z\s\-\.]', ' ', cleaned)
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-        words = cleaned.split()
-        if len(words) > 2:
-            cleaned = ' '.join(words[:2])
         if len(cleaned) >= 3 and any(c.isalpha() for c in cleaned):
             return cleaned.title()
         return ''
