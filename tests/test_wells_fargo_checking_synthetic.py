@@ -159,6 +159,35 @@ class WellsFargoCheckingSyntheticPipelineTest(unittest.TestCase):
         report = p.generate_report()
         self.assertIn('Balance verification: PASSED', report)
 
+    def test_balances_with_multi_space_labels(self):
+        # pdftotext -layout column alignment can insert many spaces between
+        # words in a label; the widened balance regexes must still match.
+        # Regression test for REFACTORING_ROADMAP.md's "Literal single-space
+        # label gates across every bank parser".
+        text = _TEXT.replace(
+            "Beginning balance on 1/1 $1,000.00",
+            "Beginning    balance    on 1/1 $1,000.00",
+        ).replace(
+            "Ending balance on 1/31 $1,565.00",
+            "Ending    balance    on 1/31 $1,565.00",
+        )
+        from parsers.wells_fargo import WellsFargoCheckingParser
+        p = WellsFargoCheckingParser.__new__(WellsFargoCheckingParser)
+        p.client_name = None
+        p.beginning_balance = None
+        p.ending_balance = None
+        p.statement_period = None
+        p.closing_date = None
+        p.credits = []
+        p.debits = []
+        p.checks = []
+        p.bank_fees = []
+        p.credit_card_payments = []
+        p.text = text
+        p.parse()
+        self.assertEqual(p.beginning_balance, _d('1000.00'))
+        self.assertEqual(p.ending_balance, _d('1565.00'))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

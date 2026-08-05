@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from parsers.base import (
     StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, CLIENT_CARDHOLDERS,
-    _classify_cc_transaction, _is_known_cc_network_payment,
+    _classify_cc_transaction, _is_known_cc_network_payment, contains_label,
 )
 from parsers.row_schema import TransactionRow
 from parsers.report import *
@@ -89,24 +89,24 @@ class AmexStatementParser(StatementParser):
 
         # Account metadata
         for line in lines:
-            if 'Closing Date' in line:
-                m = re.search(r'Closing Date\s+(\d{2}/\d{2}/\d{2})', line)
+            if contains_label(line, 'Closing Date'):
+                m = re.search(r'Closing\s+Date\s+(\d{2}/\d{2}/\d{2})', line)
                 if m and not self.closing_date:
                     self.closing_date = m.group(1)
-            if 'Account Ending' in line and not self.account_number:
-                m = re.search(r'Account Ending\s+([\d\-]+)', line)
+            if contains_label(line, 'Account Ending') and not self.account_number:
+                m = re.search(r'Account\s+Ending\s+([\d\-]+)', line)
                 if m:
                     self.account_number = m.group(1)
 
         # Previous / New Balance — grab last occurrence (Account Total section)
-        prev_matches = re.findall(r'Previous Balance\s*\r?\n\s*\$([0-9,]+\.\d{2})', self.text)
+        prev_matches = re.findall(r'Previous\s+Balance\s*\r?\n\s*\$([0-9,]+\.\d{2})', self.text)
         if not prev_matches:
-            prev_matches = re.findall(r'Previous Balance\s+\$([0-9,]+\.\d{2})', self.text)
-        new_matches = re.findall(r'^New Balance\s+\$([0-9,]+\.\d{2})', self.text, re.MULTILINE)
+            prev_matches = re.findall(r'Previous\s+Balance\s+\$([0-9,]+\.\d{2})', self.text)
+        new_matches = re.findall(r'^New\s+Balance\s+\$([0-9,]+\.\d{2})', self.text, re.MULTILINE)
         if not new_matches:
-            new_matches = re.findall(r'New Balance\s*\r?\n\s*\$([0-9,]+\.\d{2})', self.text)
+            new_matches = re.findall(r'New\s+Balance\s*\r?\n\s*\$([0-9,]+\.\d{2})', self.text)
         if not new_matches:
-            new_matches = re.findall(r'New Balance\s{2,}\$([0-9,]+\.\d{2})', self.text)
+            new_matches = re.findall(r'New\s+Balance\s{2,}\$([0-9,]+\.\d{2})', self.text)
         if prev_matches:
             self.previous_balance = Decimal(prev_matches[-1].replace(',', ''))
         if new_matches:
@@ -117,14 +117,14 @@ class AmexStatementParser(StatementParser):
 
         # Fees / Interest — try the detailed section labels first, then fall back
         # to the summary "Finance Charges" line used on some AMEX statement formats.
-        m = re.search(r'Total Fees for this Period\s+\$([0-9,]+\.\d{2})', self.text)
+        m = re.search(r'Total\s+Fees\s+for\s+this\s+Period\s+\$([0-9,]+\.\d{2})', self.text)
         if m:
             self.fees = Decimal(m.group(1).replace(',', ''))
-        m = re.search(r'Total Interest Charged for this Period\s+\$([0-9,]+\.\d{2})', self.text)
+        m = re.search(r'Total\s+Interest\s+Charged\s+for\s+this\s+Period\s+\$([0-9,]+\.\d{2})', self.text)
         if m:
             self.interest = Decimal(m.group(1).replace(',', ''))
         if self.fees == 0 and self.interest == 0:
-            m = re.search(r'Finance Charges[:\s]+\$\s*([0-9,]+\.\d{2})', self.text)
+            m = re.search(r'Finance\s+Charges[:\s]+\$\s*([0-9,]+\.\d{2})', self.text)
             if m:
                 self.fees = Decimal(m.group(1).replace(',', ''))
 
@@ -484,20 +484,20 @@ class AmexCheckingParser(StatementParser):
 
         # ── metadata ──────────────────────────────────────────────────────────
         for line in lines:
-            if 'Beginning Balance as of' in line and self.beginning_balance is None:
+            if contains_label(line, 'Beginning Balance as of') and self.beginning_balance is None:
                 m = re.search(r'\$([0-9,]+\.\d{2})', line)
                 if m:
                     self.beginning_balance = Decimal(m.group(1).replace(',', ''))
-            if 'Ending Balance as of' in line and self.ending_balance is None:
+            if contains_label(line, 'Ending Balance as of') and self.ending_balance is None:
                 m = re.search(r'\$([0-9,]+\.\d{2})', line)
                 if m:
                     self.ending_balance = Decimal(m.group(1).replace(',', ''))
-            if 'Statement Date:' in line and not self.statement_date:
-                m = re.search(r'Statement Date:\s+(\d{2}/\d{2}/\d{4})', line)
+            if contains_label(line, 'Statement Date:') and not self.statement_date:
+                m = re.search(r'Statement\s+Date:\s+(\d{2}/\d{2}/\d{4})', line)
                 if m:
                     self.statement_date = m.group(1)
-            if 'Account Ending:' in line and not self.account_number:
-                m = re.search(r'Account Ending:\s+\*?(\d+)', line)
+            if contains_label(line, 'Account Ending:') and not self.account_number:
+                m = re.search(r'Account\s+Ending:\s+\*?(\d+)', line)
                 if m:
                     self.account_number = m.group(1)
 
@@ -554,7 +554,7 @@ class AmexCheckingParser(StatementParser):
         while i < len(lines):
             line = lines[i]
 
-            if 'Checks Paid Summary' in line:
+            if contains_label(line, 'Checks Paid Summary'):
                 in_checks_summary = True
                 i += 1
                 continue

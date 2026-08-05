@@ -9,7 +9,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from parsers.ocr_support import fitz, pytesseract, Image, _io, OCR_AVAILABLE
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL
+from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL, contains_label
 from parsers.row_schema import TransactionRow
 from parsers.classify import classify_checking_rows
 from parsers.report import *
@@ -86,16 +86,16 @@ class NorthernTrustCheckingParser(StatementParser):
         # populate statement_end_date in recon_log.json — without this every
         # run would log a blank date (same bug fixed in parsers/bofa.py,
         # 2026-07-02). "Statement Period\n12/01/25 through 12/31/25".
-        m = re.search(r'Statement Period\s*\n?\s*\d{2}/\d{2}/\d{2}\s+through\s+(\d{2}/\d{2}/\d{2})', self.text)
+        m = re.search(r'Statement\s+Period\s*\n?\s*\d{2}/\d{2}/\d{2}\s+through\s+(\d{2}/\d{2}/\d{2})', self.text)
         if m:
             self.closing_date = m.group(1)
 
         for line in lines:
-            if 'Beginning Balance on' in line and self.beginning_balance is None:
+            if contains_label(line, 'Beginning Balance on') and self.beginning_balance is None:
                 m = re.search(r'([\d,]+\.\d{2})', line)
                 if m:
                     self.beginning_balance = Decimal(m.group(1).replace(',', ''))
-            if 'Ending Balance on' in line and self.ending_balance is None:
+            if contains_label(line, 'Ending Balance on') and self.ending_balance is None:
                 m = re.search(r'([\d,]+\.\d{2})', line)
                 if m:
                     self.ending_balance = Decimal(m.group(1).replace(',', ''))

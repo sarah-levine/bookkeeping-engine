@@ -172,6 +172,28 @@ class CitiCheckingSyntheticPipelineTest(unittest.TestCase):
         report = p.generate_report()
         self.assertIn('Balance verification: PASSED', report)
 
+    def test_balances_and_period_with_multi_space_labels(self):
+        # pdftotext -layout column alignment can insert many spaces between
+        # words in a label; contains_label() must still match. Regression
+        # test for REFACTORING_ROADMAP.md's "Literal single-space label
+        # gates across every bank parser".
+        text = _TEXT.replace(
+            "Statement Period: May 1 - May 31, 2026",
+            "Statement    Period: May 1 - May 31, 2026",
+        ).replace(
+            "Beginning Balance: $68,444.85",
+            "Beginning    Balance: $68,444.85",
+        ).replace(
+            "Ending Balance: $68,114.85",
+            "Ending    Balance: $68,114.85",
+        )
+        p = self._parser()
+        p.text = text
+        p.parse()
+        self.assertEqual(p.statement_date, 'May 1 - May 31, 2026')
+        self.assertEqual(p.previous_balance, _d('68444.85'))
+        self.assertEqual(p.new_balance, _d('68114.85'))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -3,7 +3,7 @@ import sys
 from decimal import Decimal
 from datetime import datetime
 
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, _classify_cc_transaction
+from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, _classify_cc_transaction, contains_label
 from parsers.report import (
     _report_header, _summary_block, _balance_check, _is_balanced,
     _payments_section, _credits_section,
@@ -113,12 +113,12 @@ class CapitalOneParser(StatementParser):
 
         # ── Account summary ──────────────────────────────────────────────────
         for line in lines:
-            if 'Previous Balance' in line and self.previous_balance is None:
+            if contains_label(line, 'Previous Balance') and self.previous_balance is None:
                 m = re.search(r'\$\s*([0-9,]+\.\d{2})', line)
                 if m:
                     self.previous_balance = Decimal(m.group(1).replace(',', ''))
 
-            if (re.search(r'\bNew Balance\b', line)
+            if (re.search(r'\bNew\s+Balance\b', line)
                     and 'Minimum' not in line
                     and self.new_balance is None):
                 m = re.search(r'\$\s*([0-9,]+\.\d{2})', line)
@@ -132,7 +132,7 @@ class CapitalOneParser(StatementParser):
                     if v > 0:
                         self.fees = v
 
-            if 'Interest Charged' in line and self.interest == 0:
+            if contains_label(line, 'Interest Charged') and self.interest == 0:
                 m = re.search(r'\$\s*([0-9,]+\.\d{2})', line)
                 if m:
                     self.interest = Decimal(m.group(1).replace(',', ''))

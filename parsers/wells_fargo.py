@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, _is_known_cc_network_payment
+from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, _is_known_cc_network_payment, contains_label
 from parsers.vendor_normalize import strip_client_suffixes
 from parsers.row_schema import TransactionRow
 from parsers.report import *
@@ -50,7 +50,7 @@ class WellsFargoCreditCardParser(StatementParser):
         # Detect statement closing year from "Statement Closing Date MM/DD/YY"
         self.closing_date = None
         for line in lines:
-            m = re.search(r'Statement Closing Date[\s.]+(\d{2}/\d{2}/(\d{2,4}))', line, re.IGNORECASE)
+            m = re.search(r'Statement\s+Closing\s+Date[\s.]+(\d{2}/\d{2}/(\d{2,4}))', line, re.IGNORECASE)
             if m:
                 yr = m.group(2)
                 self.statement_year = int(yr) if len(yr) == 4 else 2000 + int(yr)
@@ -62,11 +62,11 @@ class WellsFargoCreditCardParser(StatementParser):
         # Parse summary balances
         for line in lines:
             if self.previous_balance is None:
-                m = re.search(r'Previous Balance\s+\$?([\d,]+\.\d{2})', line)
+                m = re.search(r'Previous\s+Balance\s+\$?([\d,]+\.\d{2})', line)
                 if m:
                     self.previous_balance = Decimal(m.group(1).replace(',', ''))
             if self.new_balance is None:
-                m = re.search(r'New Balance\s*=?\s*\$?([\d,]+\.\d{2})', line)
+                m = re.search(r'New\s+Balance\s*=?\s*\$?([\d,]+\.\d{2})', line)
                 if m:
                     self.new_balance = Decimal(m.group(1).replace(',', ''))
 
@@ -104,7 +104,7 @@ class WellsFargoCreditCardParser(StatementParser):
         rows = []
         in_transactions = False
         for line in lines:
-            if 'Transaction Details' in line or ('Trans' in line and 'Post' in line and 'Description' in line):
+            if contains_label(line, 'Transaction Details') or ('Trans' in line and 'Post' in line and 'Description' in line):
                 in_transactions = True
                 continue
             if not in_transactions:
@@ -347,10 +347,10 @@ class WellsFargoCheckingParser(StatementParser):
 
         # Extract statement period and balances
         for line in lines:
-            m = re.search(r'Beginning balance on (\d+/\d+)\s+\$?([\d,]+\.\d{2})', line)
+            m = re.search(r'Beginning\s+balance\s+on\s+(\d+/\d+)\s+\$?([\d,]+\.\d{2})', line)
             if m:
                 self.beginning_balance = Decimal(m.group(2).replace(',', ''))
-            m = re.search(r'Ending balance on (\d+/\d+)\s+\$?([\d,]+\.\d{2})', line)
+            m = re.search(r'Ending\s+balance\s+on\s+(\d+/\d+)\s+\$?([\d,]+\.\d{2})', line)
             if m:
                 self.ending_balance = Decimal(m.group(2).replace(',', ''))
             m = re.search(r'(\w+ \d+, \d{4})\s+Page', line)
