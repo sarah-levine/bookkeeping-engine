@@ -141,6 +141,32 @@ class AmexCheckingSyntheticPipelineTest(unittest.TestCase):
         report = p.generate_report()
         self.assertIn('Balance verification: PASSED', report)
 
+    def test_metadata_extracted_with_multi_space_labels(self):
+        # pdftotext -layout column alignment can insert many spaces between
+        # words in a label; contains_label() and its companion value-
+        # extraction regexes must both still match. Regression test for
+        # REFACTORING_ROADMAP.md's "Literal single-space label gates across
+        # every bank parser".
+        text = _TEXT.replace(
+            "Statement Date: 01/31/2026", "Statement    Date: 01/31/2026"
+        ).replace(
+            "Account Ending: *19440", "Account     Ending: *19440"
+        )
+        p = AmexCheckingParser.__new__(AmexCheckingParser)
+        p.client_name = None
+        p.beginning_balance = None
+        p.ending_balance = None
+        p.statement_date = ''
+        p.account_number = ''
+        p.credits = []
+        p.debits = []
+        p.checks = []
+        p.interest_earned = Decimal('0')
+        p.text = text
+        p.parse()
+        self.assertEqual(p.statement_date, '01/31/2026')
+        self.assertEqual(p.account_number, '19440')
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

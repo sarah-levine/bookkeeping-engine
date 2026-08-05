@@ -159,6 +159,37 @@ class BofaCheckingSyntheticPipelineTest(unittest.TestCase):
         report = p.generate_report()
         self.assertIn('Balance verification: PASSED', report)
 
+    def test_balances_and_service_fees_with_multi_space_labels(self):
+        # pdftotext -layout column alignment can insert many spaces between
+        # words in a label; contains_label() must still match. Regression
+        # test for REFACTORING_ROADMAP.md's "Literal single-space label
+        # gates across every bank parser".
+        text = _TEXT.replace(
+            "Beginning balance on 5/1/26 $1,000.00",
+            "Beginning    balance    on 5/1/26 $1,000.00",
+        ).replace(
+            "Ending balance on 5/31/26 $945.00",
+            "Ending    balance    on 5/31/26 $945.00",
+        ).replace(
+            "Total service fees -$25.00",
+            "Total    service    fees -$25.00",
+        )
+        p = BankOfAmericaCheckingParser.__new__(BankOfAmericaCheckingParser)
+        p.client_name = "Bravo Studio LLC"
+        p.beginning_balance = None
+        p.ending_balance = None
+        p.credits = []
+        p.debits = []
+        p.checks = []
+        p.service_fees = Decimal('0')
+        p.closing_date = None
+        p.credit_card_payments = []
+        p.text = text
+        p.parse()
+        self.assertEqual(p.beginning_balance, _d('1000.00'))
+        self.assertEqual(p.ending_balance, _d('945.00'))
+        self.assertEqual(p.service_fees, _d('25.00'))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -176,6 +176,28 @@ class NorthernTrustSyntheticPipelineTest(unittest.TestCase):
         self.assertIn('Balance verification: PASSED', report)
         self.assertIn('Generated: <TIMESTAMP>', report)
 
+    def test_closing_date_and_balances_with_multi_space_labels(self):
+        # pdftotext -layout column alignment can insert many spaces between
+        # words in a label; contains_label() must still match. Regression
+        # test for REFACTORING_ROADMAP.md's "Literal single-space label
+        # gates across every bank parser".
+        text = _TEXT.replace(
+            "Statement Period\n06/01/26 through 06/30/26",
+            "Statement    Period\n06/01/26 through 06/30/26",
+        ).replace(
+            "Beginning Balance on 06/01/26  5,000.00",
+            "Beginning    Balance    on 06/01/26  5,000.00",
+        ).replace(
+            "Ending Balance on 06/30/26, 2026  690.00",
+            "Ending    Balance    on 06/30/26, 2026  690.00",
+        )
+        p = self._parser()
+        p.text = text
+        p.parse()
+        self.assertEqual(p.closing_date, '06/30/26')
+        self.assertEqual(p.beginning_balance, _d('5000.00'))
+        self.assertEqual(p.ending_balance, _d('690.00'))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

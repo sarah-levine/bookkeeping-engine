@@ -135,6 +135,37 @@ class ChaseSyntheticPipelineTest(unittest.TestCase):
         self.assertIn('Contoso Widgets Inc', report)
         self.assertIn('Interest Charge On Purchases', report)
 
+    def test_closing_date_and_balances_with_multi_space_labels(self):
+        # pdftotext -layout column alignment can insert many spaces between
+        # words in a label; contains_label() must still match. Regression
+        # test for REFACTORING_ROADMAP.md's "Literal single-space label
+        # gates across every bank parser".
+        text = _TEXT.replace(
+            "Opening/Closing Date 05/22/26 - 06/21/26",
+            "Opening/Closing    Date 05/22/26 - 06/21/26",
+        ).replace(
+            "Previous Balance $1,000.00",
+            "Previous    Balance $1,000.00",
+        ).replace(
+            "New Balance $512.34",
+            "New    Balance $512.34",
+        )
+        p = ChaseParser.__new__(ChaseParser)
+        p.client_name = None
+        p.previous_balance = Decimal('0')
+        p.new_balance = Decimal('0')
+        p.total_payments = Decimal('0')
+        p.interest_charged = Decimal('0')
+        p.payments = []
+        p.credits = []
+        p.charges = []
+        p.closing_date = None
+        p.text = text
+        p.parse()
+        self.assertEqual(p.closing_date, '06/21/26')
+        self.assertEqual(p.previous_balance, _d('1000.00'))
+        self.assertEqual(p.new_balance, _d('512.34'))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

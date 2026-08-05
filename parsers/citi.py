@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from parsers.base import (
     StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL,
-    _classify_cc_transaction,
+    _classify_cc_transaction, contains_label,
 )
 from parsers.row_schema import TransactionRow
 from parsers.report import *
@@ -68,7 +68,7 @@ class CitiCheckingParser(StatementParser):
         found_beginning = False
         found_ending = False
         for line in lines:
-            if 'Beginning Balance:' in line and not found_beginning:
+            if contains_label(line, 'Beginning Balance:') and not found_beginning:
                 m = re.match(r'(\d{9})', line.strip())
                 if m:
                     self.account_number = m.group(1)
@@ -76,12 +76,12 @@ class CitiCheckingParser(StatementParser):
                 if bm:
                     self.previous_balance = Decimal(bm.group(1).replace(',', ''))
                     found_beginning = True
-            if 'Ending Balance:' in line and not found_ending:
+            if contains_label(line, 'Ending Balance:') and not found_ending:
                 bm = re.search(r'\$([\d,]+\.\d{2})', line)
                 if bm:
                     self.new_balance = Decimal(bm.group(1).replace(',', ''))
                     found_ending = True
-            if 'Statement Period' in line:
+            if contains_label(line, 'Statement Period'):
                 m = re.search(r'(\w+ \d+ - \w+ \d+, \d{4})', line)
                 if m:
                     self.statement_date = m.group(1)
@@ -832,7 +832,7 @@ class CitiSavingsParser(StatementParser):
         # unscoped text for it. Some statements only print it on earlier
         # pages and don't repeat it after the savings section.
         for line in all_lines:
-            if 'Statement Period' in line and not self.statement_date:
+            if contains_label(line, 'Statement Period') and not self.statement_date:
                 m = re.search(r'(\w+ \d+ - \w+ \d+, \d{4})', line)
                 if m:
                     self.statement_date = m.group(1)
@@ -856,12 +856,12 @@ class CitiSavingsParser(StatementParser):
         found_beginning = False
         found_ending = False
         for line in lines:
-            if 'Beginning Balance:' in line and not found_beginning:
+            if contains_label(line, 'Beginning Balance:') and not found_beginning:
                 bm = re.search(r'\$([\d,]+\.\d{2})', line)
                 if bm:
                     self.beginning_balance = Decimal(bm.group(1).replace(',', ''))
                     found_beginning = True
-            if 'Ending Balance:' in line and not found_ending:
+            if contains_label(line, 'Ending Balance:') and not found_ending:
                 bm = re.search(r'\$([\d,]+\.\d{2})', line)
                 if bm:
                     self.ending_balance = Decimal(bm.group(1).replace(',', ''))

@@ -204,6 +204,21 @@ class AmexStatementSyntheticPipelineTest(unittest.TestCase):
         report = p.generate_report()
         self.assertIn('Balance verification: PASSED', report)
 
+    def test_metadata_extracted_with_multi_space_labels(self):
+        # pdftotext -layout column alignment can insert many spaces between
+        # words in a label ("New    balance"); contains_label() must still
+        # match. Regression test for REFACTORING_ROADMAP.md's "Literal
+        # single-space label gates across every bank parser".
+        text = _TEXT.replace(
+            "Closing Date 01/31/26", "Closing    Date 01/31/26"
+        ).replace(
+            "Account Ending 1-91004", "Account     Ending 1-91004"
+        )
+        p = self._parser(text=text)
+        p.parse()
+        self.assertEqual(p.closing_date, '01/31/26')
+        self.assertEqual(p.account_number, '1-91004')
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

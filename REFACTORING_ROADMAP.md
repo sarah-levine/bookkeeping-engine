@@ -5,91 +5,28 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
-### Literal single-space label gates across every bank parser (same bug class as the CitiVisaCostcoParser balance-header fix, 2026-07-30)
+### `bofa.py`'s `'Payments and Other Credits' in stripped` section marker (same bug class as the label-gate sweep below, found while fixing it, not fixed)
 
-The `CitiVisaCostcoParser` fix that day found: `pdftotext -layout`'s column
-alignment can insert many spaces between words in a label (`"New    balance
-   $4,098.16"`), but the matching code assumed a literal single space, so it
-silently failed to find the balance and both fields stayed at their
-`Decimal('0')` default. That fix only touched `citi.py`. A follow-up sweep
-(2026-08-04) found the identical bug shape repeated ~30 times across every
-other bank parser — same root cause, not yet fixed anywhere else:
+`BankOfAmericaCreditCardParser._extract_rows()` (`parsers/bofa.py`, inside
+the transaction-extraction loop, not the metadata loop the rest of this bug
+class lived in) gates entry into the payments/credits section on
+`'Payments and Other Credits' in stripped` — a literal-space multi-word
+label, same shape as every site fixed below. Found while auditing `bofa.py`
+for the label-gate sweep (2026-08-04) but deliberately left unfixed: it's
+in a different method than every other site fixed in that pass (extraction
+loop vs. metadata loop), so fixing it would have meant re-verifying the
+whole transaction-extraction path against real fixtures rather than just
+the balance/date lines already covered by `tests/dump_report.py`'s
+byte-identical check — reasonable scope for its own pass, not a rider on
+the metadata-only sweep.
 
-```
-parsers/amex.py:92      if 'Closing Date' in line:
-parsers/amex.py:96      if 'Account Ending' in line and not self.account_number:
-parsers/amex.py:487     if 'Beginning Balance as of' in line and self.beginning_balance is None:
-parsers/amex.py:491     if 'Ending Balance as of' in line and self.ending_balance is None:
-parsers/amex.py:495     if 'Statement Date:' in line and not self.statement_date:
-parsers/amex.py:499     if 'Account Ending:' in line and not self.account_number:
-parsers/amex.py:557     if 'Checks Paid Summary' in line:
-parsers/bofa.py:79      if 'Previous Balance' in line and self.previous_balance is None:
-parsers/bofa.py:88      if 'New Balance Total' in line and self.new_balance is None:
-parsers/bofa.py:106     if 'LATE PAYMENT FEE' in line or 'RETURNED PAYMENT FEE' in line or 'ANNUAL FEE' in line:
-parsers/bofa.py:321     if 'Beginning balance on' in line and self.beginning_balance is None:
-parsers/bofa.py:325     if 'Ending balance on' in line and self.ending_balance is None:
-parsers/bofa.py:415     if 'Total service fees' in line:
-parsers/bofa.py:422     if 'Service fees' in line and 'Total' not in line:
-parsers/bofa.py:432     if 'Subtotal for card account' in line or 'Card account #' in line:
-parsers/capital_one.py:116  if 'Previous Balance' in line and self.previous_balance is None:
-parsers/capital_one.py:121  if (re.search(r'\bNew Balance\b', line)   # literal space inside \b...\b too
-parsers/capital_one.py:135  if 'Interest Charged' in line and self.interest == 0:
-parsers/chase.py:116    if 'Statement Date' in line and not self.closing_date:
-parsers/chase.py:122    if 'Previous Balance' in line and not self.previous_balance:
-parsers/chase.py:126    if 'New Balance' in line and 'Minimum' not in line and not self.new_balance:
-parsers/chase.py:130    if 'Interest Charged' in line and not self.interest_charged:
-parsers/citi.py:71      if 'Beginning Balance:' in line and not found_beginning:      (CitiCheckingParser)
-parsers/citi.py:79      if 'Ending Balance:' in line and not found_ending:
-parsers/citi.py:84      if 'Statement Period' in line:
-parsers/citi.py:766     if 'Statement Period' in line and not self.statement_date:   (CitiSavingsParser)
-parsers/citi.py:790     if 'Beginning Balance:' in line and not found_beginning:
-parsers/citi.py:795     if 'Ending Balance:' in line and not found_ending:
-parsers/northern_trust.py:94   if 'Beginning Balance on' in line and self.beginning_balance is None:
-parsers/northern_trust.py:98   if 'Ending Balance on' in line and self.ending_balance is None:
-parsers/wells_fargo.py:107  if 'Transaction Details' in line or ('Trans' in line and 'Post' in line and 'Description' in line):
-```
+**Root cause fix:** wrap in `contains_label()` (`parsers/base.py`, added by
+the sweep below): `if contains_label(stripped, 'Payments and Other
+Credits'):`. Verify against both real `bofa_credit` fixtures via
+`tests/dump_report.py` before merging, same as every other change to this
+file.
 
-(there's also `usbank.py:71`: `re.search(r'Beginning Balance on (\w+ \d+)', ...)` —
-same shape, regex form instead of a substring gate.)
-
-**Why this is worse than 30 independent one-line bugs**: patching each site
-individually would just recreate the exact duplication this roadmap's
-"Architecture Proposal" entry (below) already names as the recurring root
-cause of bugs in this codebase — the same check copy-pasted with minor
-variations across every parser, each copy able to rot independently.
-
-**Recommended fix**: add one shared helper to `parsers/base.py`, e.g.
-
-```python
-def contains_label(line: str, label: str) -> bool:
-    """Whitespace-tolerant substring check for a multi-word statement label.
-    pdftotext -layout's column alignment can insert arbitrary spacing
-    between words (e.g. "New    balance"), so a literal `label in line`
-    check silently misses real statements. Matches case-sensitively, same
-    as the `in` checks it replaces."""
-    return re.search(r'\s+'.join(re.escape(w) for w in label.split(' ')), line) is not None
-```
-
-then replace every `'X Y' in line` site above with
-`contains_label(line, 'X Y')`, and the two already-regex sites
-(`capital_one.py:121`, `usbank.py:71`) to use `\s+` directly between the
-words that currently have a literal space.
-
-**Testing**: `capital_one.py` and `usbank.py` have no synthetic unit tests
-(only real-fixture smoke tests via `smoke_all_fixtures.py` /
-`test_parsers.py`, which need Drive access this sandbox didn't have) — the
-change is a strict widening (matches every case the old literal check
-matched, plus more), so it can't newly break a currently-passing case, but
-still verify against whatever real fixtures are reachable before shipping,
-per CLAUDE.md's testing policy. `amex.py`, `bofa.py`, `chase.py`,
-`citi.py`, `wells_fargo.py` all have synthetic test coverage
-(`tests/test_*_synthetic.py`) to run after the change. Add at least one
-new test case per file with deliberate multi-space label spacing (the
-actual regression case that was invisible before) rather than relying on
-the existing fixtures alone — same lesson as the
-`tests/test_bofa_check_payees.py` rework: a passing synthetic suite that
-never varies label spacing won't catch this class of bug even after the
-helper exists.
+---
 
 ### BMO checking parser never sets `closing_date`/`statement_date`
 `BMOCheckingParser` never assigns `self.closing_date` or `self.statement_date`
@@ -942,6 +879,59 @@ becomes available, the same 3-commit branch pattern applies:
 ---
 
 ## Closed: Fixed
+
+- Literal single-space label gates across every bank parser — fixed
+  2026-08-05. Follow-up to the `CitiVisaCostcoParser` balance-header fix
+  (2026-07-30): `pdftotext -layout`'s column alignment can insert many
+  spaces between words in a label (`"New    balance    $4,098.16"`), but
+  most parsers assumed a literal single space, so the check silently missed
+  the value instead of erroring. Added `contains_label(line, label)` to
+  `parsers/base.py` (whitespace-tolerant substring check, `\s+` between
+  each word of `label`) and routed all ~30 originally-logged sites through
+  it across `amex.py`, `bofa.py`, `capital_one.py`, `chase.py`, `citi.py`,
+  `northern_trust.py`, `usbank.py`, and `wells_fargo.py`; the two sites that
+  were already regex-based (`capital_one.py`'s `\bNew Balance\b`,
+  `usbank.py`'s `Beginning Balance on` pattern) got `\s+` widened directly
+  instead.
+  **A real gap in the original sweep, caught by testing rather than by
+  inspection**: wrapping the boolean gate alone wasn't sufficient wherever
+  a companion value-extraction regex on the same line *also* repeated the
+  label text with its own literal space — e.g. `amex.py`'s `Closing Date`
+  gate now matched a multi-spaced line correctly, but the following
+  `re.search(r'Closing Date\s+(\d{2}/\d{2}/\d{2})', line)` still didn't,
+  because "Closing" and "Date" themselves still had a literal single space
+  between them. Caught immediately by the first new regression test
+  (`AssertionError: None != '01/31/26'`) rather than shipping a fix that
+  silently didn't fix anything. Audited every one of the ~30 sites for this
+  same companion-regex pattern and widened each one found (`amex.py` x4,
+  `bofa.py` x3 including `Statement Closing Date`, `wells_fargo.py` x3
+  including `Statement Closing Date` and `Beginning/Ending balance on`,
+  `northern_trust.py` x1 `Statement Period`, `usbank.py` x1 additional
+  `Beginning Balance on` site not in the original list) — all found by
+  reading the surrounding code at each site while fixing it, not by a
+  fresh independent sweep, so this is not guaranteed exhaustive either (see
+  the `bofa.py` "Payments and Other Credits" item logged separately above,
+  found the same way but deliberately not folded into this fix).
+  **Testing**: added one new synthetic test per affected parser class (9
+  total, across `amex.py` x2, `bofa.py` x2, `chase.py`, `citi.py` x2,
+  `northern_trust.py`, `wells_fargo.py` x2) with deliberately multi-spaced
+  labels — the existing fixtures never varied spacing, so none of them
+  would have caught this class of bug even with the helper in place, same
+  lesson as the `tests/test_bofa_check_payees.py` rework. Full suite (353
+  tests) and `pii_scan.py` both clean. `capital_one.py` and `usbank.py`
+  have no synthetic coverage — `usbank_checking_duran` (the one real
+  fixture reachable in this environment, cached locally) verified
+  byte-identical via `tests/dump_report.py` before/after; `capital_one.py`
+  has no fixture anywhere (real or synthetic — same absence noted in this
+  file's "Architecture Proposal" section, where the Capital One migration
+  itself is deferred for the identical reason), so verified instead via a
+  standalone manual check (not committed as a test) confirming both the
+  widened gate and regex produce identical, correct output against
+  hand-built single-space and multi-space input. `smoke_all_fixtures.py`
+  run against every real fixture in this environment: 23 passed, 4
+  warnings (pre-existing, documented data issues unrelated to this change
+  — the `citi_visa_costco_jojo`/`_2` unrecoverable-charge case and the BMO
+  photo-fixture balance mismatches), 0 failed.
 
 - `reconciliation_log.csv` historical gaps from the `mark_clean.py` upsert
   bug — data backfill completed 2026-08-04 (code root cause fixed

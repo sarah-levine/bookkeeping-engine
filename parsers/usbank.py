@@ -68,8 +68,8 @@ class USBankCheckingParser(StatementParser):
         # pdftotext -layout places dates in separate columns far from "Statement Period:"
         # Strategy: find the start date from "Beginning Balance on <Month> <D>" and
         # end date from "Ending Balance on <Month> <D>, <YYYY>"
-        m_start = re.search(r'Beginning Balance on (\w+ \d+)', self.text)
-        m_end   = re.search(r'Ending Balance on\s+(\w+ \d+,?\s*\d{4})', self.text)
+        m_start = re.search(r'Beginning\s+Balance\s+on\s+(\w+ \d+)', self.text)
+        m_end   = re.search(r'Ending\s+Balance\s+on\s+(\w+ \d+,?\s*\d{4})', self.text)
         if m_start and m_end:
             start_str = m_start.group(1).strip()
             end_str   = re.sub(r'\s+', ' ', m_end.group(1).strip())
@@ -90,10 +90,10 @@ class USBankCheckingParser(StatementParser):
                     self.closing_date = None
 
         # Beginning / Ending balance
-        m = re.search(r'Beginning Balance on \w+ \d+\s+\$?\s*([\d,]+\.\d{2})', self.text)
+        m = re.search(r'Beginning\s+Balance\s+on\s+\w+ \d+\s+\$?\s*([\d,]+\.\d{2})', self.text)
         if m:
             self.beginning_balance = Decimal(m.group(1).replace(',', ''))
-        m = re.search(r'Ending Balance on\s+\w+ \d+,?\s*\d{4}\s+\$?\s*([\d,]+\.\d{2})', self.text)
+        m = re.search(r'Ending\s+Balance\s+on\s+\w+ \d+,?\s*\d{4}\s+\$?\s*([\d,]+\.\d{2})', self.text)
         if m:
             self.ending_balance = Decimal(m.group(1).replace(',', ''))
 

@@ -508,6 +508,15 @@ def _is_known_cc_network_payment(description_upper: str) -> bool:
     return any(p in description_upper for p in _KNOWN_CC_NETWORK_PATTERNS)
 
 
+def contains_label(line: str, label: str) -> bool:
+    """Whitespace-tolerant substring check for a multi-word statement label.
+    pdftotext -layout's column alignment can insert arbitrary spacing
+    between words (e.g. "New    balance"), so a literal `label in line`
+    check silently misses real statements. Matches case-sensitively, same
+    as the `in` checks it replaces."""
+    return re.search(r'\s+'.join(re.escape(w) for w in label.split(' ')), line) is not None
+
+
 # Cardholder names per client (for multi-cardholder AmEx statements)
 # NOTE: Loaded dynamically from clients/*.json via _registry.CLIENT_CARDHOLDERS above.
 # Do not hardcode here — it would overwrite the registry.

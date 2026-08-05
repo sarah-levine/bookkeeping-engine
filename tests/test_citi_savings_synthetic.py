@@ -140,6 +140,30 @@ class CitiSavingsSyntheticPipelineTest(unittest.TestCase):
         self.assertIn('Check #1042', report)
         self.assertIn('Contoso Debit Vendor', report)
 
+    def test_balances_and_period_with_multi_space_labels(self):
+        # pdftotext -layout column alignment can insert many spaces between
+        # words in a label; contains_label() must still match. Regression
+        # test for REFACTORING_ROADMAP.md's "Literal single-space label
+        # gates across every bank parser". Widens only the real (post-
+        # SAVINGS ACTIVITY) balance lines and the unscoped Statement Period
+        # line, leaving the decoy section's spacing untouched.
+        text = _TEXT.replace(
+            "Statement Period: May 1 - May 31, 2026",
+            "Statement    Period: May 1 - May 31, 2026",
+        ).replace(
+            "Beginning Balance: $10,000.00",
+            "Beginning    Balance: $10,000.00",
+        ).replace(
+            "Ending Balance: $10,135.00",
+            "Ending    Balance: $10,135.00",
+        )
+        p = self._parser()
+        p.text = text
+        p.parse()
+        self.assertEqual(p.statement_date, 'May 1 - May 31, 2026')
+        self.assertEqual(p.beginning_balance, _d('10000.00'))
+        self.assertEqual(p.ending_balance, _d('10135.00'))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

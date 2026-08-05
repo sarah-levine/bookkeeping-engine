@@ -157,6 +157,28 @@ class BofaCreditSyntheticPipelineTest(unittest.TestCase):
         report = p.generate_report()
         self.assertIn('Balance verification: PASSED', report)
 
+    def test_balances_and_closing_date_with_multi_space_labels(self):
+        # pdftotext -layout column alignment can insert many spaces between
+        # words in a label; contains_label() and its companion value-
+        # extraction regexes must both still match. Regression test for
+        # REFACTORING_ROADMAP.md's "Literal single-space label gates across
+        # every bank parser".
+        text = _TEXT.replace(
+            "Statement Closing Date ....... 01/06/26",
+            "Statement    Closing    Date ....... 01/06/26",
+        ).replace(
+            "Previous Balance ....... $500.00",
+            "Previous    Balance ....... $500.00",
+        ).replace(
+            "New Balance Total ....... $290.00",
+            "New    Balance    Total ....... $290.00",
+        )
+        p = self._parser(text=text)
+        p.parse()
+        self.assertEqual(p.previous_balance, _d('500.00'))
+        self.assertEqual(p.new_balance, _d('290.00'))
+        self.assertEqual(p.closing_date, '01/06/26')
+
 
 class BofaCreditsAccountConfigTest(unittest.TestCase):
     """bofa_credits_account (client config) routes the "Payments and Other

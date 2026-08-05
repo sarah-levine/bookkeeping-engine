@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, _classify_cc_transaction
+from parsers.base import StatementParser, _registry, KNOWN_CLIENTS, _classify_cc_transaction, contains_label
 from parsers.row_schema import TransactionRow
 from parsers.report import *
 from parsers.report import (
@@ -109,25 +109,25 @@ class ChaseParser(StatementParser):
 
         for line in lines:
             # Statement closing date
-            if 'Opening/Closing Date' in line and not self.closing_date:
+            if contains_label(line, 'Opening/Closing Date') and not self.closing_date:
                 m = re.search(r'(\d{2}/\d{2}/\d{2})\s*-\s*(\d{2}/\d{2}/\d{2})', line)
                 if m:
                     self.closing_date = m.group(2)
-            if 'Statement Date' in line and not self.closing_date:
+            if contains_label(line, 'Statement Date') and not self.closing_date:
                 m = re.search(r'(\d{2}/\d{2}/\d{2})', line)
                 if m:
                     self.closing_date = m.group(1)
 
             # Balances
-            if 'Previous Balance' in line and not self.previous_balance:
+            if contains_label(line, 'Previous Balance') and not self.previous_balance:
                 m = re.search(r'\$?([\d,]+\.\d{2})', line)
                 if m:
                     self.previous_balance = Decimal(m.group(1).replace(',', ''))
-            if 'New Balance' in line and 'Minimum' not in line and not self.new_balance:
+            if contains_label(line, 'New Balance') and 'Minimum' not in line and not self.new_balance:
                 m = re.search(r'\$?([\d,]+\.\d{2})', line)
                 if m:
                     self.new_balance = Decimal(m.group(1).replace(',', ''))
-            if 'Interest Charged' in line and not self.interest_charged:
+            if contains_label(line, 'Interest Charged') and not self.interest_charged:
                 m = re.search(r'\+?\$?([\d,]+\.\d{2})', line)
                 if m:
                     self.interest_charged = Decimal(m.group(1).replace(',', ''))

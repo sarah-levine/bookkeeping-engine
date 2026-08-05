@@ -28,7 +28,7 @@ except ImportError:
 
 from parsers.base import (
     StatementParser, _registry, KNOWN_CLIENTS, CLIENT_CANONICAL,
-    _classify_cc_transaction, _is_known_cc_network_payment,
+    _classify_cc_transaction, _is_known_cc_network_payment, contains_label,
 )
 from parsers.row_schema import TransactionRow
 from parsers.report import *
@@ -70,27 +70,27 @@ class BankOfAmericaCreditCardParser(StatementParser):
 
         # Extract closing date from "Statement Closing Date ........ MM/DD/YY"
         for line in lines:
-            m = re.search(r'Statement Closing Date[\s.]+(\d{2}/\d{2}/\d{2,4})', line, re.IGNORECASE)
+            m = re.search(r'Statement\s+Closing\s+Date[\s.]+(\d{2}/\d{2}/\d{2,4})', line, re.IGNORECASE)
             if m:
                 self.closing_date = m.group(1)
                 break
 
         for line in lines:
-            if 'Previous Balance' in line and self.previous_balance is None:
+            if contains_label(line, 'Previous Balance') and self.previous_balance is None:
                 # Search for amount after "Previous Balance" keyword specifically.
                 # Must capture optional leading minus sign so credit balances (e.g. -$91.13) are negative.
-                m = re.search(r'Previous Balance\s*[.$]*\s*(-?)\$?([\d,]+\.\d{2})', line)
+                m = re.search(r'Previous\s+Balance\s*[.$]*\s*(-?)\$?([\d,]+\.\d{2})', line)
                 if not m:
-                    m = re.search(r'Previous Balance.*?(-?)\$([\d,]+\.\d{2})', line)
+                    m = re.search(r'Previous\s+Balance.*?(-?)\$([\d,]+\.\d{2})', line)
                 if m:
                     sign = -1 if m.group(1) == '-' else 1
                     self.previous_balance = sign * Decimal(m.group(2).replace(',', ''))
-            if 'New Balance Total' in line and self.new_balance is None:
+            if contains_label(line, 'New Balance Total') and self.new_balance is None:
                 # Search for amount after "New Balance Total" keyword specifically.
                 # Capture optional leading minus sign for credit balances.
-                m = re.search(r'New Balance Total\s*[.$]*\s*(-?)\$?([\d,]+\.\d{2})', line)
+                m = re.search(r'New\s+Balance\s+Total\s*[.$]*\s*(-?)\$?([\d,]+\.\d{2})', line)
                 if not m:
-                    m = re.search(r'New Balance Total.*?(-?)\$([\d,]+\.\d{2})', line)
+                    m = re.search(r'New\s+Balance\s+Total.*?(-?)\$([\d,]+\.\d{2})', line)
                 if m:
                     sign = -1 if m.group(1) == '-' else 1
                     self.new_balance = sign * Decimal(m.group(2).replace(',', ''))
@@ -103,7 +103,7 @@ class BankOfAmericaCreditCardParser(StatementParser):
                 m = re.search(r'([\d,]+\.\d{2})$', line)
                 if m:
                     self.finance_charge = Decimal(m.group(1).replace(',', ''))
-            if 'LATE PAYMENT FEE' in line or 'RETURNED PAYMENT FEE' in line or 'ANNUAL FEE' in line:
+            if contains_label(line, 'LATE PAYMENT FEE') or contains_label(line, 'RETURNED PAYMENT FEE') or contains_label(line, 'ANNUAL FEE'):
                 m = re.search(r'([\d,]+\.\d{2})$', line)
                 if m:
                     self.fees += Decimal(m.group(1).replace(',', ''))
@@ -318,11 +318,11 @@ class BankOfAmericaCheckingParser(StatementParser):
         self.closing_date = self._extract_closing_date()
 
         for line in lines:
-            if 'Beginning balance on' in line and self.beginning_balance is None:
+            if contains_label(line, 'Beginning balance on') and self.beginning_balance is None:
                 m = re.search(r'\$?([\d,]+\.\d{2})', line)
                 if m:
                     self.beginning_balance = Decimal(m.group(1).replace(',', ''))
-            if 'Ending balance on' in line and self.ending_balance is None:
+            if contains_label(line, 'Ending balance on') and self.ending_balance is None:
                 m = re.search(r'\$?([\d,]+\.\d{2})', line)
                 if m:
                     self.ending_balance = Decimal(m.group(1).replace(',', ''))
@@ -412,14 +412,14 @@ class BankOfAmericaCheckingParser(StatementParser):
                 continue
 
             # Capture total service fees line e.g. 'Total service fees -$8.00'
-            if 'Total service fees' in line:
+            if contains_label(line, 'Total service fees'):
                 m = re.search(r'-\$?([\d,]+\.\d{2})', line)
                 if m:
                     self.service_fees = Decimal(m.group(1).replace(',', ''))
                 in_deposits = in_withdrawals = in_checks = False
                 continue
 
-            if 'Service fees' in line and 'Total' not in line:
+            if contains_label(line, 'Service fees') and 'Total' not in line:
                 if current_date and current_desc and current_amount is not None:
                     save_transaction(current_date, current_desc, current_amount,
                                      in_deposits, in_withdrawals)
@@ -429,7 +429,7 @@ class BankOfAmericaCheckingParser(StatementParser):
 
             if line.strip().startswith('Date') and 'Description' in line:
                 continue
-            if 'Subtotal for card account' in line or 'Card account #' in line:
+            if contains_label(line, 'Subtotal for card account') or contains_label(line, 'Card account #'):
                 continue
 
             if in_deposits or in_withdrawals:
