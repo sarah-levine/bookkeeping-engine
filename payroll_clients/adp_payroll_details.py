@@ -303,28 +303,40 @@ def _build_journal(data: dict, wc_amount: float, cfg: dict) -> list:
 
 def run_adp_payroll_details(args, config_name):
     if len(args) < 1:
-        print("Usage: python payroll.py adp_payroll_details <payroll_details.pdf> --config <client.json>")
+        print("Usage: python payroll.py adp_payroll_details <payroll_details.pdf> <payroll_liability.pdf> --config <client.json>")
         sys.exit(1)
     pdf          = args[0]
     liability_pdf = args[1] if len(args) > 1 else None
     cfg          = load_config(config_name)
 
+    # The Liability PDF is required, not optional -- it's the only source
+    # for the Workers Comp / Pay-by-Pay figure, which has no config-level
+    # default for this format (unlike adp_payroll_tipped's
+    # workers_comp_refund). Silently defaulting a real, nonzero, per-run
+    # dollar amount to $0.00 produced a balanced-looking but wrong journal
+    # entry -- caught live when a real run's WC was $0 only because the
+    # Liability PDF hadn't been uploaded yet, not because WC was actually
+    # zero that period. Error out instead of generating a report that
+    # looks final but is missing money.
+    if not liability_pdf:
+        print(f"ERROR: Missing required Payroll Liability PDF for {pdf}")
+        print("  adp_payroll_details needs both the Payroll Details PDF and its")
+        print("  matching Payroll Liability PDF (for the Workers Comp / Pay-by-Pay")
+        print("  figure) -- provide both:")
+        print("  python payroll.py <client_key> <payroll_details.pdf> <payroll_liability.pdf>")
+        sys.exit(1)
+
     # Verify both PDFs are from the same payroll period before parsing further.
-    if liability_pdf:
-        verify_same_check_date({
-            "Payroll Details":   pdf,
-            "Payroll Liability": liability_pdf,
-        })
+    verify_same_check_date({
+        "Payroll Details":   pdf,
+        "Payroll Liability": liability_pdf,
+    })
 
     data = parse_payroll_details(pdf, contractors_1099=cfg.get("contractors_1099"))
 
-    wc_amount = 0.0
-    if liability_pdf:
-        liab = parse_liability(liability_pdf)
-        wc_amount = liab["wc"]
-        print(f"Pay-by-Pay (WC) from Liability PDF: ${wc_amount:.2f}")
-    else:
-        print("⚠️  No Payroll Liability PDF provided — Workers Comp will be $0.00")
+    liab = parse_liability(liability_pdf)
+    wc_amount = liab["wc"]
+    print(f"Pay-by-Pay (WC) from Liability PDF: ${wc_amount:.2f}")
 
     rows = _build_journal(data, wc_amount, cfg)
     print_journal_table(rows, cfg["client_name"], data["check_date"])
