@@ -873,7 +873,7 @@ def sync_sheet_to_log():
                 added += 1
     if added > 0:
         with open(log_file, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore", lineterminator="\n")
             writer.writeheader()
             writer.writerows(rows)
         print(f"✅ Synced {added} sheet date(s) into reconciliation_log.csv")

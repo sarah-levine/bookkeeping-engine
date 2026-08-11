@@ -638,7 +638,7 @@ def write_both_logs(
             existing_rows.append(row)
 
         with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fields)
+            writer = csv.DictWriter(f, fieldnames=fields, lineterminator="\n")
             writer.writeheader()
             writer.writerows(existing_rows)
 

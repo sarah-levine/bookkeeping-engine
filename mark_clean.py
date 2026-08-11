@@ -192,7 +192,7 @@ def update_csv(entry: dict):
         verb = "Appended"
 
     with open(CSV_PATH, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fields)
+        writer = csv.DictWriter(f, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(existing)
 

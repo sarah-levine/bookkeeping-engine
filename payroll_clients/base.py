@@ -212,7 +212,7 @@ def _upsert_csv(log_path: Path, fields: list, key_fields: list, entry: dict):
         rows.append(entry)
 
     with open(log_path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
+        w = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore', lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
 

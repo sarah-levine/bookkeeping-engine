@@ -208,7 +208,7 @@ def sync_log_from_sheet() -> int:
                 'client','client_name','account_type','account_ending',
                 'statement_date','beginning_balance','ending_balance',
                 'total_payments','source','run_timestamp'
-            ])
+            ], lineterminator="\n")
             if not file_exists:
                 writer.writeheader()
             writer.writerows(new_rows)
