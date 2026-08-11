@@ -5,49 +5,6 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
-### `adp_payroll_professional.parse_admin()` silently drops unrecognized earnings categories (found 2026-08-11, fixing the tax-total bug below exposed it)
-
-`parse_admin()` (staff/admin wages, Department 002) only recognizes a
-hardcoded, closed list of five earnings categories: `regular`, `overtime`,
-`holiday`, `sick`, `travel`. Any category on the statement that isn't
-exactly one of those five is silently dropped from gross wages entirely —
-no warning, no error, no fallback bucket. Contrast with
-`adp_payroll_details.py`'s equivalent Associates-earnings parser, which
-already handles this correctly: it warns on an unrecognized category
-("New Associates earnings category 'Backpay' ($248.10) included in gross
-wages — not previously seen, verify this is correct") and still includes
-it, rather than silently discarding it.
-
-**Found via**: fixing `parse_company_totals()`'s tax-total heuristic (a
-position/magnitude guess replaced with direct per-label extraction, same
-session) corrected a real client's payroll journal entry's credit side,
-which exposed that the debit side was *also* wrong — the entry went from
-"balanced by coincidence, both sides wrong" to visibly OUT OF BALANCE by
-exactly $1,400.00. That statement had a "Vacation" line
-(`Vacation 40.00 $1,400.00`) that `parse_admin()` doesn't recognize, so it
-never made it into the journal at all. This is exactly why fixing one
-silent-default bug is worth doing even when it doesn't fully balance the
-books afterward: a visible imbalance is strictly better than a
-plausible-looking wrong number, because it surfaces the *next* bug instead
-of hiding it.
-
-**Root cause fix**: give `parse_admin()` the same shape as
-`adp_payroll_details.py`'s Associates-earnings parser — iterate every
-earnings-category line actually present in the `DepartmentTotals:002`
-block rather than searching for five fixed literal category names, add any
-category not in the known set to gross wages with a printed warning
-(matching the existing warning convention), and account for it with a
-labeled memo in the journal entry (the existing categories already do this
-via their own line items) rather than lumping it silently into "Regular."
-
-**Not fixed here** — this is a second, independent bug from the tax-total
-one; fixing it needs its own verification pass, not a rushed follow-on
-patch. The specific statement that surfaced this (a real client's payroll,
-check date 7/17/2026, Run 0509) should NOT be entered into QuickBooks
-until this is resolved — its current journal entry is short $1,400 of
-Vacation wages on the debit side.
-
-
 ### `bofa.py`'s `'Payments and Other Credits' in stripped` section marker (same bug class as the label-gate sweep below, found while fixing it, not fixed)
 
 `BankOfAmericaCreditCardParser._extract_rows()` (`parsers/bofa.py`, inside
@@ -922,6 +879,27 @@ becomes available, the same 3-commit branch pattern applies:
 ---
 
 ## Closed: Fixed
+
+- `adp_payroll_professional.parse_admin()` silently dropped unrecognized
+  earnings categories — fixed 2026-08-11, same session that found it. Gave
+  `parse_admin()` the same shape as `adp_payroll_details.py`'s
+  Associates-earnings parser: iterate every earnings-category line actually
+  present in the `DepartmentTotals:002` block instead of searching for five
+  fixed literal category names (`regular`, `overtime`, `holiday`, `sick`,
+  `travel`); any category not in that known set now goes into a new
+  `other`/`other_labels` bucket with a printed warning (same convention as
+  the Associates-earnings parser's own unknown-category case), and
+  `_build_journal()` adds it as its own labeled debit row rather than
+  dropping it. **Testing**: no synthetic fixture exists for this format, so
+  verified against both real client PDFs held for this reconciliation run —
+  the check date 7/17/2026 (Run 0509) statement, which has a `Vacation
+  40.00 $1,400.00` line that previously vanished silently, now shows
+  "Admin other: $1,400.00 (Vacation)" and the journal entry is fully
+  BALANCED ($19,706.55, previously OUT OF BALANCE by exactly $1,400.00);
+  the check date 7/31/2026 (Run 0511) statement, which has no unrecognized
+  categories, reproduces byte-identical output (BALANCED $28,556.09, no
+  "Admin other" line). `pii_scan.py` clean. That 7/17/2026 statement can now
+  be entered into QuickBooks.
 
 - Literal single-space label gates across every bank parser — fixed
   2026-08-05. Follow-up to the `CitiVisaCostcoParser` balance-header fix

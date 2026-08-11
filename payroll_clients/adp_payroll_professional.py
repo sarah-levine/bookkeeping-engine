@@ -64,29 +64,57 @@ def parse_officers(lines: list) -> list:
     return employees
 
 
+# Known Admin (dept 002) earnings-category labels -> totals dict key.
+_ADMIN_KNOWN_LABELS = {
+    'Regular': 'regular', 'Overtime': 'overtime', 'Holiday': 'holiday',
+    'Sick': 'sick', 'Travel': 'travel',
+}
+# Matches a prefix only (no end-of-line anchor): pdftotext flattens each
+# earnings row's trailing tax/deduction columns onto the same line (e.g.
+# "Regular 131.75 $5,601.01 FEDFIT $604.70 ..."), same shape documented in
+# adp_payroll_details.py's parse_associates_earnings().
+_ADMIN_EARNINGS_LINE_RE = re.compile(r'^([A-Za-z]+)\s+[\d.]+\s+\$([\d,]+\.\d+)')
+
+
 def parse_admin(lines: list) -> dict:
-    """Returns {regular, overtime, holiday, sick, travel} from DepartmentTotals:002.
+    """Returns {regular, overtime, holiday, sick, travel, other, other_labels}
+    from DepartmentTotals:002.
+
+    Iterates every earnings-category line actually present in the block
+    instead of searching for five fixed literal category names. The fixed
+    list silently dropped any unrecognized category out of gross wages
+    entirely, with no warning -- a "Vacation" line went missing this way
+    until 2026-08-11, throwing a real journal entry $1,400 out of balance
+    (found because fixing a separate tax-parsing bug in the same statement
+    made the entry visibly imbalanced instead of wrong-but-balanced).
+    Unrecognized labels are now summed into "other" with a printed
+    warning, same convention as adp_payroll_details.py's
+    parse_associates_earnings() uses for its own unknown-category case.
 
     Note: 'sick' is treated as gross wages (same account as Regular), matching
     how ADP rolls it up on the PDF.
     """
     totals = {"regular": 0.0, "overtime": 0.0, "holiday": 0.0,
-              "sick": 0.0, "travel": 0.0}
+              "sick": 0.0, "travel": 0.0, "other": 0.0, "other_labels": []}
     in_totals = False
     for line in lines:
         if "DepartmentTotals:002" in line:
             in_totals = True; continue
         if in_totals and "TotalEmployees-002" in line: break
         if not in_totals: continue
-        for key, pattern in [
-            ("regular",  r'Regular\s+[\d.]+\s+(\$[\d,]+\.\d+)'),
-            ("overtime", r'Overtime\s+[\d.]+\s+(\$[\d,]+\.\d+)'),
-            ("holiday",  r'Holiday\s+[\d.]+\s+(\$[\d,]+\.\d+)'),
-            ("sick",     r'Sick\s+[\d.]+\s+(\$[\d,]+\.\d+)'),
-            ("travel",   r'Travel\s+[\d.]+\s+(\$[\d,]+\.\d+)'),
-        ]:
-            m = re.search(pattern, line)
-            if m: totals[key] = amt(m.group(1))
+        m = _ADMIN_EARNINGS_LINE_RE.match(line)
+        if not m: continue
+        label, amount_str = m.group(1), m.group(2)
+        amount = amt(amount_str)
+        key = _ADMIN_KNOWN_LABELS.get(label)
+        if key:
+            totals[key] = amount
+        else:
+            totals["other"] += amount
+            totals["other_labels"].append(label)
+            print(f"  ℹ️  New Admin earnings category '{label}' "
+                  f"(${amount:,.2f}) included in gross wages — not previously "
+                  f"seen, verify this is correct.")
     return totals
 
 
@@ -204,6 +232,9 @@ def _build_journal(cfg: dict, officers: list, admin: dict,
                              debit=admin["sick"], memo="Sick"))
     if admin["travel"] > 0:
         rows.append(make_row(check_date, admin_cfg["travel_account"], debit=admin["travel"], memo="Travel"))
+    if admin.get("other", 0) > 0:
+        rows.append(make_row(check_date, admin_cfg.get("regular_account"),
+                             debit=admin["other"], memo=", ".join(admin.get("other_labels", [])) or "Other"))
 
     dept_1099_cfg = dept_cfg.get("005", {})
     if total_1099 > 0:
@@ -283,6 +314,8 @@ def run_adp_payroll_professional(args, config_name):
     if admin.get('sick', 0) > 0:
         print(f"  Admin sick:     ${admin['sick']:,.2f}")
     print(f"  Admin travel:   ${admin['travel']:,.2f}")
+    if admin.get('other', 0) > 0:
+        print(f"  Admin other:    ${admin['other']:,.2f}  ({', '.join(admin.get('other_labels', []))})")
     print(f"  1099:           ${total_1099:,.2f}")
     print(f"  Net pay:        ${totals['net_pay']:,.2f}")
     print(f"  Emp taxes:      ${totals['total_taxes']:,.2f}")
