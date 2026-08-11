@@ -121,19 +121,32 @@ def parse_company_totals(lines: list) -> dict:
     m = re.search(r'\$([\d,]+\.\d{2})\s+FEDSOCSEC-ER', block)
     if m: totals["net_pay"] = amt(m.group(1))
 
-    # Employee taxes
-    casdi_idx = block.rfind("CASDI")
-    if casdi_idx >= 0:
-        post  = block[casdi_idx:]
-        large = [amt(a) for a in re.findall(r'\$([\d,]+\.\d{2})', post) if amt(a) > 1000]
-        if len(large) >= 2: totals["total_taxes"] = large[-2]
-        elif len(large) == 1: totals["total_taxes"] = large[0]
-    if totals["total_taxes"] == 0.0:
-        emp = 0.0
-        for t in ["FEDFIT", "FEDSOCSEC", "FEDMEDCARE", "CASIT", "CASDI"]:
-            m = re.search(rf'{t}\s+\$([\d,]+\.\d{{2}})', block)
-            if m: emp += amt(m.group(1))
-        totals["total_taxes"] = round(emp, 2)
+    # Employee taxes -- sum each labeled tax field directly instead of
+    # guessing by position/magnitude in the linearized number stream. The
+    # previous version picked "the 2nd-to-last dollar amount over $1,000
+    # after CASDI", which isn't tied to what any of those numbers actually
+    # are -- it silently returns the wrong figure whenever the layout's
+    # number count/order differs from whatever statement it was written
+    # against. Confirmed live: it returned $1,975.75 for a real client's
+    # run whose actual total (per the Payroll Liability PDF) was $4,421.39.
+    #
+    # FEDMEDCARE sometimes prints as one contiguous token; on statements
+    # where the source PDF wraps that label across two rows, pdftotext
+    # linearizes it as a standalone "FED $X.XX" (the value stays on the
+    # same row as "FED") with an orphaned "MEDCARE" on the next row and no
+    # value nearby. \bFED\b only matches that standalone token -- it can't
+    # match the "FED" inside "FEDFIT" or "FEDSOCSEC" since those have no
+    # word boundary between "FED" and the letters that follow.
+    emp = 0.0
+    for pattern in [r'FEDFIT\s+\$([\d,]+\.\d{2})',
+                    r'FEDSOCSEC\s+\$([\d,]+\.\d{2})',
+                    r'FEDMEDCARE\s+\$([\d,]+\.\d{2})',
+                    r'\bFED\b\s+\$([\d,]+\.\d{2})',
+                    r'CASIT\s+\$([\d,]+\.\d{2})',
+                    r'CASDI\s+\$([\d,]+\.\d{2})']:
+        m = re.search(pattern, block)
+        if m: emp += amt(m.group(1))
+    totals["total_taxes"] = round(emp, 2)
 
     # Employee 401k
     emp_401k = 0.0
