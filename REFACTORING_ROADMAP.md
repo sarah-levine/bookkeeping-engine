@@ -5,6 +5,88 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
+### Mode E's "unrecognized CC payment" check is session-scoped, not log-scoped — flags real, already-reconciled payments as false positives (found 2026-08-11, not fixed)
+
+`reconcile_comprehensive.py`'s checking-statement flow (~line 1434-1472)
+flags a CC payment debit as `"Unrecognized ... payment ... — no ... statement
+on file (ASK CLIENT) — Not Recognized Account"` whenever the matching card
+issuer (Amex, or Chase via `chase_ink`/`chase_united`/`chase_sapphire`)
+wasn't *also reconciled in this same process invocation*
+(`_session_stmt_types`, populated only from statements processed in this
+run). It writes each flag as an open manual issue to `recon_log.json`.
+
+This contradicts this file's own README, which describes the checking
+auto-sequence's CC tie-out (Mode E) as checking "against already-logged
+data — no new PDFs needed." The actual code never reads
+`reconciliation_log.csv`/`recon_log.json` for this check at all — only
+in-memory session state. Any time a checking statement is reconciled as a
+separate command/session from its paired credit-card statement (the normal
+case — CC and checking statements typically arrive and get reconciled on
+different days), every real, already-reconciled CC payment gets
+mis-flagged as unrecognized.
+
+**Found via**: reconciling MP Cheng's CitiBusiness Checking statement
+(07/31/26) in a separate process from the Chase Sapphire statement
+(08/06/26) reconciled minutes earlier the same session. Two payments
+($1,115.57 on 07/06/26, $7,913.87 on 07/17/26) were flagged
+"unrecognized," but both already have matching, already-reconciled Chase
+statements in `reconciliation_log.csv` (`chase_sapphire` and `chase_ink`
+respectively, `source=mark_clean`). Manually removed both spurious manual-
+issue entries from `recon_log.json` before committing (see
+`Bookkeeping-clients` commit `7f91789`); the checking statement's own
+DONE/IN_PROGRESS log entry is separate and unaffected by this bug.
+
+**Root cause fix**: replace the `_session_stmt_types` membership check with
+a real lookup against `reconciliation_log.csv`/`recon_log.json` for the
+client — does an already-logged statement of the relevant card type
+(`chase_ink`/`chase_united`/`chase_sapphire`/`amex`) exist covering a
+period that could plausibly include this payment date? Exact matching
+semantics (amount-based? date-window-based? just issuer-type presence,
+matching the current coarse check?) need real design thought, not a rushed
+patch — that's why this is logged here rather than fixed inline.
+
+
+### `reconcile_comprehensive.py`'s Step-0 log sync assumes `main` is the only source of truth — clobbers unmerged feature-branch log writes (found 2026-08-11, not fixed)
+
+`_sync_logs_before_write()` (`reconcile_comprehensive.py`) pulls
+`recon_log.json` / `reconciliation_log.csv` / `payroll_log.csv` from
+`Bookkeeping-clients` via the GitHub REST API (`tools.github_clients.sync_down()`)
+before every real write, specifically to stop a stale local clone from
+silently clobbering another session's already-committed work. That's the
+right fix for the workflow it was built for (single session working
+directly against `main`).
+
+It's the wrong fix in a branch-based PR workflow: `sync_down()` reads from
+`main`, with no notion of "what branch is `BOOKKEEPING_CLIENTS_DIR`
+actually on." A session doing legitimate work on an unmerged feature
+branch (e.g. `claude/reconcile-4t22w9`, committed and pushed but not yet
+merged to `main`) will have that work silently overwritten in its own
+working tree the next time it runs a real (non-`--dry-run`) reconciliation
+— the exact failure mode the sync was built to prevent, just pointed at
+the wrong ref for this workflow.
+
+**Caught live**: two just-committed MP Cheng payroll `DONE` log rows
+(pushed to the feature branch, not yet merged) were wiped from the local
+`payroll_log.csv` working tree mid-session by this sync, immediately
+before a Chase Sapphire credit-card reconciliation write. Caught by
+`git status`/`git diff` before committing, not by the tool itself — nothing
+in `_sync_logs_before_write()`'s output flags that it just discarded
+uncommitted-to-main work. Recovered via `git checkout --` (the git history
+was untouched, only the working tree was overwritten) and re-applied the
+Chase entry directly through `log_utils.write_both_logs()`, bypassing the
+sync for that one run.
+
+**Not fixed here** — needs a real design decision, not a quick patch:
+either make `sync_down()` branch-aware (pull the branch
+`BOOKKEEPING_CLIENTS_DIR` is actually checked out on, not hardcoded
+`main`), or detect/skip the sync entirely when the local clone is on a
+non-`main` branch with unpushed-to-main commits ahead of `main`, or accept
+that this workflow requires merging feature branches promptly and treat a
+long-lived unmerged branch as the actual bug. Whichever direction, it's a
+policy choice for how this repo's branch-based sessions are meant to work,
+not something to decide unilaterally mid-reconciliation-run.
+
+
 ### `bofa.py`'s `'Payments and Other Credits' in stripped` section marker (same bug class as the label-gate sweep below, found while fixing it, not fixed)
 
 `BankOfAmericaCreditCardParser._extract_rows()` (`parsers/bofa.py`, inside
@@ -879,6 +961,27 @@ becomes available, the same 3-commit branch pattern applies:
 ---
 
 ## Closed: Fixed
+
+- `adp_payroll_professional.parse_admin()` silently dropped unrecognized
+  earnings categories — fixed 2026-08-11, same session that found it. Gave
+  `parse_admin()` the same shape as `adp_payroll_details.py`'s
+  Associates-earnings parser: iterate every earnings-category line actually
+  present in the `DepartmentTotals:002` block instead of searching for five
+  fixed literal category names (`regular`, `overtime`, `holiday`, `sick`,
+  `travel`); any category not in that known set now goes into a new
+  `other`/`other_labels` bucket with a printed warning (same convention as
+  the Associates-earnings parser's own unknown-category case), and
+  `_build_journal()` adds it as its own labeled debit row rather than
+  dropping it. **Testing**: no synthetic fixture exists for this format, so
+  verified against both real client PDFs held for this reconciliation run —
+  the check date 7/17/2026 (Run 0509) statement, which has a `Vacation
+  40.00 $1,400.00` line that previously vanished silently, now shows
+  "Admin other: $1,400.00 (Vacation)" and the journal entry is fully
+  BALANCED ($19,706.55, previously OUT OF BALANCE by exactly $1,400.00);
+  the check date 7/31/2026 (Run 0511) statement, which has no unrecognized
+  categories, reproduces byte-identical output (BALANCED $28,556.09, no
+  "Admin other" line). `pii_scan.py` clean. That 7/17/2026 statement can now
+  be entered into QuickBooks.
 
 - Literal single-space label gates across every bank parser — fixed
   2026-08-05. Follow-up to the `CitiVisaCostcoParser` balance-header fix
