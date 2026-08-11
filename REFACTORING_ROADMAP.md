@@ -5,6 +5,47 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
+### Mode E's "unrecognized CC payment" check is session-scoped, not log-scoped — flags real, already-reconciled payments as false positives (found 2026-08-11, not fixed)
+
+`reconcile_comprehensive.py`'s checking-statement flow (~line 1434-1472)
+flags a CC payment debit as `"Unrecognized ... payment ... — no ... statement
+on file (ASK CLIENT) — Not Recognized Account"` whenever the matching card
+issuer (Amex, or Chase via `chase_ink`/`chase_united`/`chase_sapphire`)
+wasn't *also reconciled in this same process invocation*
+(`_session_stmt_types`, populated only from statements processed in this
+run). It writes each flag as an open manual issue to `recon_log.json`.
+
+This contradicts this file's own README, which describes the checking
+auto-sequence's CC tie-out (Mode E) as checking "against already-logged
+data — no new PDFs needed." The actual code never reads
+`reconciliation_log.csv`/`recon_log.json` for this check at all — only
+in-memory session state. Any time a checking statement is reconciled as a
+separate command/session from its paired credit-card statement (the normal
+case — CC and checking statements typically arrive and get reconciled on
+different days), every real, already-reconciled CC payment gets
+mis-flagged as unrecognized.
+
+**Found via**: reconciling MP Cheng's CitiBusiness Checking statement
+(07/31/26) in a separate process from the Chase Sapphire statement
+(08/06/26) reconciled minutes earlier the same session. Two payments
+($1,115.57 on 07/06/26, $7,913.87 on 07/17/26) were flagged
+"unrecognized," but both already have matching, already-reconciled Chase
+statements in `reconciliation_log.csv` (`chase_sapphire` and `chase_ink`
+respectively, `source=mark_clean`). Manually removed both spurious manual-
+issue entries from `recon_log.json` before committing (see
+`Bookkeeping-clients` commit `7f91789`); the checking statement's own
+DONE/IN_PROGRESS log entry is separate and unaffected by this bug.
+
+**Root cause fix**: replace the `_session_stmt_types` membership check with
+a real lookup against `reconciliation_log.csv`/`recon_log.json` for the
+client — does an already-logged statement of the relevant card type
+(`chase_ink`/`chase_united`/`chase_sapphire`/`amex`) exist covering a
+period that could plausibly include this payment date? Exact matching
+semantics (amount-based? date-window-based? just issuer-type presence,
+matching the current coarse check?) need real design thought, not a rushed
+patch — that's why this is logged here rather than fixed inline.
+
+
 ### `reconcile_comprehensive.py`'s Step-0 log sync assumes `main` is the only source of truth — clobbers unmerged feature-branch log writes (found 2026-08-11, not fixed)
 
 `_sync_logs_before_write()` (`reconcile_comprehensive.py`) pulls
