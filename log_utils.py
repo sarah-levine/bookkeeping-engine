@@ -602,9 +602,15 @@ def write_both_logs(
         print(f"  ⚠ Skipping reconciliation_log.csv (ERROR status)")
     else:
         csv_path = get_logs_dir() / "reconciliation_log.csv"
+        # Same column order as payroll_clients/base.py's RECON_LOG_FIELDS --
+        # keep these in sync. A mismatched order here doesn't corrupt data
+        # (DictWriter/DictReader are both name-keyed) but it means whichever
+        # of these two functions writes the file last flips every existing
+        # row's column order, producing a whole-file diff for what's really
+        # a single-row change.
         fields = ["client", "client_name", "account_type", "account_ending",
                   "statement_date", "beginning_balance", "ending_balance",
-                  "total_payments", "run_timestamp", "source"]
+                  "total_payments", "source", "run_timestamp"]
 
         row = {
             "client":             client_key,
