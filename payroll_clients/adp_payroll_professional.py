@@ -224,17 +224,23 @@ def _build_journal(cfg: dict, officers: list, admin: dict,
     admin_cfg = dept_cfg.get("002", {})
     if admin["regular"]  > 0: rows.append(make_row(check_date, admin_cfg["regular_account"],  debit=admin["regular"]))
     if admin["overtime"] > 0: rows.append(make_row(check_date, admin_cfg["overtime_account"], debit=admin["overtime"]))
-    if admin.get("holiday", 0) > 0:
-        rows.append(make_row(check_date, admin_cfg.get("holiday_account", admin_cfg["regular_account"]),
-                             debit=admin["holiday"], memo="Holiday"))
     if admin.get("sick", 0) > 0:
         rows.append(make_row(check_date, admin_cfg.get("sick_account", admin_cfg["regular_account"]),
                              debit=admin["sick"], memo="Sick"))
+
+    # Holiday, Travel, and any other non-regular/overtime/sick admin earnings
+    # category (e.g. Vacation) all post to the same GL account by default --
+    # combine them into a single labeled line instead of one row per category.
+    extra_labels, extra_total = [], 0.0
+    if admin.get("holiday", 0) > 0:
+        extra_labels.append("Holiday"); extra_total += admin["holiday"]
     if admin["travel"] > 0:
-        rows.append(make_row(check_date, admin_cfg["travel_account"], debit=admin["travel"], memo="Travel"))
+        extra_labels.append("Travel"); extra_total += admin["travel"]
     if admin.get("other", 0) > 0:
-        rows.append(make_row(check_date, admin_cfg.get("regular_account"),
-                             debit=admin["other"], memo=", ".join(admin.get("other_labels", [])) or "Other"))
+        extra_labels.extend(admin.get("other_labels", [])); extra_total += admin["other"]
+    if extra_total > 0:
+        rows.append(make_row(check_date, admin_cfg["travel_account"],
+                             debit=round(extra_total, 2), memo=", ".join(extra_labels)))
 
     dept_1099_cfg = dept_cfg.get("005", {})
     if total_1099 > 0:
