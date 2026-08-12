@@ -63,20 +63,6 @@ def load_manual_issues(log_date):
     return manual
 
 
-def filter_new_manual_entries(manual_entries, log_dates):
-    """manual_entries is every unresolved note regardless of date (by design
-    — log_utils.load_recon_log()'s docstring: "ALL unresolved manual notes",
-    used as-is by mcp_server.py's open_issues tool). A note left unresolved
-    for a week would otherwise look "new" every one of those days purely
-    because it's still sitting there — same class of bug as an account
-    staying overdue. Returns only the entries whose own run_time falls on
-    one of log_dates; the full unresolved list should still be shown in the
-    email whenever one sends for any reason, this is only for the send
-    decision."""
-    dates = set(log_dates)
-    return [e for e in manual_entries if e.get("run_time", "")[:10] in dates]
-
-
 def load_reconciliation_log():
     log_file = LOG_DIR / "reconciliation_log.csv"
     if not log_file.exists():
@@ -441,28 +427,6 @@ def compute_overdue_accounts(recon_dates, today):
     return overdue_by_client
 
 
-def has_newly_overdue_accounts(overdue_today, recon_dates, today):
-    """True if any account in overdue_today wasn't already overdue as of
-    yesterday — i.e. it just crossed into overdue today, not something
-    that's been sitting overdue for a while. An account overdue for 10
-    days straight would otherwise re-trigger a send every single one of
-    those 10 days for no new reason; this gates the send decision to the
-    day something actually changes. overdue_today still renders in full
-    in the email whenever one *does* send (for another reason too) — this
-    only affects whether the overdue section causes the send by itself."""
-    yesterday_overdue = compute_overdue_accounts(recon_dates, today - timedelta(days=1))
-    already_overdue = {
-        (client, a["label"])
-        for client, accts in yesterday_overdue.items()
-        for a in accts
-    }
-    return any(
-        (client, a["label"]) not in already_overdue
-        for client, accts in overdue_today.items()
-        for a in accts
-    )
-
-
 def build_digest_email(recon_entries, manual_entries, log_date, due_items,
                         overdue_by_client, today=None):
     """Build the single combined morning email: CC-due-today action items,
@@ -489,14 +453,17 @@ def build_digest_email(recon_entries, manual_entries, log_date, due_items,
     except Exception:
         friendly_date = log_date
 
-    has_cc_due  = bool(due_items)
-    has_overdue = bool(overdue_by_client)
+    has_recon_activity = bool(recon_entries)
+    has_due_items      = bool(due_items)
 
+    # Subject only ever names the two triggers that can actually cause a
+    # send (see should_send_digest) — an email whose subject named a
+    # reason it didn't actually send for would misrepresent why it exists.
     subject_parts = []
-    if has_cc_due:
-        subject_parts.append("📋 CC Due Today")
-    if has_overdue:
-        subject_parts.append("🔴 Past Due")
+    if has_recon_activity:
+        subject_parts.append("✅ Reconciliation Complete")
+    if has_due_items:
+        subject_parts.append("📋 Statements Generated Today")
     if subject_parts:
         subject = " + ".join(subject_parts) + f" — {friendly_today}"
     else:
@@ -764,10 +731,35 @@ def build_digest_email(recon_entries, manual_entries, log_date, due_items,
               </div>
             </div>
             """
+
+    # No "no reconciliations ran" filler — if nothing ran, the whole
+    # Reconciliation Runs section (header included) is omitted rather than
+    # shown empty. runs_block is "" when there's nothing to report.
+    runs_block = ""
+    if clients:
+        runs_block = f"""
+    <!-- Reconciliation runs -->
+    <div style="font-weight:700;font-size:14px;color:#1f2937;margin-bottom:10px">
+      Reconciliation Runs — {len(clients)} client(s) · activity from {friendly_date}
+    </div>
+    {runs_html}
+"""
+
+    attention_block = f"""
+    <!-- Needs attention: CC due today + overdue -->
+    {attention_html}
+
+    <!-- Manual notes -->
+    {unmatched_notes_html}
+"""
+
+    # Section order follows the subject: when reconciliations ran, that
+    # section leads (whether or not statements also generated today);
+    # otherwise Needs Attention leads, as before.
+    if has_recon_activity:
+        top_blocks = runs_block + attention_block
     else:
-        runs_html = '<p style="color:#6b7280;font-size:13px">No reconciliations ran yesterday.</p>'
-
-
+        top_blocks = attention_block + runs_block
 
     html = f"""
 <!DOCTYPE html>
@@ -783,19 +775,7 @@ def build_digest_email(recon_entries, manual_entries, log_date, due_items,
 
   <div style="padding:20px 24px">
 
-    <!-- Needs attention: CC due today + overdue -->
-    {attention_html}
-
-    <!-- Manual notes -->
-    {unmatched_notes_html}
-
-    <!-- Reconciliation runs -->
-    <div style="font-weight:700;font-size:14px;color:#1f2937;margin-bottom:10px">
-      Reconciliation Runs — {len(clients)} client(s) · activity from {friendly_date}
-    </div>
-    {runs_html}
-
-
+    {top_blocks}
 
     <!-- Tracker -->
     <div style="margin-top:28px">
@@ -932,41 +912,28 @@ def get_cc_due_today(today=None):
     return due
 
 
-def should_send_digest(recon_entries, new_manual_entries, accounts_due_yesterday,
-                        due_items, newly_overdue):
+def should_send_digest(recon_entries, due_items):
     """Single source of truth for whether the digest should send at all.
     Returns (should_send, reasons) — reasons names every trigger that
     fired (empty list if should_send is False), so a caller can log
     exactly *why* a send happened instead of just that it did.
 
-    Every trigger here must represent something NEW as of this run, not
-    something merely still-true. An account overdue for 10 days straight,
-    or a manual note left unresolved for a week, must not each re-trigger
-    a send every one of those days for no new reason — that's what
-    new_manual_entries/newly_overdue already encode (see
-    filter_new_manual_entries / has_newly_overdue_accounts).
-
-    This function exists specifically so every trigger condition lives in
-    one place and gets exercised by one test, instead of several
-    independent inline booleans in main() that can regress individually
-    without anyone noticing: the overdue trigger was correctly fixed once
-    (a stale account no longer re-sends), but the digest kept sending
-    daily anyway because a sibling condition — stale unresolved manual
-    notes — had the exact same bug and nothing tested the *combined*
-    decision. One function, one test, covering the whole decision closes
-    that gap.
+    Only two triggers cause a send: a reconciliation ran, or a CC
+    statement generated today. New manual notes, a newly-overdue account,
+    and a generic statement-period-closed signal do NOT trigger a send by
+    themselves — they still render in the email body (Needs Attention
+    table, notes) whenever a send happens for one of the two reasons
+    above, but a day where *only* one of those three occurred produces no
+    email. This matches the subject line, which only ever names these two
+    reasons (see build_digest_email) — every reason that can cause a send
+    must be nameable in the subject, otherwise the subject misrepresents
+    why the email exists.
     """
     reasons = []
     if recon_entries:
         reasons.append(f"{len(recon_entries)} reconciliation(s) ran")
-    if new_manual_entries:
-        reasons.append(f"{len(new_manual_entries)} new manual note(s)")
-    if accounts_due_yesterday:
-        reasons.append("an account's statement period closed yesterday")
     if due_items:
-        reasons.append(f"{len(due_items)} CC statement(s) due today")
-    if newly_overdue:
-        reasons.append("an account newly went overdue")
+        reasons.append(f"{len(due_items)} CC statement(s) generated today")
     return bool(reasons), reasons
 
 
@@ -980,11 +947,12 @@ def main():
 
     today = date.today()
 
-    # ── CC-due-today + overdue-accounts trigger (evaluated against today) ──
+    # ── CC-due-today + overdue-accounts (overdue still renders in the body
+    # whenever an email sends for another reason, it just isn't a trigger
+    # or subject reason by itself — see should_send_digest) ──
     due_items = get_cc_due_today(today)
     recon_dates_for_overdue = load_reconciliation_log()
     overdue_by_client = compute_overdue_accounts(recon_dates_for_overdue, today)
-    newly_overdue = has_newly_overdue_accounts(overdue_by_client, recon_dates_for_overdue, today)
 
     # ── Reconciliation-digest trigger (evaluated against yesterday's activity) ──
     log_date = args.date or (datetime.now(ZoneInfo('America/Los_Angeles')).date() - timedelta(days=1)).isoformat()
@@ -997,26 +965,10 @@ def main():
     recon_entries  = load_log(log_dates)
     manual_entries = load_manual_issues(log_dates)
 
-    # Determine the primary log date (yesterday in the default case)
-    yesterday = date.fromisoformat(log_dates[0])
-
-    # Check whether any account's statement period closed yesterday
-    import calendar as _cal
-    yesterday_was_eom = yesterday.day == _cal.monthrange(yesterday.year, yesterday.month)[1]
-    cc_due_yesterday = any(
-        b["closing_day"] == yesterday.day
-        for rules in CC_BLOCKING_RULES.values()
-        for b in rules.get("cc_blockers", [])
-    )
-    accounts_due_yesterday = yesterday_was_eom or cc_due_yesterday
-
-    new_manual_entries = filter_new_manual_entries(manual_entries, log_dates)
-
-    should_send, reasons = should_send_digest(
-        recon_entries, new_manual_entries, accounts_due_yesterday, due_items, newly_overdue)
+    should_send, reasons = should_send_digest(recon_entries, due_items)
     if not should_send:
-        print("Nothing new to report — no reconciliations, no new manual notes, "
-              "no account newly due, no CC due today, nothing newly overdue. Skipping.")
+        print("Nothing new to report — no reconciliations ran, no CC statement "
+              "generated today. Skipping.")
         sys.exit(0)
     print(f"Sending because: {', '.join(reasons)}")
 
