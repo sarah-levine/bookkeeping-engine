@@ -31,8 +31,7 @@ from pathlib import Path
 import send_morning_digest as smd
 from send_morning_digest import (
     acct_group, is_reconciliation_current, build_digest_email,
-    compute_overdue_accounts, has_newly_overdue_accounts,
-    filter_new_manual_entries, should_send_digest,
+    compute_overdue_accounts, should_send_digest,
 )
 
 
@@ -127,12 +126,16 @@ class BuildDigestEmailCombinedTest(unittest.TestCase):
         }]
         self.overdue = {self.client: [{"label": "Zzz Test Card", "last_date": "06/06/26"}]}
 
-    def test_both_action_items_present_combines_subject_and_section(self):
+    def test_due_today_and_overdue_both_render_in_section_but_only_due_today_in_subject(self):
+        # Overdue no longer contributes to the subject (only recon activity
+        # and CC-due-today do — see should_send_digest) but it still
+        # renders in the body's Needs Attention table whenever the email
+        # sends for another reason.
         subject, html = build_digest_email([], [], "2026-07-22", self.due_items,
                                             self.overdue, self.today)
         section = _needs_attention_section(html)
-        self.assertIn("CC Due Today", subject)
-        self.assertIn("Past Due", subject)
+        self.assertIn("Statements Generated Today", subject)
+        self.assertNotIn("Past Due", subject)
         self.assertIn("📅 Closes Today", section)
         self.assertIn("🔴 Overdue", section)
         self.assertIn("BofA Credit Card", section)
@@ -155,16 +158,16 @@ class BuildDigestEmailCombinedTest(unittest.TestCase):
     def test_only_cc_due_omits_overdue_badge(self):
         subject, html = build_digest_email([], [], "2026-07-22", self.due_items, {}, self.today)
         section = _needs_attention_section(html)
-        self.assertIn("CC Due Today", subject)
-        self.assertNotIn("Past Due", subject)
+        self.assertIn("Statements Generated Today", subject)
         self.assertIn("📅 Closes Today", section)
         self.assertNotIn("🔴 Overdue", section)
 
-    def test_only_overdue_omits_cc_due_badge(self):
+    def test_only_overdue_falls_back_to_plain_subject_but_still_shows_in_section(self):
+        # Overdue alone no longer earns its own subject reason — it falls
+        # back to the generic subject even though the section still renders.
         subject, html = build_digest_email([], [], "2026-07-22", [], self.overdue, self.today)
         section = _needs_attention_section(html)
-        self.assertIn("Past Due", subject)
-        self.assertNotIn("CC Due Today", subject)
+        self.assertEqual(subject, "Reconciliation Digest — July 22, 2026")
         self.assertIn("🔴 Overdue", section)
         self.assertNotIn("📅 Closes Today", section)
 
@@ -172,6 +175,48 @@ class BuildDigestEmailCombinedTest(unittest.TestCase):
         subject, html = build_digest_email([], [], "2026-07-22", [], {}, self.today)
         self.assertEqual(subject, "Reconciliation Digest — July 22, 2026")
         self.assertNotIn("🔴 Needs Attention", _needs_attention_section(html))
+
+    def test_no_reconciliations_omits_the_whole_runs_section(self):
+        # No "No reconciliations ran yesterday." filler -- the section
+        # (header included) is absent entirely when nothing ran.
+        subject, html = build_digest_email([], [], "2026-07-22", [], {}, self.today)
+        self.assertNotIn("Reconciliation Runs —", html)
+
+    def test_recon_activity_alone_names_it_in_subject(self):
+        recon_entries = [{"client": self.client, "account_type": "bofa_credit",
+                           "statement_end_date": "2026-07-21", "status": "DONE",
+                           "run_time": "2026-07-22T08:00:00"}]
+        subject, html = build_digest_email(recon_entries, [], "2026-07-22", [], {}, self.today)
+        self.assertIn("Reconciliation Complete", subject)
+        self.assertNotIn("Statements Generated Today", subject)
+        self.assertIn("Reconciliation Runs —", html)
+
+    def test_recon_activity_and_due_today_both_named_in_subject(self):
+        recon_entries = [{"client": self.client, "account_type": "bofa_credit",
+                           "statement_end_date": "2026-07-21", "status": "DONE",
+                           "run_time": "2026-07-22T08:00:00"}]
+        subject, html = build_digest_email(recon_entries, [], "2026-07-22",
+                                            self.due_items, {}, self.today)
+        self.assertIn("Reconciliation Complete", subject)
+        self.assertIn("Statements Generated Today", subject)
+
+    def test_recon_activity_moves_runs_section_above_needs_attention(self):
+        recon_entries = [{"client": self.client, "account_type": "bofa_credit",
+                           "statement_end_date": "2026-07-21", "status": "DONE",
+                           "run_time": "2026-07-22T08:00:00"}]
+        subject, html = build_digest_email(recon_entries, [], "2026-07-22",
+                                            self.due_items, {}, self.today)
+        self.assertLess(html.find("Reconciliation Runs —"),
+                         html.find("<!-- Needs attention:"))
+
+    def test_due_today_alone_has_no_runs_section_to_order_against(self):
+        # recon_entries empty => runs_block is empty (see test_no_
+        # reconciliations_omits_the_whole_runs_section) regardless of
+        # due_items, so Needs Attention is the only top section rendered.
+        subject, html = build_digest_email([], [], "2026-07-22",
+                                            self.due_items, {}, self.today)
+        self.assertIn("<!-- Needs attention:", html)
+        self.assertNotIn("Reconciliation Runs —", html)
 
 
 class ManualNotesInlineInTrackerTest(unittest.TestCase):
@@ -210,132 +255,35 @@ class ManualNotesInlineInTrackerTest(unittest.TestCase):
         self.assertIn("Zzz stray issue", html)
 
 
-class HasNewlyOverdueAccountsTest(unittest.TestCase):
-    """An account overdue for 10 days straight shouldn't re-trigger a send
-    every one of those 10 days — only the day it actually crosses over.
-    Uses a real TRACKER client/account_key so is_reconciliation_current's
-    real closing-cycle math drives the transition, not a synthetic stand-in."""
-
-    def setUp(self):
-        from send_morning_digest import TRACKER
-        client = next(c for c in TRACKER
-                      if any(a["key"] == "bofa_credit" for a in c["accounts"]))
-        self.client_key = client["client_keys"][0]
-        # bofa_credit closes on the 6th each month (from last_date's day) —
-        # current through 07/07, overdue starting 07/08.
-        self.recon_dates = {(self.client_key, "bofa_credit"): "06/06/2026"}
-
-    def test_first_overdue_day_is_newly_overdue(self):
-        overdue = compute_overdue_accounts(self.recon_dates, date(2026, 7, 8))
-        self.assertTrue(has_newly_overdue_accounts(overdue, self.recon_dates, date(2026, 7, 8)))
-
-    def test_second_overdue_day_is_not_newly_overdue(self):
-        overdue = compute_overdue_accounts(self.recon_dates, date(2026, 7, 9))
-        self.assertFalse(has_newly_overdue_accounts(overdue, self.recon_dates, date(2026, 7, 9)))
-
-    def test_last_current_day_has_no_newly_overdue(self):
-        overdue = compute_overdue_accounts(self.recon_dates, date(2026, 7, 7))
-        self.assertFalse(has_newly_overdue_accounts(overdue, self.recon_dates, date(2026, 7, 7)))
-
-
-class FilterNewManualEntriesTest(unittest.TestCase):
-    """load_recon_log() intentionally returns every unresolved manual note
-    regardless of date (mcp_server.py's open_issues tool needs that) — a
-    note left unresolved for a week would otherwise look "new" every one
-    of those days and re-trigger a send purely because it's still sitting
-    there. Only run_time falling on one of the target log_dates should
-    count as new for the send decision."""
-
-    def test_entry_from_target_date_is_new(self):
-        entries = [{"client": "X", "issue": "zzz", "run_time": "2026-07-26T09:00:00-07:00"}]
-        self.assertEqual(filter_new_manual_entries(entries, ["2026-07-26"]), entries)
-
-    def test_stale_unresolved_entry_from_prior_day_is_not_new(self):
-        entries = [{"client": "X", "issue": "zzz", "run_time": "2026-07-13T13:51:00-07:00"}]
-        self.assertEqual(filter_new_manual_entries(entries, ["2026-07-26"]), [])
-
-    def test_mixed_batch_keeps_only_matching_dates(self):
-        old = {"client": "X", "issue": "old", "run_time": "2026-07-13T13:51:00-07:00"}
-        new = {"client": "X", "issue": "new", "run_time": "2026-07-26T09:00:00-07:00"}
-        self.assertEqual(filter_new_manual_entries([old, new], ["2026-07-26"]), [new])
-
-    def test_matches_any_of_multiple_log_dates(self):
-        entries = [{"client": "X", "issue": "zzz", "run_time": "2026-07-25T09:00:00-07:00"}]
-        result = filter_new_manual_entries(entries, ["2026-07-24", "2026-07-25"])
-        self.assertEqual(result, entries)
-
-
 class ShouldSendDigestTest(unittest.TestCase):
-    """The whole send decision, in one place, exercised by one test —
-    covers the exact scenario that slipped through in #34: the overdue
-    trigger was correctly fixed to stop re-firing, but the digest kept
-    sending daily anyway because a sibling trigger (stale unresolved
-    manual notes) had the same "still true, not actually new" bug and
-    nothing tested the combined decision. All five inputs here are
-    already-filtered "is this new" booleans/lists (filter_new_manual_
-    entries, has_newly_overdue_accounts, etc. do that filtering) —
-    should_send_digest's only job is combining them, so these tests use
-    plain synthetic values rather than real TRACKER data."""
+    """The whole send decision, in one place. Only two things trigger a
+    send: a reconciliation ran, or a CC statement generated today — a new
+    manual note, an account going newly overdue, or a generic statement-
+    period-closed signal no longer trigger a send by themselves (they still
+    render in the body whenever a send happens for one of the two reasons
+    above)."""
 
-    def test_everything_stale_stays_silent(self):
-        # Old overdue accounts still overdue, old manual notes still
-        # unresolved, no new recon activity, no CC due today — exactly
-        # what reconciliation_log.csv/recon_log.json looked like on
-        # 07/25-07/27 while the digest kept sending anyway.
-        should_send, reasons = should_send_digest(
-            recon_entries=[], new_manual_entries=[], accounts_due_yesterday=False,
-            due_items=[], newly_overdue=False,
-        )
+    def test_everything_else_stale_stays_silent(self):
+        should_send, reasons = should_send_digest(recon_entries=[], due_items=[])
         self.assertFalse(should_send)
         self.assertEqual(reasons, [])
 
     def test_recon_activity_alone_triggers_a_send(self):
-        should_send, reasons = should_send_digest(
-            recon_entries=[{"client": "X"}], new_manual_entries=[], accounts_due_yesterday=False,
-            due_items=[], newly_overdue=False,
-        )
+        should_send, reasons = should_send_digest(recon_entries=[{"client": "X"}], due_items=[])
         self.assertTrue(should_send)
         self.assertEqual(len(reasons), 1)
 
-    def test_new_manual_note_alone_triggers_a_send(self):
-        should_send, reasons = should_send_digest(
-            recon_entries=[], new_manual_entries=[{"issue": "x"}], accounts_due_yesterday=False,
-            due_items=[], newly_overdue=False,
-        )
+    def test_due_today_alone_triggers_a_send(self):
+        should_send, reasons = should_send_digest(recon_entries=[], due_items=[{"cc_label": "x"}])
         self.assertTrue(should_send)
         self.assertEqual(len(reasons), 1)
 
-    def test_account_due_yesterday_alone_triggers_a_send(self):
+    def test_both_triggers_named_in_reasons(self):
         should_send, reasons = should_send_digest(
-            recon_entries=[], new_manual_entries=[], accounts_due_yesterday=True,
-            due_items=[], newly_overdue=False,
+            recon_entries=[{"client": "X"}], due_items=[{"cc_label": "x"}],
         )
         self.assertTrue(should_send)
-        self.assertEqual(len(reasons), 1)
-
-    def test_cc_due_today_alone_triggers_a_send(self):
-        should_send, reasons = should_send_digest(
-            recon_entries=[], new_manual_entries=[], accounts_due_yesterday=False,
-            due_items=[{"cc_label": "x"}], newly_overdue=False,
-        )
-        self.assertTrue(should_send)
-        self.assertEqual(len(reasons), 1)
-
-    def test_newly_overdue_alone_triggers_a_send(self):
-        should_send, reasons = should_send_digest(
-            recon_entries=[], new_manual_entries=[], accounts_due_yesterday=False,
-            due_items=[], newly_overdue=True,
-        )
-        self.assertTrue(should_send)
-        self.assertEqual(len(reasons), 1)
-
-    def test_multiple_simultaneous_triggers_all_named_in_reasons(self):
-        should_send, reasons = should_send_digest(
-            recon_entries=[{"client": "X"}], new_manual_entries=[{"issue": "x"}],
-            accounts_due_yesterday=False, due_items=[{"cc_label": "x"}], newly_overdue=True,
-        )
-        self.assertTrue(should_send)
-        self.assertEqual(len(reasons), 4)
+        self.assertEqual(len(reasons), 2)
 
 
 class LoadReconciliationLogMixedDateFormatTest(unittest.TestCase):
