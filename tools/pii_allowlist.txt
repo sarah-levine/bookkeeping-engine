@@ -15,7 +15,7 @@ savings money market imma investment
 # ── Payment processors / national vendors / services ────────────────
 square stripe paypal venmo zelle gusto adp apple tmobile comcast xfinity amazon
 mktpl mktpla mktplace pmts ecomm whse saloncentric unitehairpro primo brands
-waterserv pge pacific gas electric applepay eftps
+waterserv pge pacific gas electric applepay eftps consumer reports
 
 # ── Government / payroll-tax line items ─────────────────────────────
 irs edd employment devel fedsocsec fedmedcare fedfuta fedfit fedfica casui casdi

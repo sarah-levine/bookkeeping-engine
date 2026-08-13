@@ -317,7 +317,59 @@ Findings that matter for future migrations:
   (single-date/Ink, two-date/Sapphire+United) had identical copy-pasted
   classify+append logic; now both call one shared `_classify_row()` helper.
 
-### Status: Capital One — no real fixture exists, deferred (2026-07-14)
+### Status: Capital One — real fixture now available, four parsing bugs found and fixed (2026-08-13)
+
+A real client's real Capital One Spark statement was reconciled this
+session — the first one this parser had ever actually seen (see the
+2026-07-14 entry below, superseded by this one). It exposed four separate
+bugs from the same root cause: `pdftotext -layout` merges unrelated
+two-column page content onto one output line, and the parser searched for
+a `$` amount from the start of the whole line instead of anchoring to the
+label it just matched.
+
+1. **New Balance silently wrong.** "...may have to pay a $39.00 late
+   fee...  New Balance  = $61.35" is one real merged line (left-column
+   warning text + right-column Account Summary value). Grabbing the first
+   `$` amount on the line read $39.00 instead of the real $61.35 — a
+   report that printed BALANCED/PASSED with a materially wrong ending
+   balance, not a crash or a visible failure.
+2. **Fees Charged same bug**, another merged line, read a nonzero value
+   ($61.35, borrowed from an unrelated column) when the real value was
+   $0.00.
+3. **Transaction table used the wrong column shape.** The real layout is
+   per-cardholder tables of `Trans Date | Post Date | Description |
+   Amount` — two date columns, not the one the parser's regex assumed.
+   The single-date pattern absorbed the Post Date token into what it
+   thought was the description, producing garbage rows like a
+   transaction "described" as "Apr 11" (the post-date text) instead of
+   the real vendor name.
+4. **Space-separated negative sign dropped.** One real payment line
+   printed the amount as `"- $22.35"` (space between the minus sign and
+   the dollar sign); the amount regex required them adjacent, so the
+   sign was silently lost and a real payment became a positive-amount
+   charge instead.
+
+**Root cause fix**: anchored all summary-value searches to the text
+*after* the matched label (not the whole line); added a two-date
+transaction pattern tried first, falling back to the original single-date
+patterns; widened the amount regex/parsing to tolerate whitespace after a
+leading minus sign; added closing-date parsing for the billing-cycle-range
+format ("Apr 08, 2026 - May 08, 2026...") this statement uses instead of
+"Statement Ending ...", which the parser never had a pattern for either.
+Also added `PYMT` alongside `PAYMENT`/`AUTOPAY` to
+`_classify_cc_transaction`'s negative-amount payment-keyword list (shared
+across all CC parsers) — this statement's own payment line reads "CAPITAL
+ONE ONLINE PYMT", which the existing keywords didn't catch.
+
+**Testing**: verified against the real statement (balance math ties
+exactly: $22.35 previous + $61.35 charges − $22.35 payment = $61.35 new
+balance, matching the PDF's own Account Summary numbers). Added
+`tests/test_capital_one_synthetic.py` (7 tests, fictional data reproducing
+each bug's exact line shape) since this parser had zero test coverage
+before now. Full suite (279 tests) and `pii_scan.py` both clean.
+
+<details>
+<summary>Original 2026-07-14 entry (superseded)</summary>
 
 Attempted to start this migration next per the rollout order below, but
 found the gap is deeper than "missing `PARSER_MAP`/manifest wiring": **no
@@ -329,6 +381,8 @@ even though one client's config lists `capital_one` in its
 `statement_types`. Skipped in favor of Citi Savings; the wiring gap noted
 in the rollout playbook below still applies whenever a real fixture becomes
 available (e.g. a scanned paper/email statement for that client).
+
+</details>
 
 ### Status: Citi Savings migration complete (2026-07-14)
 

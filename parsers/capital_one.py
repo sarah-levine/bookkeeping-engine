@@ -20,14 +20,20 @@ _CAP1_MONTH = {
 }
 
 # Transaction line patterns for pdftotext -layout output.
-# Capital One statements use "Mon DD" dates in the transaction table;
-# MM/DD numeric format is also handled as a fallback.
-# Amount is at the end of the line, possibly negative (payment / credit).
+# The real (fixture-verified) Capital One layout is per-cardholder tables
+# with TWO "Mon DD" dates -- Trans Date then Post Date -- before the
+# description and amount, e.g. "Apr 10   Apr 11   CONSUMER REPORTS...
+# $39.00". Tried first since it's the confirmed real shape. The single-date
+# patterns below are kept as a fallback for any other statement layout
+# this parser might see (unverified against a real fixture).
+_TXN_ABBREV_TWO_DATE = re.compile(
+    r'^([A-Za-z]{3,9})\s+(\d{1,2})\s+[A-Za-z]{3,9}\s+\d{1,2}\s+(.+?)\s+(-?\s*\$?[0-9,]+\.\d{2})\s*$'
+)
 _TXN_ABBREV = re.compile(
-    r'^([A-Za-z]{3,9})\s+(\d{1,2})\s+(.+?)\s+(-?\$?[0-9,]+\.\d{2})\s*$'
+    r'^([A-Za-z]{3,9})\s+(\d{1,2})\s+(.+?)\s+(-?\s*\$?[0-9,]+\.\d{2})\s*$'
 )
 _TXN_NUMERIC = re.compile(
-    r'^(\d{1,2}/\d{1,2})\s+(.+?)\s+(-?\$?[0-9,]+\.\d{2})\s*$'
+    r'^(\d{1,2}/\d{1,2})\s+(.+?)\s+(-?\s*\$?[0-9,]+\.\d{2})\s*$'
 )
 
 # Column headers and summary labels that should not be parsed as transactions
@@ -88,6 +94,20 @@ class CapitalOneParser(StatementParser):
                 mm, dd, yr = parts
                 yy = yr[-2:]
                 return f"{int(mm):02d}/{int(dd):02d}/{yy}"
+        # Billing-cycle range: "Apr 08, 2026 - May 08, 2026 | 31 days in
+        # Billing Cycle" -- some Capital One statements never print
+        # "Statement Ending" at all; the cycle's end date is the closing
+        # date. Takes the second (later) date in the range.
+        m = re.search(
+            r'[A-Za-z]+\s+\d{1,2},?\s+\d{4}\s*-\s*([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})',
+            self.text,
+        )
+        if m:
+            month_num = _CAP1_MONTH.get(m.group(1).lower())
+            if month_num:
+                day = int(m.group(2))
+                yy = m.group(3)[-2:]
+                return f"{month_num}/{day:02d}/{yy}"
         return None
 
     def _mmdd_from_abbrev(self, abbrev, day):
@@ -97,10 +117,12 @@ class CapitalOneParser(StatementParser):
 
     @staticmethod
     def _parse_amount(raw):
-        """Convert '-$1,234.56' or '$-1,234.56' or '$1,234.56' to signed Decimal."""
-        s = raw.strip()
+        """Convert '-$1,234.56', '$-1,234.56', '- $1,234.56' (a real fixture's
+        payment line puts a space between the minus sign and the dollar
+        sign), or '$1,234.56' to signed Decimal."""
+        s = re.sub(r'\s+', '', raw)
         negative = s.startswith('-')
-        s = s.lstrip('-').lstrip('$').replace(',', '').strip()
+        s = s.lstrip('-').lstrip('$').replace(',', '')
         try:
             val = Decimal(s)
             return -val if negative else val
@@ -113,35 +135,47 @@ class CapitalOneParser(StatementParser):
 
         # ── Account summary ──────────────────────────────────────────────────
         for line in lines:
-            if contains_label(line, 'Previous Balance') and self.previous_balance is None:
-                m = re.search(r'\$\s*([0-9,]+\.\d{2})', line)
+            # Search for the dollar amount only in the text AFTER the label
+            # match, not the whole line. The two-column Account Summary
+            # block sits beside the payment-coupon/warning text on the same
+            # visual row, and pdftotext -layout merges both onto one output
+            # line -- e.g. "...may have to pay a $39.00 late fee...  New
+            # Balance  = $61.35" is one real line, where $39.00 is unrelated
+            # left-column text and $61.35 (after "New Balance") is the real
+            # value. Searching the whole line grabbed whichever $ came
+            # first, which is only ever correct by accident.
+            m_prev = contains_label(line, 'Previous Balance')
+            if m_prev and self.previous_balance is None:
+                label_end = re.search(r'\s+'.join(re.escape(w) for w in 'Previous Balance'.split()), line).end()
+                m = re.search(r'\$\s*([0-9,]+\.\d{2})', line[label_end:])
                 if m:
                     self.previous_balance = Decimal(m.group(1).replace(',', ''))
 
-            if (re.search(r'\bNew\s+Balance\b', line)
-                    and 'Minimum' not in line
-                    and self.new_balance is None):
-                m = re.search(r'\$\s*([0-9,]+\.\d{2})', line)
+            m_new = re.search(r'\bNew\s+Balance\b', line)
+            if m_new and 'Minimum' not in line and self.new_balance is None:
+                m = re.search(r'\$\s*([0-9,]+\.\d{2})', line[m_new.end():])
                 if m:
                     self.new_balance = Decimal(m.group(1).replace(',', ''))
 
-            if re.search(r'\bFees?\b', line) and self.fees == 0:
-                m = re.search(r'\$\s*([0-9,]+\.\d{2})', line)
+            m_fees = re.search(r'\bFees?\b', line)
+            if m_fees and self.fees == 0:
+                m = re.search(r'\$\s*([0-9,]+\.\d{2})', line[m_fees.end():])
                 if m:
                     v = Decimal(m.group(1).replace(',', ''))
                     if v > 0:
                         self.fees = v
 
-            if contains_label(line, 'Interest Charged') and self.interest == 0:
-                m = re.search(r'\$\s*([0-9,]+\.\d{2})', line)
+            m_int = contains_label(line, 'Interest Charged')
+            if m_int and self.interest == 0:
+                label_end = re.search(r'\s+'.join(re.escape(w) for w in 'Interest Charged'.split()), line).end()
+                m = re.search(r'\$\s*([0-9,]+\.\d{2})', line[label_end:])
                 if m:
                     self.interest = Decimal(m.group(1).replace(',', ''))
 
         # ── Transactions ─────────────────────────────────────────────────────
-        # Capital One's transaction table has 5 columns in pdftotext -layout
-        # output: Date | Description | Category | Card | Amount.
-        # We capture description (first content column) by stripping everything
-        # after the first 2+ space gap, which marks the next column boundary.
+        # Real (fixture-verified) layout: per-cardholder tables of
+        # Trans Date | Post Date | Description | Amount. The single-date
+        # patterns are an unverified fallback for any other layout.
         for line in lines:
             stripped = line.strip()
             if not stripped or stripped.upper() in _SKIP_PHRASES:
@@ -151,8 +185,8 @@ class CapitalOneParser(StatementParser):
             mid = None
             amount_raw = None
 
-            # "Apr 15  Description  Category  Card  $Amount"
-            m = _TXN_ABBREV.match(stripped)
+            # "Apr 10  Apr 11  Description  $Amount" (Trans Date, Post Date)
+            m = _TXN_ABBREV_TWO_DATE.match(stripped)
             if m:
                 abbrev, day, mid_raw, amount_raw = m.groups()
                 mmdd = self._mmdd_from_abbrev(abbrev, day)
@@ -160,7 +194,17 @@ class CapitalOneParser(StatementParser):
                     date_str = (self._add_year_to_date(mmdd, self.closing_date)
                                 if self.closing_date else mmdd)
                     mid = mid_raw
-            else:
+            if date_str is None:
+                # "Apr 15  Description  Category  Card  $Amount"
+                m = _TXN_ABBREV.match(stripped)
+                if m:
+                    abbrev, day, mid_raw, amount_raw = m.groups()
+                    mmdd = self._mmdd_from_abbrev(abbrev, day)
+                    if mmdd:
+                        date_str = (self._add_year_to_date(mmdd, self.closing_date)
+                                    if self.closing_date else mmdd)
+                        mid = mid_raw
+            if date_str is None:
                 # "04/15  Description  Category  Card  $Amount"
                 m = _TXN_NUMERIC.match(stripped)
                 if m:
