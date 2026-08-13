@@ -116,12 +116,16 @@ def _assert_known_client(client: str) -> None:
     import os
     try:
         from parsers.base import _registry
-        # Strip _agency/_admin suffixes used by adp_labor_distribution to
-        # keep per-division payroll_log.csv rows distinct while still resolving
-        # to a known client key.
+        # Strip the division suffixes adp_labor_distribution.py uses to keep
+        # per-division rows distinct while still resolving to a known client
+        # key: "_agency"/"_admin" (payroll_key form, e.g. "acme_agency", used
+        # by append_payroll_log's client arg) and " — Agency"/" — Admin"
+        # (display-name form, e.g. "Acme Inc — Agency", used by
+        # append_digest_log's client_name arg -- same division, a different
+        # string shape, so both must be recognized here).
         probe = client
-        for _sfx in ("_agency", "_admin"):
-            if probe.lower().endswith(_sfx):
+        for _sfx in ("_agency", "_admin", " — Agency", " — Admin"):
+            if probe.lower().endswith(_sfx.lower()):
                 probe = probe[: -len(_sfx)]
                 break
         if _registry.resolve(probe) is not None:
