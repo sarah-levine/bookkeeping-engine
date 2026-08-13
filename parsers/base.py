@@ -454,13 +454,15 @@ def _classify_cc_transaction(vendor, amount):
         'ONLINE PAYMENT', 'AUTOPAY PAYMENT', 'PAYMENT RECEIVED',
     ]):
         return 'payment'
-    # Also treat negative amounts with a PAYMENT/AUTOPAY keyword as payments
-    # — AUTOPAY covers Citi Costco's own "AUTOPAY <ref> AUTO-PMT" autopay
-    # debit line, which never spells out "PAYMENT" in full. Gated on a
-    # negative amount (same as the PAYMENT check) so it can't catch an
-    # ordinary positive-amount charge from a merchant with "autopay" in its
-    # name.
+    # Also treat negative amounts with a PAYMENT/PYMT/AUTOPAY keyword as
+    # payments — AUTOPAY covers Citi Costco's own "AUTOPAY <ref> AUTO-PMT"
+    # autopay debit line, and PYMT covers a real Capital One statement's own
+    # "CAPITAL ONE ONLINE PYMT" line, neither of which spells out "PAYMENT"
+    # in full. Gated on a negative amount (same as the PAYMENT check) so it
+    # can't catch an ordinary positive-amount charge from a merchant with
+    # one of these words in its name.
     if amount < 0 and ('PAYMENT' in v or 'PAYMENT' in v_compact
+                        or 'PYMT' in v or 'PYMT' in v_compact
                         or 'AUTOPAY' in v or 'AUTOPAY' in v_compact):
         return 'payment'
     # Credits / refunds / returns
