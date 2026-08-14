@@ -5,6 +5,40 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
+### `_charges_section()`'s paired-vendor DR/CR rendering silently fabricates a value on an odd transaction count (found 2026-08-13, not fixed)
+
+`parsers/report.py::_charges_section()` supports a `paired_vendors` config
+(vendor name → debit/credit account pair) for vendors whose transactions
+should render as a DR/CR journal split instead of a flat line — e.g. a
+401k vendor debiting a match-expense account and crediting a withholding
+liability. The pairing loop (`for i in range(0, len(amounts), 2)`) assumes
+transactions always arrive in even-numbered pairs. When a real statement
+has an odd count for that vendor+date, the leftover transaction has no
+partner: the code prints a warning and reuses that transaction's own
+amount as its fabricated "CR" side, rather than giving it its own
+single-line entry.
+
+**Found via**: a real client's checking statement had 3 (not the assumed
+even number) same-day, same-amount Empower withdrawals. Since all three
+were identically $577.11, reusing the amount for the odd one's synthetic
+CR side happened to produce the numerically correct output — but this is
+a coincidence of the specific data, not a property of the code. If the
+odd-one-out's amount had differed from the others (a very plausible real
+scenario — e.g. a new employee's first, smaller contribution alongside
+two existing ones), the fabricated CR value would be wrong, and nothing
+in the code or its warning message would indicate a wrong dollar amount
+was booked — only that the count was odd.
+
+**Root cause fix**: when the count is odd, don't fabricate a CR partner —
+render the leftover transaction as its own plain single-line entry (same
+as an unpaired vendor), or explicitly flag it as needing manual review
+before it's included in a journal entry, rather than silently completing
+a phantom pair. Not fixed here — this session's real occurrence happened
+to be numerically harmless (confirmed by hand against the source PDF
+before committing), and the fix deserves its own verification pass rather
+than a rushed inline patch.
+
+
 ### Mode E's "unrecognized CC payment" check is session-scoped, not log-scoped — flags real, already-reconciled payments as false positives (found 2026-08-11, not fixed)
 
 `reconcile_comprehensive.py`'s checking-statement flow (~line 1434-1472)
