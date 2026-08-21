@@ -214,6 +214,17 @@ def run_adp_payroll_1099(args, config_name):
     print(f"Check Date: {check_date}")
     print(f"Pay Period: {header.get('pay_period_start')} to {header.get('pay_period_end')}")
 
+    # ADP occasionally splits one check date into multiple separate runs
+    # (e.g. a regular payroll plus a same-day 1099/contractor-only run).
+    # Both would otherwise collide on (client, check_date) in
+    # payroll_log.csv / recon_log.json and silently overwrite each other --
+    # disambiguate every run after the first with a suffix.
+    payroll_run = header.get("payroll_run")
+    run_suffix  = f"_run{payroll_run}" if payroll_run and payroll_run != "1" else ""
+    name_suffix = f" — Payroll {payroll_run}" if payroll_run and payroll_run != "1" else ""
+    if run_suffix:
+        print(f"Payroll Run: {payroll_run} (same-day multi-run — logged as a separate entry)")
+
     employees = parse_employees(text)
     print(f"\nEmployees found: {len(employees)}")
     dept_totals = {}
@@ -236,10 +247,19 @@ def run_adp_payroll_1099(args, config_name):
     if abs(total_d - total_c) > 0.01:
         print(f"⚠️  JE out of balance: debits ${total_d:,.2f} vs credits ${total_c:,.2f}")
 
-    print_journal_table(rows, cfg["client_name"], check_date)
-    if _qb_confirm(cfg["client_name"]):
-        append_payroll_log(cfg.get("payroll_key") or cfg["client_name"], cfg["client_name"], check_date, rows)
-        append_digest_log(cfg["client_name"], check_date)
+    print_journal_table(rows, cfg["client_name"] + name_suffix, check_date)
+    if _qb_confirm(cfg["client_name"] + name_suffix):
+        dispatch_key = (cfg.get("payroll_key") or cfg["client_name"]) + run_suffix
+        append_payroll_log(dispatch_key, cfg["client_name"] + name_suffix, check_date, rows)
+        append_digest_log(cfg["client_name"] + name_suffix, check_date)
+        # Plain client_name here (no run suffix) -- archive_payroll_pdf uses
+        # it for both the Drive folder path and the filename; suffixing it
+        # would fragment the same client's payroll archive into a separate
+        # folder per run instead of just needing a distinct filename. A
+        # same-date second run's archive may report "already exists" and
+        # get skipped since the filename template doesn't include the run
+        # number -- acceptable since the PDF itself isn't the bookkeeping
+        # record of truth (the journal entry and payroll_log.csv are).
         archive_payroll_pdf(pdf_path, cfg["client_name"], check_date)
 
 

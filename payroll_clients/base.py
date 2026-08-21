@@ -35,10 +35,16 @@ def parse_header(text: str) -> dict:
     handles the 'Check dates from: X to: Y' / 'Pay Period from: X to: Y'
     header format used on multi-payroll combined reports."""
     header = {}
-    # Single-payroll header: "Check date: 4/10/2026"
-    m = re.search(r'Checkdate:(\d+/\d+/\d+)', text)
+    # Single-payroll header: "Check date: 4/10/2026", sometimes followed by
+    # "-Payroll N" when ADP splits one check date into multiple separate runs
+    # (e.g. a regular payroll plus a same-day 1099/contractor-only run) --
+    # capture N so callers can disambiguate log keys that would otherwise
+    # collide on (client, check_date) and silently overwrite each other.
+    m = re.search(r'Checkdate:(\d+/\d+/\d+)(?:-Payroll(\d+))?', text)
     if m:
         header["check_date"] = m.group(1)
+        if m.group(2):
+            header["payroll_run"] = m.group(2)
     else:
         # Combined / multi-payroll header:
         #   "Check dates from: 5/8/2026 - Payroll 1 to: 5/14/2026 - Payroll 2"
