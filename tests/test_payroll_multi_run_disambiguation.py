@@ -9,10 +9,10 @@ same check date). append_payroll_log/append_digest_log key their upserts on
 second run silently overwrote the first run's entry in payroll_log.csv and
 recon_log.json, losing its BALANCED confirmation record entirely.
 
-Caught live reconciling a real client's two same-date FCBA-style runs
-(Run Number 0167 "Payroll 1" and Run Number 0168 "Payroll 2", both dated
-8/19/2026) before the second one was ever logged -- ADP's own PDF footer
-text ("Checkdate:8/19/2026-Payroll2 RunNumber:0168...") is the only signal
+Caught live reconciling a real client's two same-date runs (Run Number
+0167 "Payroll 1" and Run Number 0168 "Payroll 2", both dated 8/19/2026)
+before the second one was ever logged -- ADP's own PDF footer text
+("Checkdate:8/19/2026-Payroll2 RunNumber:0168...") is the only signal
 that distinguishes them.
 
 Uses fictional/synthetic header text -- no real client data.
