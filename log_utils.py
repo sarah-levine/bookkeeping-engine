@@ -114,20 +114,29 @@ def _assert_known_client(client: str) -> None:
     Importing parsers.base lazily to avoid circular imports.
     """
     import os
+    import re
     try:
         from parsers.base import _registry
-        # Strip the division suffixes adp_labor_distribution.py uses to keep
-        # per-division rows distinct while still resolving to a known client
-        # key: "_agency"/"_admin" (payroll_key form, e.g. "acme_agency", used
-        # by append_payroll_log's client arg) and " — Agency"/" — Admin"
-        # (display-name form, e.g. "Acme Inc — Agency", used by
-        # append_digest_log's client_name arg -- same division, a different
-        # string shape, so both must be recognized here).
+        # Strip disambiguating suffixes that keep otherwise-identical-key log
+        # rows distinct while still resolving to a known client key:
+        #   "_agency"/"_admin" (payroll_key form, e.g. "acme_agency", used by
+        #     append_payroll_log's client arg -- adp_labor_distribution.py's
+        #     two divisions) and " — Agency"/" — Admin" (display-name form,
+        #     e.g. "Acme Inc — Agency", used by append_digest_log's
+        #     client_name arg for the same divisions);
+        #   "_run\d+" (payroll_key form) and " — Payroll \d+" (display-name
+        #     form) -- adp_payroll_1099.py's same-check-date multiple runs
+        #     (e.g. a regular payroll plus a same-day 1099-only run), which
+        #     would otherwise collide on (client, check_date) in
+        #     payroll_log.csv / recon_log.json and silently overwrite the
+        #     earlier run's entry.
         probe = client
         for _sfx in ("_agency", "_admin", " — Agency", " — Admin"):
             if probe.lower().endswith(_sfx.lower()):
                 probe = probe[: -len(_sfx)]
                 break
+        else:
+            probe = re.sub(r'(_run\d+| — Payroll \d+)$', '', probe, flags=re.IGNORECASE)
         if _registry.resolve(probe) is not None:
             return  # known — proceed normally
     except Exception:
