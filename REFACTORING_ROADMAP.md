@@ -79,6 +79,47 @@ semantics (amount-based? date-window-based? just issuer-type presence,
 matching the current coarse check?) need real design thought, not a rushed
 patch — that's why this is logged here rather than fixed inline.
 
+**Two more prerequisite bugs found (2026-08-24), compounding the above for
+`amex_checking` specifically:**
+
+1. `parsers/amex.py`'s `amex_checking` report-generation path (~line 730-778)
+   classifies checking debits into a local `cc_payments` list correctly
+   (using the shared `_is_known_cc_network_payment()` plus `cfg['cc_keywords']`
+   — `'AMEX EPAYMENT'` is already in the known-network pattern list), but
+   then does `withdrawals.extend(cc_payments)` and never assigns the list to
+   `self.credit_card_payments`. Every other checking parser (`bofa.py`,
+   `usbank.py`, `wells_fargo.py`, `citi.py`, `northern_trust.py`) sets
+   `self.credit_card_payments` explicitly; `amex.py`'s checking path does
+   not. `reconcile_comprehensive.py`'s flag check reads
+   `getattr(parser, 'credit_card_payments', [])` — for every `amex_checking`
+   statement this is always `[]`, so the flag check above never runs at all
+   for this account type, independent of the session-scoping bug.
+2. Even with #1 fixed, the flag check's issuer detection
+   (`'AMERICAN EXPRESS' in vendor`) only matches the literal phrase
+   "AMERICAN EXPRESS" — real Amex-issued checking statements describe the
+   debit as `"Amex Epayment Ach Pmt"`, which does not contain that phrase.
+   The check needs to also match `'AMEX'`.
+
+**Found via**: user asked "isnt there a checking account?" for FCBA
+Academy, surfacing two unreconciled `amex_checking` statements (06/30/26,
+07/31/26). The 06/30/26 statement's "Amex Epayment Ach Pmt" debit (with a masked
+trailing-digits reference) for $13,113.67 doesn't match either payment line on the already-
+reconciled Amex statement covering that period ($27,090.32 on 7/13,
+$20,000.00 on 7/28) — a real, currently-undetected tie-out gap. Manually
+verified by grepping the raw Amex PDF and flagged as an open manual issue
+in `recon_log.json` (see `Bookkeeping-clients` commit `a571998`) since no
+automated check caught it. The July statement's two Amex payments
+($27,090.32 on 7/14, $20,000.00 on 7/29) do tie out cleanly to the same
+Amex statement — confirmed by hand, not by any existing check.
+
+**Requested**: Sarah asked for the check to be built out properly —
+amount-level cross-referencing (does this checking-side CC payment amount
+match a specific already-logged CC-side payment/period, not just "was any
+statement of this issuer type reconciled ever/this-session") so cases like
+the $13,113.67 gap above are flagged automatically instead of requiring a
+manual grep. Combine with the root-cause fix above and the two prerequisite
+bugs when this gets picked up.
+
 
 ### `reconcile_comprehensive.py`'s Step-0 log sync assumes `main` is the only source of truth — clobbers unmerged feature-branch log writes (found 2026-08-11, not fixed)
 
