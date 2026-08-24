@@ -181,6 +181,10 @@ def _file_exists(service, name: str, folder_id: str) -> bool:
 
 def _prune_old_statements(service, folder_id: str, keep: int = 2, dry_run: bool = False) -> None:
     """Keep only the most recent `keep` PDFs in a folder, delete the rest."""
+    if folder_id.startswith("DRY_RUN_"):
+        # Placeholder id from _find_or_create_folder(dry_run=True) — the folder
+        # doesn't exist yet, so there's nothing to list or prune.
+        return
     files = _list_files(service, folder_id)
     if len(files) <= keep:
         return

@@ -121,16 +121,6 @@ policy choice for how this repo's branch-based sessions are meant to work,
 not something to decide unilaterally mid-reconciliation-run.
 
 
-### `drive_archiver.py`'s dry-run path crashes when a client/account-type's Drive folder doesn't exist yet
-
-`archive_statement(..., dry_run=True)` crashes with a `googleapiclient.errors.HttpError: 404` whenever the target client/account-type folder pair doesn't already exist in Drive. Found 2026-08-11 while forcing a fresh interactive OAuth login via `python3 drive_archiver.py --dry-run <pdf> <client> <account_type>` (unrelated task — the token itself refreshed fine, this surfaced afterward) against `Duran Human Capital Partners Inc` / `usbank_checking`, whose account-type subfolder didn't exist yet.
-
-Root cause: `_find_or_create_folder()` returns a placeholder id (`f"DRY_RUN_FOLDER_{name}"`, never a real Drive id) when a folder is missing and `dry_run=True`, rather than creating it for real. The caller, `archive_statement()`, correctly guards its own next Drive call against this — `if not account_id.startswith("DRY_RUN_") and _file_exists(...)` — but then unconditionally calls `_prune_old_statements(service, account_id, keep=2, dry_run=True)` right after, with no such guard. `_prune_old_statements` immediately calls `_list_files(service, folder_id)`, which queries Drive with the fake `DRY_RUN_FOLDER_...` string as a real folder id in the `q=` filter — Drive's API rejects it as a malformed/nonexistent file id (`"File not found: ."`), raising an uncaught `HttpError` that crashes the whole script.
-
-**Root cause fix:** add the same `not account_id.startswith("DRY_RUN_")` guard already used for the `_file_exists()` call to the `_prune_old_statements()` call in `archive_statement()` (`drive_archiver.py`), or push the check inside `_prune_old_statements`/`_list_files` itself so every caller gets it automatically rather than needing to remember the guard at each call site — the latter is probably safer given `archive_fixture()` has its own separate dry-run path that wasn't audited for the same gap while logging this.
-
-Didn't block the OAuth-refresh task this was found during: the token write happens inside `_get_service()`, well before this crash point in `archive_statement()`, so the actual credential refresh (and the `Bookkeeping-clients` commit of the new `drive_token.pickle`) completed successfully despite the later crash. No real Drive data was at risk either way — `dry_run=True` never reaches the actual upload/delete calls, only this diagnostic listing call.
-
 ### `bofa.py`'s `'Payments and Other Credits' in stripped` section marker (same bug class as the label-gate sweep below, found while fixing it, not fixed)
 
 `BankOfAmericaCreditCardParser._extract_rows()` (`parsers/bofa.py`, inside
@@ -1059,6 +1049,28 @@ becomes available, the same 3-commit branch pattern applies:
 ---
 
 ## Closed: Fixed
+
+- `drive_archiver.py`'s dry-run path crashed when a client/account-type's
+  Drive folder didn't exist yet — fixed 2026-08-24. `_find_or_create_folder()`
+  returns a placeholder id (`f"DRY_RUN_FOLDER_{name}"`) when a folder is
+  missing and `dry_run=True`; `archive_statement()` guarded its own
+  `_file_exists()` call against that placeholder but unconditionally called
+  `_prune_old_statements(service, account_id, keep=2, dry_run=True)` right
+  after, which queried Drive with the fake id as a real folder id and raised
+  an uncaught `HttpError: 404`. Took the "push the check inside
+  `_prune_old_statements`" option from this entry's own writeup (safer than
+  repeating the guard at every call site, and covers `archive_fixture()`'s
+  separate dry-run path too, which was never audited for the same gap):
+  added `if folder_id.startswith("DRY_RUN_"): return` at the top of
+  `_prune_old_statements()`, before it ever calls `_list_files()`.
+  **Testing**: called `_prune_old_statements(None, "DRY_RUN_FOLDER_...",
+  dry_run=True)` directly — passing `service=None` means any code path that
+  still touched `service` would crash immediately with `AttributeError`, so
+  reaching the printed "no crash" line proves the guard short-circuits
+  before any Drive call. Re-ran the exact crashing case from this entry
+  (`python3 drive_archiver.py --dry-run tests/.fixture_cache/usbank_checking_duran.pdf
+  "Duran Human Capital Partners Inc" usbank_checking`) — no crash. Full
+  suite: 353 passed.
 
 - `adp_payroll_professional.parse_admin()` silently dropped unrecognized
   earnings categories — fixed 2026-08-11, same session that found it. Gave
