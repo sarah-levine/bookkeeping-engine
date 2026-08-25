@@ -410,6 +410,7 @@ class BMOCreditCardParser(StatementParser):
         self.charges = []
         self.statement_period = ''
         self.closing_date = None
+        self.cardholder = None
 
         if pdf_path:
             self.text = self._extract_text()
@@ -490,6 +491,7 @@ class BMOCreditCardParser(StatementParser):
         self.total_payments   = Decimal(str(data.get('total_payments', 0)))
         self.statement_period = data.get('statement_period', '')
         self.client_name      = data.get('client_name', self.client_name)
+        self.cardholder       = data.get('cardholder', self.cardholder)
         self.payments         = data.get('payments', [])
         self.credits          = data.get('credits', [])
         self.charges          = data.get('charges', [])
@@ -504,6 +506,16 @@ class BMOCreditCardParser(StatementParser):
 
         for line in lines:
             upper = line.upper()
+            # This card program issues one statement per named individual
+            # under the same company bill (e.g. four separate cardholders,
+            # each their own account/balance) — without printing which
+            # cardholder a given report belongs to, there's no way to tell
+            # four otherwise-identical "Acme Appliance..." reports apart.
+            if 'INDIVIDUAL NAME' in upper and self.cardholder is None:
+                idx = upper.index('INDIVIDUAL NAME') + len('INDIVIDUAL NAME')
+                m = re.search(r':?\s*([A-Za-z][A-Za-z .]+?)(?:\s{2,}|$)', line[idx:])
+                if m:
+                    self.cardholder = m.group(1).strip()
             # Anchored to the text AFTER the keyword, taking the FIRST amount
             # that follows — not amounts[-1] on the whole line. OCR commonly
             # collapses this statement's two-column summary onto one line
@@ -603,6 +615,8 @@ class BMOCreditCardParser(StatementParser):
         total_credits  = sum(Decimal(str(c['amount'])) for c in self.credits)
 
         report  = _report_header(self.statement_type, self.client_name,
+                                  account_number=self.cardholder,
+                                  account_label='Cardholder',
                                   statement_date=self.statement_period)
         report += _summary_block([
             ('Previous Balance', self.previous_balance),

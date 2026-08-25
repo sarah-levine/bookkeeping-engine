@@ -108,6 +108,7 @@ def run(month_key=None, output_path=None, no_prompt=False):
     parser.finance_charge      = Decimal('0')
     parser.statement_new_charges = Decimal('0')
     parser.closing_date        = None
+    parser.cardholder          = None
     parser.client_name         = data.get('client_name', '')
     parser.load_from_dict(data)
 

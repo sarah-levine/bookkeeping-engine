@@ -181,6 +181,28 @@ def test_generate_report_header():
     print("PASS  test_generate_report_header")
 
 
+def test_generate_report_no_cardholder_omits_line():
+    """Without a cardholder, the report shouldn't print an empty 'Cardholder:'
+    line -- _report_header() only adds the line when account_number is set."""
+    p = _make_parser(**_base_data())
+    report = p.generate_report()
+    assert 'Cardholder' not in report
+    print("PASS  test_generate_report_no_cardholder_omits_line")
+
+
+def test_generate_report_cardholder_shown():
+    """This program issues one statement per named individual under the same
+    company bill (e.g. four separate cardholders, each their own account) --
+    without printing which cardholder a report belongs to, four otherwise-
+    identical 'Acme Corp' reports are indistinguishable."""
+    data = _base_data()
+    data['cardholder'] = 'Jane Doe'
+    p = _make_parser(**data)
+    report = p.generate_report()
+    assert 'Cardholder: Jane Doe' in report
+    print("PASS  test_generate_report_cardholder_shown")
+
+
 def test_generate_report_credits_section():
     data = _base_data()
     data['credits'] = [
@@ -251,6 +273,7 @@ def test_normalize_vendor_with_config():
 
 _SYNTHETIC_TEXT = """\
 BMO Business Platinum Rewards Credit Card
+Individual Name: JANE DOE
 Account Number ending in 0971
 
 STATEMENT CLOSE DATE  May 24, 2026
@@ -273,6 +296,14 @@ def test_parse_previous_and_new_balance():
     assert p.previous_balance == Decimal('109.99'), p.previous_balance
     assert p.new_balance      == Decimal('821.45'), p.new_balance
     print("PASS  test_parse_previous_and_new_balance")
+
+
+def test_parse_individual_name():
+    p = BMOCreditCardParser()
+    p.text = _SYNTHETIC_TEXT
+    p.parse()
+    assert p.cardholder == 'JANE DOE', p.cardholder
+    print("PASS  test_parse_individual_name")
 
 
 def test_parse_statement_period():
@@ -346,10 +377,13 @@ TESTS = [
     test_generate_report_payments_section,
     test_generate_report_dates_four_digit,
     test_generate_report_header,
+    test_generate_report_no_cardholder_omits_line,
+    test_generate_report_cardholder_shown,
     test_generate_report_credits_section,
     test_normalize_vendor_no_config,
     test_normalize_vendor_with_config,
     test_parse_previous_and_new_balance,
+    test_parse_individual_name,
     test_parse_statement_period,
     test_parse_transactions,
     test_parse_dates_are_four_digit,
