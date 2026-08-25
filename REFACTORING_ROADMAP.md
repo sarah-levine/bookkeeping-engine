@@ -5,6 +5,40 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
+### `manual_statement_entry.py` hand-builds parser instances via `__new__`, bypassing `__init__` — breaks every time a parser gains a new instance attribute (found 2026-08-25, patched not fixed)
+
+`manual_statement_entry.py`'s `run()` never constructs a parser through its
+normal `__init__` (which takes `pdf_path=None`, `client_name=None` and sets
+up all instance state). Instead it does `parser_cls.__new__(parser_cls)` and
+then hand-sets ~20 attributes explicitly, one line per attribute, because
+some parser `__init__` methods do PDF-only work (`self.text =
+self._extract_text()`) that would crash with no `pdf_path`. This means the
+hand-rolled attribute list is a second, separately-maintained copy of "every
+attribute a manual-entry-supporting parser's `__init__` sets" — nothing
+enforces the two stay in sync.
+
+**Found via**: adding a `cardholder` attribute to `BMOCreditCardParser` (see
+`parsers/bmo.py`, PR #54) broke `manual_statement_entry.py` immediately —
+`AttributeError: 'BMOCreditCardParser' object has no attribute 'cardholder'`
+at `load_from_dict()`, since the hand-rolled attribute list didn't know
+about it. Patched by adding `parser.cardholder = None` to that list in the
+same PR — a real ship-blocking bug (not a null case) but a patch, not a fix:
+the next new attribute on *any* manual-entry-supporting parser
+(`BMOCreditCardParser`, `CitiVisaCostcoParser`, etc.) will silently
+reproduce this exact crash, and nothing will catch it until a real manual
+entry run breaks.
+
+**Root cause fix**: give parsers a manual-entry-safe construction path that
+doesn't require a second hand-maintained attribute list — e.g. a
+`classmethod` per parser (`from_manual_data(data)`) that each parser class
+owns and keeps in sync with its own `__init__`/`load_from_dict`, or split
+`__init__` so the PDF-only work is opt-in (`if pdf_path: self._extract_and_parse()`)
+and the no-PDF path can safely run the full constructor. Not fixed here —
+touches every manual-entry-registered parser class, not just BMO, and
+deserves its own test pass across all of them rather than a rushed change
+alongside an unrelated feature.
+
+
 ### `_charges_section()`'s paired-vendor DR/CR rendering silently fabricates a value on an odd transaction count (found 2026-08-13, not fixed)
 
 `parsers/report.py::_charges_section()` supports a `paired_vendors` config
