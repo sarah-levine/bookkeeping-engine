@@ -45,6 +45,8 @@ class BMOCheckingParser(StatementParser):
         self.debits   = []   # withdrawals (stored as negative Decimal)
         self.checks   = []   # check items (stored as negative Decimal)
         self.service_fees = Decimal('0')
+        self.closing_date = None
+        self.statement_period = ''
 
     # ── text extraction ──────────────────────────────────────────────────────
 
@@ -119,6 +121,13 @@ class BMOCheckingParser(StatementParser):
         year = self._get_statement_year()
 
         # ── balance lines ────────────────────────────────────────────────────
+        # reconcile_comprehensive.py logs statement_end_date from closing_date
+        # (falling back to statement_date/statement_period) -- this class
+        # never set any of them, so every real BMOCheckingParser reconciliation
+        # has been logging a blank statement date (same bug class already
+        # fixed for BMOCreditCardParser). The statement's own header prints
+        # its period as "<Month> <Day>, <Year> through <Month> <Day>, <Year>"
+        # -- the date after "through" is the closing date.
         for line in lines:
             upper = line.upper()
             if 'BEGINNING BALANCE' in upper and self.beginning_balance is None:
@@ -129,6 +138,26 @@ class BMOCheckingParser(StatementParser):
                 amounts = re.findall(r'[\$]?([\d,]+\.\d{2})', line)
                 if amounts:
                     self.ending_balance = Decimal(amounts[-1].replace(',', ''))
+
+        # "through" and the closing date after it can land on separate
+        # pdftotext -layout lines (the source statement stacks "<start date>
+        # through" / "<end date>" in a narrow info box) -- search the whole
+        # text with DOTALL rather than line-by-line, or a wrapped date is
+        # silently missed.
+        m = re.search(
+            r'THROUGH\s+((?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\w*\s+\d{1,2},?\s+\d{4})',
+            self.text.upper(), re.DOTALL
+        )
+        if m:
+            self.statement_period = m.group(1).title()
+            for _fmt in ('%B %d, %Y', '%b %d, %Y', '%B %d %Y', '%b %d %Y'):
+                try:
+                    self.closing_date = datetime.strptime(
+                        self.statement_period, _fmt).strftime('%m/%d/%y')
+                    break
+                except ValueError:
+                    continue
+        self.statement_date = self.closing_date
 
         # ── transaction lines ─────────────────────────────────────────────────
         # BMO layout (pdftotext -layout):
@@ -256,6 +285,8 @@ class BMOCheckingParser(StatementParser):
         self.debits            = data.get('debits', [])
         self.service_fees      = Decimal(str(data.get('service_fees', 0)))
         self.statement_period  = data.get('statement_period', '')
+        self.closing_date      = data.get('closing_date')
+        self.statement_date    = self.closing_date
         self.client_name       = data.get('client_name', self.client_name)
 
     def generate_report(self, check_payee_map=None, check_date_map=None):
