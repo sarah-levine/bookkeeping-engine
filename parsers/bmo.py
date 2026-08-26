@@ -47,6 +47,13 @@ class BMOCheckingParser(StatementParser):
         self.service_fees = Decimal('0')
         self.closing_date = None
         self.statement_period = ''
+        # The statement's own "Account Summary" row prints its own count/total
+        # for deposits and withdrawals -- an independent cross-check against
+        # what parse()/manual entry actually itemized. None until found/given.
+        self.stated_deposit_count = None
+        self.stated_deposit_amount = None
+        self.stated_withdrawal_count = None
+        self.stated_withdrawal_amount = None
 
     # ── text extraction ──────────────────────────────────────────────────────
 
@@ -148,6 +155,29 @@ class BMOCheckingParser(StatementParser):
             r'THROUGH\s+((?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\w*\s+\d{1,2},?\s+\d{4})',
             self.text.upper(), re.DOTALL
         )
+        # The "Account Summary" table row -- beginning balance, deposit
+        # count, deposit amount, withdrawal count, withdrawal amount,
+        # service charges, ending balance, all printed together as one row
+        # in the source statement. An independent cross-check against
+        # whatever parse() (or manual entry) actually itemizes below:
+        # a shortfall with a matching count means a misread amount; a
+        # matching total with a short count means two real transactions
+        # got collapsed into one line. Confirmed live: a real statement's
+        # itemized deposits were short by one transaction's worth of
+        # dollars despite the count matching, and the withdrawal total
+        # matched exactly despite being one transaction short -- neither
+        # gap was visible without this cross-check.
+        sm = re.search(
+            r'\$?([\d,]+\.\d{2})\s+(\d{1,4})\s+\$?([\d,]+\.\d{2})\s+'
+            r'(\d{1,4})\s+\$?([\d,]+\.\d{2})\s+\$?([\d,]+\.\d{2})\s+\$?([\d,]+\.\d{2})',
+            self.text
+        )
+        if sm:
+            self.stated_deposit_count      = int(sm.group(2))
+            self.stated_deposit_amount     = Decimal(sm.group(3).replace(',', ''))
+            self.stated_withdrawal_count   = int(sm.group(4))
+            self.stated_withdrawal_amount  = Decimal(sm.group(5).replace(',', ''))
+
         if m:
             self.statement_period = m.group(1).title()
             for _fmt in ('%B %d, %Y', '%b %d, %Y', '%B %d %Y', '%b %d %Y'):
@@ -288,6 +318,16 @@ class BMOCheckingParser(StatementParser):
         self.closing_date      = data.get('closing_date')
         self.statement_date    = self.closing_date
         self.client_name       = data.get('client_name', self.client_name)
+        self.stated_deposit_count = data.get('stated_deposit_count')
+        self.stated_deposit_amount = (
+            Decimal(str(data['stated_deposit_amount']))
+            if data.get('stated_deposit_amount') is not None else None
+        )
+        self.stated_withdrawal_count = data.get('stated_withdrawal_count')
+        self.stated_withdrawal_amount = (
+            Decimal(str(data['stated_withdrawal_amount']))
+            if data.get('stated_withdrawal_amount') is not None else None
+        )
 
     def generate_report(self, check_payee_map=None, check_date_map=None):
         check_payee_map = check_payee_map or {}
@@ -380,6 +420,41 @@ class BMOCheckingParser(StatementParser):
             calc = self.beginning_balance + total_dep - total_all_deb
             ok   = _is_balanced(calc, self.ending_balance, tolerance=Decimal('0.05'))
             report += _balance_check(ok, calc)
+
+        # Cross-check against the statement's own Account Summary row (its
+        # printed deposit/withdrawal count and total) -- independent of the
+        # beginning/ending-balance check above, which can pass even when an
+        # itemized amount is wrong or two transactions got collapsed into
+        # one line, as long as the errors happen to cancel out. Confirmed
+        # live on a real statement: deposits were short by one transaction's
+        # dollar value despite the count matching (a misread amount), and
+        # withdrawals matched in total despite being one transaction short
+        # (two real transactions collapsed into one line) -- neither gap
+        # was visible from the balance check alone.
+        if self.stated_deposit_count is not None or self.stated_withdrawal_count is not None:
+            actual_dep_count = len(self.credits)
+            actual_wd_count  = len(self.checks) + len(other_txns) + len(payroll_txns) + len(fee_txns)
+            mismatches = []
+            if (self.stated_deposit_count is not None
+                    and self.stated_deposit_count != actual_dep_count):
+                mismatches.append(f"  Deposit count: statement says {self.stated_deposit_count}, itemized {actual_dep_count}")
+            if (self.stated_deposit_amount is not None
+                    and not _is_balanced(self.stated_deposit_amount, total_dep, tolerance=Decimal('0.01'))):
+                mismatches.append(f"  Deposit total: statement says ${self.stated_deposit_amount:,.2f}, itemized ${total_dep:,.2f}")
+            if (self.stated_withdrawal_count is not None
+                    and self.stated_withdrawal_count != actual_wd_count):
+                mismatches.append(f"  Withdrawal count: statement says {self.stated_withdrawal_count}, itemized {actual_wd_count}")
+            if (self.stated_withdrawal_amount is not None
+                    and not _is_balanced(self.stated_withdrawal_amount, total_all_deb, tolerance=Decimal('0.01'))):
+                mismatches.append(f"  Withdrawal total: statement says ${self.stated_withdrawal_amount:,.2f}, itemized ${total_all_deb:,.2f}")
+            if mismatches:
+                report += "⚠ Deposit/withdrawal count or total doesn't match the statement's Account Summary:\n"
+                report += '\n'.join(mismatches) + '\n'
+                report += ("  A count match with an amount mismatch usually means one itemized amount is\n"
+                           "  misread. An amount match with a count mismatch usually means two real\n"
+                           "  transactions got collapsed into one itemized line.\n\n")
+            else:
+                report += "✓ Deposit/withdrawal count and totals match the statement's Account Summary\n\n"
 
         report += _deposits_section(agg_credits, total_dep)
 

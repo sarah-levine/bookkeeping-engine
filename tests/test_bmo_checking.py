@@ -33,6 +33,72 @@ def test_load_from_dict_no_closing_date_defaults_none():
     print("PASS  test_load_from_dict_no_closing_date_defaults_none")
 
 
+def _base_manual_data():
+    """Two deposits, one check -- deliberately balances beginning/ending too,
+    so the existing balance check can't mask a count/amount cross-check bug."""
+    return {
+        'beginning_balance': '1000.00',
+        'ending_balance': '1350.00',
+        'credits': [
+            {'date': '07/01/26', 'vendor': 'Acme Corp Deposit', 'amount': '300.00'},
+            {'date': '07/02/26', 'vendor': 'Bravo LLC Deposit', 'amount': '200.00'},
+        ],
+        'checks': [
+            {'date': '07/03/26', 'number': '101', 'amount': '150.00', 'vendor': 'Charlie Vendor'},
+        ],
+        'debits': [],
+    }
+
+
+def test_generate_report_stated_totals_match_no_warning():
+    data = _base_manual_data()
+    data.update(stated_deposit_count=2, stated_deposit_amount='500.00',
+                 stated_withdrawal_count=1, stated_withdrawal_amount='150.00')
+    p = BMOCheckingParser(pdf_path=None, client_name='Acme Corp')
+    p.load_from_dict(data)
+    report = p.generate_report()
+    assert 'Deposit/withdrawal count and totals match' in report
+    assert "doesn't match" not in report
+    print("PASS  test_generate_report_stated_totals_match_no_warning")
+
+
+def test_generate_report_no_stated_totals_no_crosscheck_section():
+    p = BMOCheckingParser(pdf_path=None, client_name='Acme Corp')
+    p.load_from_dict(_base_manual_data())
+    report = p.generate_report()
+    assert 'Account Summary' not in report
+    print("PASS  test_generate_report_no_stated_totals_no_crosscheck_section")
+
+
+def test_generate_report_deposit_count_matches_amount_does_not():
+    """Real bug shape: count right, total wrong -- means one itemized
+    deposit amount is misread, not a missing transaction."""
+    data = _base_manual_data()
+    data.update(stated_deposit_count=2, stated_deposit_amount='550.00',
+                 stated_withdrawal_count=1, stated_withdrawal_amount='150.00')
+    p = BMOCheckingParser(pdf_path=None, client_name='Acme Corp')
+    p.load_from_dict(data)
+    report = p.generate_report()
+    assert "doesn't match" in report
+    assert 'Deposit total: statement says $550.00, itemized $500.00' in report
+    assert 'Deposit count' not in report  # count itself matched -- only the total line should fire
+    print("PASS  test_generate_report_deposit_count_matches_amount_does_not")
+
+
+def test_generate_report_withdrawal_amount_matches_count_does_not():
+    """Real bug shape: total right, count wrong -- means two real
+    transactions got collapsed into one itemized line."""
+    data = _base_manual_data()
+    data.update(stated_deposit_count=2, stated_deposit_amount='500.00',
+                 stated_withdrawal_count=2, stated_withdrawal_amount='150.00')
+    p = BMOCheckingParser(pdf_path=None, client_name='Acme Corp')
+    p.load_from_dict(data)
+    report = p.generate_report()
+    assert 'Withdrawal count: statement says 2, itemized 1' in report
+    assert 'Withdrawal total' not in report  # amount itself matched -- only the count line should fire
+    print("PASS  test_generate_report_withdrawal_amount_matches_count_does_not")
+
+
 def test_load_from_dict_closing_date_passthrough():
     p = BMOCheckingParser(pdf_path=None, client_name='Acme Corp')
     p.load_from_dict({
@@ -61,6 +127,11 @@ July 01, 2026 through
 July 31, 2026
 
 Statement Summary
+
+Account Summary
+BEGINNING BALANCE AS   NUMBER OF   DEPOSIT      NUMBER OF     WITHDRAWAL    SERVICE   ENDING BALANCE AS OF
+OF JUNE 30, 2026        DEPOSITS    AMOUNT       WITHDRAWALS   AMOUNT        CHARGES   JULY 31, 2026
+$27,897.91              56          $99,281.97   50            $94,615.45    $0.00     $32,564.43
 
 BEGINNING BALANCE AS OF JUNE 30, 2026    $27,897.91
 ENDING BALANCE AS OF JULY 31, 2026       $32,564.43
@@ -100,6 +171,21 @@ def test_parse_no_through_clause_leaves_closing_date_none():
     print("PASS  test_parse_no_through_clause_leaves_closing_date_none")
 
 
+def test_parse_stated_deposit_withdrawal_totals():
+    """The Account Summary row (beginning balance, deposit count/amount,
+    withdrawal count/amount, service charges, ending balance) is one row
+    in the real statement -- parse() should pull the count/amount fields
+    from it regardless of the label row above wrapping onto two lines."""
+    p = BMOCheckingParser(pdf_path=None)
+    p.text = _SYNTHETIC_TEXT
+    p.parse()
+    assert p.stated_deposit_count == 56, p.stated_deposit_count
+    assert p.stated_deposit_amount == Decimal('99281.97'), p.stated_deposit_amount
+    assert p.stated_withdrawal_count == 50, p.stated_withdrawal_count
+    assert p.stated_withdrawal_amount == Decimal('94615.45'), p.stated_withdrawal_amount
+    print("PASS  test_parse_stated_deposit_withdrawal_totals")
+
+
 def test_parse_still_extracts_balances_and_transactions():
     """Closing-date extraction must not regress the existing balance/
     transaction parsing this class already had."""
@@ -117,9 +203,14 @@ def test_parse_still_extracts_balances_and_transactions():
 
 TESTS = [
     test_load_from_dict_no_closing_date_defaults_none,
+    test_generate_report_stated_totals_match_no_warning,
+    test_generate_report_no_stated_totals_no_crosscheck_section,
+    test_generate_report_deposit_count_matches_amount_does_not,
+    test_generate_report_withdrawal_amount_matches_count_does_not,
     test_load_from_dict_closing_date_passthrough,
     test_parse_closing_date_from_through_clause,
     test_parse_statement_period_from_through_clause,
+    test_parse_stated_deposit_withdrawal_totals,
     test_parse_no_through_clause_leaves_closing_date_none,
     test_parse_still_extracts_balances_and_transactions,
 ]
