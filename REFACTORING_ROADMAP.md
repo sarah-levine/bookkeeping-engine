@@ -241,9 +241,24 @@ Appliance, 07/2026) — genuine real statement text, not a guess — but this is
 **not** the same as real-fixture verification: a photo isn't machine-readable
 text, so the exact whitespace/column behavior `pdftotext -layout` would
 actually produce is still unconfirmed. `tests/test_bmo_checking.py` covers
-this with synthetic text matching the observed real wording. Upload a real
-`bmo_checking` PDF via Mode H to fully close this out against the actual
-`pdftotext -layout` output, per CLAUDE.md's testing policy.
+this with synthetic text matching the observed real wording.
+
+**Correction (2026-08-26):** the original ask above — verify against real
+`pdftotext -layout` output — describes a code path that will never actually
+run for this client/parser. BMO Premium Business Checking statements arrive
+only as photos (confirmed with Sarah); `_extract_text()` (`parsers/bmo.py`
+lines 60-97) tries `pdftotext -layout` first but falls through to local OCR
+(PyMuPDF + pytesseract) whenever that returns empty, which is always the
+case for a photo-wrapped PDF. So the `closing_date` regex runs against
+Tesseract OCR output in every real invocation, never against clean digital
+`pdftotext` text. The still-open gap isn't "pdftotext vs. hand-typed text" —
+it's real Tesseract OCR noise (misread characters, irregular spacing) vs.
+the synthetic text `test_bmo_checking.py` matches against, which a
+hand-written fixture can't reproduce. To actually close this out: upload a
+real photographed `bmo_checking` statement via Mode H (same fixture shape as
+`tests/.fixture_cache/bmo_credit_de_anza_*_photo.pdf` for the credit-card
+side) and verify `closing_date`/`statement_period` extraction against its
+actual OCR output, not against `pdftotext -layout`.
 
 ---
 
