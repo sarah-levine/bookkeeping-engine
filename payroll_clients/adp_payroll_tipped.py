@@ -122,6 +122,41 @@ def parse_company_totals(text: str) -> dict:
     return totals
 
 
+def parse_pay_by_pay(text: str):
+    """The real Pay-by-Pay Insurance debit for this specific run -- only
+    printed on the Payroll Liability PDF (not the Payroll Details PDF), as
+    "TotalPay-by-PayInsurance $X.XX" -- extract_text() (pdfplumber) squishes
+    adjacent words together with no space on this PDF's layout, same as
+    every other regex in this file (e.g. "S-corp2%medical", "FEDSOCSEC-ER").
+    Returns None if not found (e.g. the Liability PDF wasn't passed in), so
+    callers can fall back explicitly rather than silently trusting a stale
+    config default."""
+    m = re.search(r"TotalPay-by-PayInsurance\s*\$?([\d,]+\.\d{2})", text)
+    return amt(m.group(1)) if m else None
+
+
+def resolve_pay_by_pay(override, liability_text, cfg):
+    """Precedence for this run's Pay-by-Pay Insurance amount: explicit
+    --pay-by-pay override > parsed from the Liability PDF's own text >
+    config default (loud fallback -- a silent wrong constant here is
+    exactly the bug this exists to prevent; see REFACTORING_ROADMAP.md).
+    Returns (amount, warning_or_None)."""
+    if override is not None:
+        return override, None
+    if liability_text:
+        parsed = parse_pay_by_pay(liability_text)
+        if parsed is not None:
+            return parsed, None
+    default = cfg.get("workers_comp_refund", 22.55)
+    warning = (
+        f"Pay-by-Pay Insurance not found in a Liability PDF and no "
+        f"--pay-by-pay given -- using config default ${default:,.2f}, "
+        f"which will NOT match this run's real ADP debit unless it "
+        f"happens to be the same amount."
+    )
+    return default, warning
+
+
 def parse_1099(lines: list) -> float:
     in_dept = False
     for line in lines:
@@ -188,14 +223,13 @@ def run_adp_payroll_tipped(args, config_name):
         sys.exit(1)
 
     pdf_path        = args[0]
+    liability_pdf   = args[1] if len(args) > 1 and not args[1].startswith("--") else None
     pay_by_pay_override = None
     for i, arg in enumerate(args):
         if arg == "--pay-by-pay" and i + 1 < len(args):
             pay_by_pay_override = float(args[i + 1])
 
     cfg = load_config(config_name)
-    if pay_by_pay_override is not None:
-        cfg["workers_comp_refund"] = pay_by_pay_override
 
     print(f"Client:  {cfg['client_name']}")
     print(f"PDF:     {pdf_path}")
@@ -212,6 +246,17 @@ def run_adp_payroll_tipped(args, config_name):
     company    = parse_company_totals(text)
     total_1099 = parse_1099(lines)
 
+    # The real Pay-by-Pay Insurance debit varies every run and only appears
+    # on the Liability PDF -- previously this silently fell back to a static
+    # config constant every time (workers_comp_refund: 22.55 in
+    # paintbox_hair_studio.json), which never matched the actual ADP debit
+    # on the bank statement.
+    liability_text = extract_text(liability_pdf) if liability_pdf else None
+    pay_by_pay, pay_by_pay_warning = resolve_pay_by_pay(pay_by_pay_override, liability_text, cfg)
+    if pay_by_pay_warning:
+        print(f"  ⚠ {pay_by_pay_warning}")
+    cfg["workers_comp_refund"] = pay_by_pay
+
     print(f"\n--- Parsed Values ---")
     print(f"  Officers gross:    ${sum(e['gross'] for e in officers['employees']):,.2f}  ({len(officers['employees'])} employee(s))")
     print(f"  S-Corp 2% medical: ${company['scorp_medical']:,.2f}")
@@ -222,6 +267,7 @@ def run_adp_payroll_tipped(args, config_name):
     print(f"  Net pay:           ${company['net_pay']:,.2f}")
     print(f"  Employee taxes:    ${company['total_taxes']:,.2f}")
     print(f"  Employer taxes:    ${company['employer_taxes']:,.2f}")
+    print(f"  Pay-by-Pay Ins.:   ${pay_by_pay:,.2f}")
 
     rows = _build_journal(cfg, officers, support, company, total_1099, check_date)
     print_journal_table(rows, cfg["client_name"], check_date)
