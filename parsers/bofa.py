@@ -711,6 +711,20 @@ class BankOfAmericaCheckingParser(StatementParser):
                 adp_debits.append(
                     {'date': t['date'], 'vendor': t['vendor'],
                      'amount': t['amount'], 'count': 1})
+            elif 'ONLINE BANKING PAYMENT' in d_upper and re.search(r'\bTO\s+CRD\b', d_upper):
+                # Mirror of the transfer-to-SAV/CHK case below: BofA's own
+                # online banking descriptions explicitly name a credit card
+                # destination ("... TO CRD 9943") for a bill payment
+                # initiated via online banking transfer rather than the
+                # card network's own withdrawal descriptor. Found live: a
+                # real "Online Banking payment to CRD 9943" (matching the
+                # last 4 of the client's own BofA card number) fell through
+                # to plain withdrawals since it doesn't match
+                # _KNOWN_CC_NETWORK_PATTERNS or any client cc_keywords, so
+                # it was silently missed by Mode E's CC payment tie-out.
+                credit_card_payments.append(
+                    {'date': t['date'], 'vendor': t['vendor'],
+                     'amount': t['amount'], 'count': 1})
             elif 'ONLINE BANKING TRANSFER' in d_upper:
                 # "Online banking transfer" is ambiguous — it's the same
                 # description whether the money is going to pay off a credit
