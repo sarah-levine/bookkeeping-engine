@@ -712,9 +712,21 @@ class BankOfAmericaCheckingParser(StatementParser):
                     {'date': t['date'], 'vendor': t['vendor'],
                      'amount': t['amount'], 'count': 1})
             elif 'ONLINE BANKING TRANSFER' in d_upper:
-                online_banking_debits.append(
-                    {'date': t['date'], 'vendor': t['vendor'],
-                     'amount': t['amount'], 'count': 1})
+                # "Online banking transfer" is ambiguous — it's the same
+                # description whether the money is going to pay off a credit
+                # card or moving into the client's own savings/checking
+                # sub-account. Only the latter names its destination
+                # explicitly ("... TO SAV 0295" / "... TO CHK 1234"); route
+                # those to the plain withdrawals bucket instead of merging
+                # them into the CREDIT CARD PAYMENTS section below, where an
+                # inter-account transfer would be misleading for QB entry
+                # and would wrongly feed Mode E's CC payment tie-out.
+                if re.search(r'\bTO\s+(SAV|CHK)\b', d_upper):
+                    other_debits.append(t)
+                else:
+                    online_banking_debits.append(
+                        {'date': t['date'], 'vendor': t['vendor'],
+                         'amount': t['amount'], 'count': 1})
             elif (_is_known_cc_network_payment(d_upper) or
                   any(kw.upper() in d_upper for kw in
                       (_registry.get_config(self.client_name) or {}).get('cc_keywords', []))):

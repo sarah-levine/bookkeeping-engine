@@ -191,5 +191,81 @@ class BofaCheckingSyntheticPipelineTest(unittest.TestCase):
         self.assertEqual(p.service_fees, _d('25.00'))
 
 
+_CC_TEXT = (
+    "for August 1, 2026 to August 31, 2026\n"
+    "Beginning balance on 8/1/26 $13,000.00\n"
+    "Ending balance on 8/31/26 $0.00\n"
+    "Deposits and other credits\n"
+    "08/05/26 CONTOSO CUSTOMER PAYMENT 500.00\n"
+    "Withdrawals and other debits\n"
+    # Real bug shape (found reconciling Paintbox Hair Studio's August 2026
+    # BofA checking statement): this client also holds a BofA savings
+    # account, and "Online banking transfer" is the same generic
+    # description BofA uses whether the money is paying off a credit card
+    # or moving to the client's own savings sub-account. Before the fix,
+    # every "Online Banking Transfer" debit was unconditionally merged into
+    # the CREDIT CARD PAYMENTS section -- this $9,500.00 transfer explicitly
+    # names its destination as a savings account (SAV 0295) and must be
+    # reported as a plain withdrawal instead, or it misleads QB entry and
+    # inflates the Mode E CC-payment tie-out by an amount that was never
+    # actually a card payment.
+    "08/11/26 ONLINE BANKING TRANSFER TO SAV 0295 -9,500.00\n"
+    # A genuine CC bill payment via online banking (no named destination
+    # account) must still land in CREDIT CARD PAYMENTS -- existing behavior
+    # for the common case must not regress.
+    "08/12/26 ONLINE BANKING TRANSFER CONTOSO CARD PMT -4,000.00\n"
+    "Total withdrawals and other debits\n"
+    "Total service fees -$0.00\n"
+    "Daily ledger balances\n"
+)
+
+
+class BofaCheckingOnlineTransferClassificationTest(unittest.TestCase):
+    def _parser(self, text):
+        p = BankOfAmericaCheckingParser.__new__(BankOfAmericaCheckingParser)
+        p.client_name = "Bravo Studio LLC"
+        p.beginning_balance = None
+        p.ending_balance = None
+        p.credits = []
+        p.debits = []
+        p.checks = []
+        p.service_fees = Decimal('0')
+        p.closing_date = None
+        p.credit_card_payments = []
+        p.text = text
+        return p
+
+    def test_transfer_to_savings_excluded_from_cc_payments(self):
+        p = self._parser(_CC_TEXT)
+        p.parse()
+        report = p.generate_report()
+        cc_section = report.split('CREDIT CARD PAYMENTS')[1].split('=' * 10)[0]
+        self.assertNotIn('SAV', cc_section)
+        self.assertIn('9,500.00', report)
+
+    def test_transfer_to_savings_lands_in_withdrawals(self):
+        p = self._parser(_CC_TEXT)
+        p.parse()
+        report = p.generate_report()
+        withdrawals_section = report.split('WITHDRAWALS AND DEBITS')[1].split('=' * 10)[0]
+        self.assertIn('Sav', withdrawals_section)
+
+    def test_plain_online_transfer_still_treated_as_cc_payment(self):
+        # Regression guard: a transfer with no named SAV/CHK destination
+        # keeps the pre-fix behavior of being merged into CREDIT CARD
+        # PAYMENTS -- only explicitly-named-destination transfers change.
+        p = self._parser(_CC_TEXT)
+        p.parse()
+        report = p.generate_report()
+        cc_section = report.split('CREDIT CARD PAYMENTS')[1].split('=' * 10)[0]
+        self.assertIn('4,000.00', cc_section)
+
+    def test_balance_still_ties_with_split_transfer(self):
+        p = self._parser(_CC_TEXT)
+        p.parse()
+        report = p.generate_report()
+        self.assertIn('Balance verification: PASSED', report)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

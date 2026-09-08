@@ -5,6 +5,46 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
+### No supported way to record a QB confirmation in a non-interactive session — `_qb_confirm()` and `manual_statement_entry.py`'s `input()` both hard-require a real TTY (found 2026-09-07, patched not fixed)
+
+`payroll_clients/base.py::_qb_confirm()` auto-answers "later" whenever
+`os.environ.get('BOOKKEEPING_NO_PROMPT')` is set **or** `not
+sys.stdin.isatty()` — the isatty check fires unconditionally in this chat
+environment, which has no real terminal attached to stdin. Piping `"done"`
+into stdin (`echo "done" | python3 payroll.py ...`) does not help: the
+isatty check short-circuits before anything reads the pipe.
+`manual_statement_entry.py`'s `run()` has the same shape via a plain
+`input()` call with no non-interactive path at all.
+
+**Found via**: Paintbox Hair Studio payroll run 08/14/2026 — after the user
+confirmed "done" in chat, `echo "done" | python3 payroll.py ...` still
+logged `IN_PROGRESS` ("[--no-prompt] Auto-answered: later"), because
+`_qb_confirm()` never got far enough to read the pipe.
+
+**Patched, not fixed**: worked around live by monkeypatching the
+already-imported name with `unittest.mock.patch.object(...)` per run —
+`payroll_clients.<format_module>._qb_confirm` for payroll (patching
+`payroll_clients.base._qb_confirm` alone doesn't work: each format module
+imports the name directly, e.g. `from payroll_clients.base import
+_qb_confirm` in `adp_payroll_tipped.py`, so the submodule's own bound
+reference has to be patched instead), and `builtins.input` for
+`manual_statement_entry.py`. This works but has to be rediscovered/rebuilt
+by hand for every script and every run — nothing prevents a future call
+site from reproducing the same "stuck on later" surprise, and there's no
+single supported entry point an agent or script can call to say "a human
+already confirmed this, log it as DONE."
+
+**Root cause fix**: give both scripts a real non-interactive confirmation
+path — e.g. a `--confirmed-done` flag (distinct from `--no-prompt`'s
+"assume later") that sets status to DONE without touching the isatty/input
+logic, or a shared `qb_confirm(label, *, non_interactive_result=None)`
+helper both scripts call so the override lives in one place instead of two
+divergent ad-hoc mechanisms (isatty-gated function vs. bare `input()`).
+Not fixed here — changes the confirmation contract for every payroll
+format and the manual-entry path, so it deserves its own review rather
+than a rushed change alongside an unrelated payroll run.
+
+
 ### `manual_statement_entry.py` hand-builds parser instances via `__new__`, bypassing `__init__` — breaks every time a parser gains a new instance attribute (found 2026-08-25, patched not fixed)
 
 `manual_statement_entry.py`'s `run()` never constructs a parser through its
