@@ -267,5 +267,63 @@ class BofaCheckingOnlineTransferClassificationTest(unittest.TestCase):
         self.assertIn('Balance verification: PASSED', report)
 
 
+_ONLINE_PAYMENT_TEXT = (
+    "for August 1, 2026 to August 31, 2026\n"
+    "Beginning balance on 8/1/26 $1,000.00\n"
+    "Ending balance on 8/31/26 $1,170.57\n"
+    "Deposits and other credits\n"
+    "08/05/26 CONTOSO CUSTOMER PAYMENT 500.00\n"
+    "Withdrawals and other debits\n"
+    # Real bug shape (found reconciling JoJo Hair Studio's August 2026 BofA
+    # checking statement): a genuine BofA credit card bill payment,
+    # described as "Online Banking payment to CRD 9943" (the last 4 of the
+    # client's own card number) rather than "transfer" or any recognized
+    # CC network name -- it matched neither _KNOWN_CC_NETWORK_PATTERNS nor
+    # the client's own cc_keywords, so it fell into plain withdrawals and
+    # was silently missed by Mode E's CC payment tie-out.
+    "08/04/26 ONLINE BANKING PAYMENT TO CRD 9943 CONFIRMATION#1382355362 -329.43\n"
+    "Total withdrawals and other debits\n"
+    "Total service fees -$0.00\n"
+    "Daily ledger balances\n"
+)
+
+
+class BofaCheckingOnlinePaymentToCardClassificationTest(unittest.TestCase):
+    def _parser(self, text):
+        p = BankOfAmericaCheckingParser.__new__(BankOfAmericaCheckingParser)
+        p.client_name = "Bravo Studio LLC"
+        p.beginning_balance = None
+        p.ending_balance = None
+        p.credits = []
+        p.debits = []
+        p.checks = []
+        p.service_fees = Decimal('0')
+        p.closing_date = None
+        p.credit_card_payments = []
+        p.text = text
+        return p
+
+    def test_online_banking_payment_to_card_lands_in_cc_payments(self):
+        p = self._parser(_ONLINE_PAYMENT_TEXT)
+        p.parse()
+        report = p.generate_report()
+        cc_section = report.split('CREDIT CARD PAYMENTS')[1].split('=' * 10)[0]
+        self.assertIn('329.43', cc_section)
+
+    def test_online_banking_payment_to_card_excluded_from_withdrawals(self):
+        p = self._parser(_ONLINE_PAYMENT_TEXT)
+        p.parse()
+        report = p.generate_report()
+        # No plain withdrawal is left once the only debit is reclassified
+        # into Credit Card Payments, so the section shouldn't print at all.
+        self.assertNotIn('WITHDRAWALS AND DEBITS', report)
+
+    def test_balance_ties_with_online_payment_to_card(self):
+        p = self._parser(_ONLINE_PAYMENT_TEXT)
+        p.parse()
+        report = p.generate_report()
+        self.assertIn('Balance verification: PASSED', report)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
