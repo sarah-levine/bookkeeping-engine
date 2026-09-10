@@ -24,8 +24,10 @@ existing tests/test_chase_balance_check.py pattern.
 """
 import unittest
 from decimal import Decimal
+from unittest.mock import patch
 
 from parsers.chase import ChaseParser
+import parsers.chase as chase_mod
 
 _TEXT = (
     "Opening/Closing Date 05/22/26 - 06/21/26\n"
@@ -165,6 +167,69 @@ class ChaseSyntheticPipelineTest(unittest.TestCase):
         self.assertEqual(p.closing_date, '06/21/26')
         self.assertEqual(p.previous_balance, _d('1000.00'))
         self.assertEqual(p.new_balance, _d('512.34'))
+
+
+# Real bug shape: a real MP Cheng Chase Ink statement never prints the word
+# "Ink" (or any of _CARD_NAMES's keywords) anywhere in its extracted text --
+# the card name is logo-image-only. reconcile_comprehensive.py's own
+# detect_statement_type() already handles this via the client's
+# account_endings config map; generate_report()'s header did not use that
+# same fallback, so it printed the generic "Chase Business Credit Card"
+# even though the specific card was already known from account_type
+# detection.
+_NO_KEYWORD_TEXT = (
+    "Opening/Closing Date 05/22/26 - 06/21/26\n"
+    "Previous Balance $1,000.00\n"
+    "New Balance $512.34\n"
+    "Account Number: XXXX XXXX XXXX 5585\n"
+    "  06/01  CONTOSO WIDGETS INC  40.00\n"
+)
+
+
+class ChaseCardNameFallbackTest(unittest.TestCase):
+    def _parser(self, text, client_name):
+        p = ChaseParser.__new__(ChaseParser)
+        p.client_name = client_name
+        p.previous_balance = Decimal('0')
+        p.new_balance = Decimal('0')
+        p.total_payments = Decimal('0')
+        p.interest_charged = Decimal('0')
+        p.payments = []
+        p.credits = []
+        p.charges = []
+        p.closing_date = None
+        p.text = text
+        return p
+
+    def test_card_name_resolved_from_account_ending_when_keyword_absent(self):
+        p = self._parser(_NO_KEYWORD_TEXT, "Bravo Studio LLC")
+        with patch.object(chase_mod._registry, 'lookup_account_ending',
+                           return_value=("Bravo Studio LLC", "chase_ink")):
+            p.parse()
+        self.assertEqual(p.statement_type, "Chase Ink Business Credit Card")
+
+    def test_keyword_in_text_takes_precedence_over_account_ending_lookup(self):
+        # Regression guard: when the brand keyword IS present, the cheap
+        # text scan wins and the (mocked) registry must not even be
+        # consulted, let alone override it with a different card name.
+        text = _NO_KEYWORD_TEXT.replace("Account Number", "SAPPHIRE\nAccount Number")
+        p = self._parser(text, "Bravo Studio LLC")
+        with patch.object(chase_mod._registry, 'lookup_account_ending',
+                           return_value=("Bravo Studio LLC", "chase_ink")) as mock_lookup:
+            p.parse()
+        self.assertEqual(p.statement_type, "Chase Sapphire Preferred")
+        mock_lookup.assert_not_called()
+
+    def test_falls_back_to_generic_label_when_ending_not_in_any_config(self):
+        p = self._parser(_NO_KEYWORD_TEXT, "Bravo Studio LLC")
+        with patch.object(chase_mod._registry, 'lookup_account_ending', return_value=None):
+            p.parse()
+        self.assertEqual(p.statement_type, "Chase Business Credit Card")
+
+    def test_no_crash_when_client_name_unset(self):
+        p = self._parser(_NO_KEYWORD_TEXT, None)
+        p.parse()  # must not raise even though there's no client to look up
+        self.assertEqual(p.statement_type, "Chase Business Credit Card")
 
 
 if __name__ == "__main__":

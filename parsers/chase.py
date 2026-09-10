@@ -40,6 +40,14 @@ class ChaseParser(StatementParser):
         'FREEDOM':  'Chase Freedom Business',
     }
 
+    # account_endings config values (e.g. "chase_ink") -> report label, for
+    # the fallback below. Kept in sync with _CARD_NAMES's values.
+    _ACCOUNT_TYPE_LABELS = {
+        'chase_ink':      'Chase Ink Business Credit Card',
+        'chase_united':   'Chase United Credit Card',
+        'chase_sapphire': 'Chase Sapphire Preferred',
+    }
+
     def __init__(self, pdf_path, client_name=None):
         super().__init__(pdf_path, client_name)
         self.previous_balance = Decimal('0')
@@ -60,6 +68,26 @@ class ChaseParser(StatementParser):
             if keyword in sample:
                 self.statement_type = label
                 break
+        else:
+            # Card name only in a logo image, not in the extracted text --
+            # reconcile_comprehensive.py's detect_statement_type() already
+            # handles this exact case (account_type still resolves to
+            # "chase_ink"/"chase_sapphire" correctly via the client's
+            # account_endings config map), but generate_report()'s header
+            # never used that same fallback, so the printed report still
+            # said the generic "Chase Business Credit Card" even though
+            # the specific card was already known. Found live: a real MP
+            # Cheng Chase Ink statement never prints the word "Ink"
+            # anywhere in its pdftotext output.
+            m = re.search(r'ACCOUNT NUMBER[:\s]+((?:[X\d]{4}\s*){2,})', self.text.upper())
+            if m and self.client_name:
+                digits = re.findall(r'\d{4}', m.group(1))
+                if digits:
+                    hit = _registry.lookup_account_ending(digits[-1])
+                    if hit:
+                        _, acct_type = hit
+                        self.statement_type = self._ACCOUNT_TYPE_LABELS.get(
+                            acct_type, self.statement_type)
 
         rows = self._extract_rows(lines)
         self._rows_to_legacy_shape(rows)
