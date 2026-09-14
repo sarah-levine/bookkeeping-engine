@@ -79,5 +79,105 @@ class UpdateCsvDateFormatTest(unittest.TestCase):
                           _normalize_date_iso("07/22/26"))
 
 
+class CsvColumnOrderTest(unittest.TestCase):
+    """Real bug: mark_clean.py hardcoded its own copy of the CSV column
+    order with the last two columns swapped (run_timestamp before source,
+    instead of source before run_timestamp) relative to log_utils.py's
+    write_both_logs() -- the actual header every other writer produces.
+    Confirmed live: running mark_clean.py once flipped the column order of
+    every existing row in a real reconciliation_log.csv, and every
+    Unicode em-dash in the accompanying recon_log.json got mangled to
+    \\u2014 by the same run (see JsonUnicodeTest below) -- a whole-file
+    diff for what should have been a single-row change.
+
+    Fixed by having both modules import the same RECON_LOG_FIELDS
+    constant from log_utils.py instead of each hardcoding their own copy."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.csv_path = Path(self.tmpdir.name) / "reconciliation_log.csv"
+        self._orig_csv_path = mark_clean.CSV_PATH
+        mark_clean.CSV_PATH = self.csv_path
+
+    def tearDown(self):
+        mark_clean.CSV_PATH = self._orig_csv_path
+        self.tmpdir.cleanup()
+
+    def test_header_matches_canonical_recon_log_fields(self):
+        from log_utils import RECON_LOG_FIELDS
+        entry = {
+            "client": "TEST_CLIENT_XYZ", "account_type": "bofa_checking",
+            "statement_end_date": "07/22/26", "beginning_balance": "100.00",
+            "ending_balance": "200.00", "difference": "0.00",
+        }
+        mark_clean.update_csv(entry)
+        with open(self.csv_path, newline="") as f:
+            header = f.readline().strip().split(",")
+        self.assertEqual(header, RECON_LOG_FIELDS)
+
+    def test_source_column_precedes_run_timestamp(self):
+        # Pin the specific real bug shape directly, not just equality with
+        # the (also-fixable-in-tandem) constant.
+        entry = {
+            "client": "TEST_CLIENT_XYZ", "account_type": "bofa_checking",
+            "statement_end_date": "07/22/26", "beginning_balance": "100.00",
+            "ending_balance": "200.00", "difference": "0.00",
+        }
+        mark_clean.update_csv(entry)
+        with open(self.csv_path, newline="") as f:
+            header = f.readline().strip().split(",")
+        self.assertLess(header.index("source"), header.index("run_timestamp"))
+
+    def test_existing_rows_column_order_preserved_on_rewrite(self):
+        # Write once, then update a second entry -- the first row's columns
+        # must not flip order on the rewrite.
+        mark_clean.update_csv({
+            "client": "TEST_CLIENT_ONE", "account_type": "bofa_checking",
+            "statement_end_date": "07/22/26", "beginning_balance": "1.00",
+            "ending_balance": "2.00", "difference": "0.00",
+        })
+        with open(self.csv_path, newline="") as f:
+            header_after_first_write = f.readline().strip().split(",")
+        mark_clean.update_csv({
+            "client": "TEST_CLIENT_TWO", "account_type": "chase_ink",
+            "statement_end_date": "08/01/26", "beginning_balance": "3.00",
+            "ending_balance": "4.00", "difference": "0.00",
+        })
+        with open(self.csv_path, newline="") as f:
+            header_after_second_write = f.readline().strip().split(",")
+        self.assertEqual(header_after_first_write, header_after_second_write)
+
+
+class JsonUnicodeTest(unittest.TestCase):
+    """Real bug: mark_clean.py's _save_log() called json.dump() without
+    ensure_ascii=False, so every non-ASCII character already stored in
+    recon_log.json (e.g. em-dashes in "CLIENT NAME — Admin" manual-
+    issue entries) got escaped to a \\uXXXX sequence on every single run
+    -- corrupting the whole file's readability for entries mark_clean.py
+    never even touched. log_utils.py's own _save_log() already does this
+    correctly; mark_clean.py had a second, separate, incorrect
+    implementation."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.log_path = Path(self.tmpdir.name) / "recon_log.json"
+        self._orig_log_path = mark_clean.LOG_PATH
+        mark_clean.LOG_PATH = self.log_path
+
+    def tearDown(self):
+        mark_clean.LOG_PATH = self._orig_log_path
+        self.tmpdir.cleanup()
+
+    def test_unicode_preserved_not_escaped(self):
+        entries = [{"client": "CONTOSO INC — Admin", "type": "manual",
+                    "issue": "some note", "account_type": "", "statement_end_date": "",
+                    "statement": "", "beginning_balance": "", "ending_balance": "",
+                    "difference": "", "status": "", "issues": []}]
+        mark_clean._save_log(entries)
+        raw = self.log_path.read_text(encoding="utf-8")
+        self.assertIn("—", raw)
+        self.assertNotIn("\\u2014", raw)
+
+
 if __name__ == "__main__":
     unittest.main()

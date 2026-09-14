@@ -25,7 +25,7 @@ from pathlib import Path
 REPO_DIR   = Path(__file__).parent
 import sys as _sys
 _sys.path.insert(0, str(REPO_DIR))
-from log_utils import get_logs_dir as _get_logs_dir
+from log_utils import get_logs_dir as _get_logs_dir, RECON_LOG_FIELDS
 # Operational logs live in the private logs dir, not the public repo.
 LOGS_DIR   = _get_logs_dir()
 LOG_PATH   = LOGS_DIR / "recon_log.json"
@@ -40,8 +40,8 @@ def _load_log():
 
 
 def _save_log(entries):
-    with open(LOG_PATH, "w") as f:
-        json.dump(entries, f, indent=2)
+    with open(LOG_PATH, "w", encoding="utf-8") as f:
+        json.dump(entries, f, indent=2, ensure_ascii=False)
         f.write("\n")
 
 
@@ -146,9 +146,7 @@ def update_csv(entry: dict):
     stmt_date_iso = _normalize_date_iso(entry.get("statement_end_date", ""))
     ts            = _now_pst().strftime("%Y-%m-%d %H:%M:%S")
 
-    fields = ["client", "client_name", "account_type", "account_ending",
-              "statement_date", "beginning_balance", "ending_balance",
-              "total_payments", "run_timestamp", "source"]
+    fields = RECON_LOG_FIELDS
 
     existing = []
     if CSV_PATH.exists():

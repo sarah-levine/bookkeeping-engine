@@ -35,6 +35,21 @@ from zoneinfo import ZoneInfo
 REPO_DIR = Path(__file__).parent
 _PST = ZoneInfo("America/Los_Angeles")
 
+# Canonical CSV column order for the two shared log files. Every writer of
+# these files (this module, payroll_clients/base.py, mark_clean.py) must
+# use the exact same list -- DictWriter/DictReader are name-keyed so a
+# mismatch doesn't corrupt data, but whichever writer runs last silently
+# reorders every existing row's columns, producing a whole-file diff for
+# what's really a single-row change. Confirmed live: mark_clean.py had its
+# own separately hardcoded copy that drifted out of sync (total_payments,
+# run_timestamp, source instead of total_payments, source, run_timestamp),
+# swapping the last two columns on every run.
+RECON_LOG_FIELDS   = ["client", "client_name", "account_type", "account_ending",
+                      "statement_date", "beginning_balance", "ending_balance",
+                      "total_payments", "source", "run_timestamp"]
+PAYROLL_LOG_FIELDS = ["client", "client_name", "check_date", "bank_credit",
+                      "balanced", "run_timestamp"]
+
 
 def _recon_log_path() -> Path:
     """recon_log.json in the private logs dir (see get_logs_dir)."""
@@ -615,15 +630,7 @@ def write_both_logs(
         print(f"  ⚠ Skipping reconciliation_log.csv (ERROR status)")
     else:
         csv_path = get_logs_dir() / "reconciliation_log.csv"
-        # Same column order as payroll_clients/base.py's RECON_LOG_FIELDS --
-        # keep these in sync. A mismatched order here doesn't corrupt data
-        # (DictWriter/DictReader are both name-keyed) but it means whichever
-        # of these two functions writes the file last flips every existing
-        # row's column order, producing a whole-file diff for what's really
-        # a single-row change.
-        fields = ["client", "client_name", "account_type", "account_ending",
-                  "statement_date", "beginning_balance", "ending_balance",
-                  "total_payments", "source", "run_timestamp"]
+        fields = RECON_LOG_FIELDS
 
         row = {
             "client":             client_key,
