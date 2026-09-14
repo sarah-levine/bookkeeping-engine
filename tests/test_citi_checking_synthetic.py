@@ -195,5 +195,72 @@ class CitiCheckingSyntheticPipelineTest(unittest.TestCase):
         self.assertEqual(p.new_balance, _d('68114.85'))
 
 
+# Real bug shape (found reconciling MP Cheng DDS's real combined Citi
+# checking+savings bundle): one PDF holds both accounts' activity, and
+# CitiCheckingParser had no stop boundary before "SAVINGS ACTIVITY" --
+# it kept scanning straight through and added the savings section's own
+# DEPOSIT row to checking's totals. CitiSavingsParser already had the
+# mirror-image guard (starts scanning AT "SAVINGS ACTIVITY"); this is the
+# other half.
+_BUNDLED_TEXT = (
+    "Statement Period: May 1 - May 31, 2026\n"
+    "CHECKING ACTIVITY\n"
+    "Beginning Balance: $1,000.00\n"
+    "Ending Balance: $1,300.00\n"
+    "05/03 DEPOSIT 300.00 1,300.00\n"
+    "SAVINGS ACTIVITY\n"
+    "Beginning Balance: $5,000.00\n"
+    "Ending Balance: $9,000.00\n"
+    "05/06 DEPOSIT 4,000.00 9,000.00\n"
+)
+
+
+class CitiCheckingBundledPdfBoundaryTest(unittest.TestCase):
+    def _parser(self, text):
+        p = CitiCheckingParser.__new__(CitiCheckingParser)
+        p.client_name = "Bravo Studio LLC"
+        p.account_number = ''
+        p.statement_date = ''
+        p.closing_date = None
+        p.previous_balance = Decimal('0')
+        p.new_balance = Decimal('0')
+        p.payments = []
+        p.credits = []
+        p.charges = []
+        p.adp_transactions = []
+        p.credit_card_payments = []
+        p.checks = []
+        p.total_payments = Decimal('0')
+        p.total_credits = Decimal('0')
+        p.total_charges = Decimal('0')
+        p.total_checks = Decimal('0')
+        p.text = text
+        return p
+
+    def test_savings_deposit_not_counted_in_checking_credits(self):
+        p = self._parser(_BUNDLED_TEXT)
+        p.parse()
+        self.assertEqual(p.total_credits, _d('300.00'))
+
+    def test_savings_section_produces_no_credit_rows(self):
+        p = self._parser(_BUNDLED_TEXT)
+        p.parse()
+        self.assertEqual(len(p.credits), 1)
+        self.assertEqual(p.credits[0]['amount'], _d('300.00'))
+
+    def test_balance_ties_on_bundled_pdf(self):
+        p = self._parser(_BUNDLED_TEXT)
+        p.parse()
+        report = p.generate_report()
+        self.assertIn('Balance verification: PASSED', report)
+
+    def test_standalone_checking_statement_unaffected(self):
+        # No "SAVINGS ACTIVITY" marker at all -- must still read every row.
+        p = self._parser(_TEXT)
+        p.parse()
+        report = p.generate_report()
+        self.assertIn('Balance verification: PASSED', report)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

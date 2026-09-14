@@ -165,5 +165,61 @@ class CitiSavingsSyntheticPipelineTest(unittest.TestCase):
         self.assertEqual(p.ending_balance, _d('10135.00'))
 
 
+# Real bug shape (found reconciling MP Cheng DDS's real Citi savings
+# statement): DEPOSIT and INTEREST rows there have NO description
+# continuation line at all -- unlike every synthetic case above, which
+# always follows a transaction with one. The parser assumed lines[i+1] was
+# always a description and used the NEXT transaction's own date line (or a
+# trailing summary line) as this row's vendor, producing garbled labels
+# like a bare "08/31" or "Total Debits/Credits" instead of "Deposit" /
+# "Interest".
+_NO_CONTINUATION_TEXT = (
+    "Statement Period: May 1 - May 31, 2026\n"
+    "SAVINGS ACTIVITY\n"
+    "Beginning Balance: $10,000.00\n"
+    "Ending Balance: $10,104.76\n"
+    "05/06 DEPOSIT 100.00 10,100.00\n"
+    "05/31 INTEREST 4.76 10,104.76\n"
+    "Total Debits/Credits 0.00 104.76\n"
+)
+
+
+class CitiSavingsNoContinuationLineTest(unittest.TestCase):
+    def _parser(self, text):
+        p = CitiSavingsParser.__new__(CitiSavingsParser)
+        p.client_name = None
+        p.statement_date = ''
+        p.closing_date = None
+        p.beginning_balance = Decimal('0')
+        p.ending_balance = Decimal('0')
+        p.deposits = []
+        p.withdrawals = []
+        p.total_deposits = Decimal('0')
+        p.total_withdrawals = Decimal('0')
+        p.text = text
+        return p
+
+    def test_deposit_row_gets_clean_label_not_next_transactions_date(self):
+        p = self._parser(_NO_CONTINUATION_TEXT)
+        p.parse()
+        deposit_vendors = {d['vendor'] for d in p.deposits}
+        self.assertIn('Deposit', deposit_vendors)
+        self.assertNotIn('05/31', deposit_vendors)
+
+    def test_interest_row_gets_clean_label_not_summary_line(self):
+        p = self._parser(_NO_CONTINUATION_TEXT)
+        p.parse()
+        deposit_vendors = {d['vendor'] for d in p.deposits}
+        self.assertIn('Interest', deposit_vendors)
+        self.assertNotIn('Total Debits/Credits', deposit_vendors)
+
+    def test_amounts_and_balance_unaffected(self):
+        p = self._parser(_NO_CONTINUATION_TEXT)
+        p.parse()
+        self.assertEqual(p.total_deposits, _d('104.76'))
+        report = p.generate_report()
+        self.assertIn('Balance verification: PASSED', report)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
