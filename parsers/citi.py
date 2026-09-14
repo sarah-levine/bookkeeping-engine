@@ -63,7 +63,26 @@ class CitiCheckingParser(StatementParser):
         return super()._detect_client()
 
     def parse(self):
-        lines = self.text.split('\n')
+        all_lines = self.text.split('\n')
+
+        # A checking statement can arrive bundled inside a combined
+        # checking+savings PDF (same account, one file) -- the SAVINGS
+        # ACTIVITY section's own transaction lines (e.g. its own DEPOSIT
+        # row) appear AFTER the checking section, in the exact same
+        # MM/DD-plus-type-keyword shape _extract_rows() scans for. Without
+        # a stop boundary here, this parser reads straight through into
+        # the savings section and silently adds its numbers to checking's
+        # totals. CitiSavingsParser already has the mirror-image guard
+        # (stops scanning at "SAVINGS ACTIVITY" instead of before it); this
+        # was the missing other half. Found live: a real MP Cheng combined
+        # Citi statement's checking balance failed to tie by exactly the
+        # savings section's own $37,948.54 deposit.
+        checking_end = len(all_lines)
+        for idx, line in enumerate(all_lines):
+            if re.match(r'\s*SAVINGS ACTIVITY\s*$', line):
+                checking_end = idx
+                break
+        lines = all_lines[:checking_end]
 
         found_beginning = False
         found_ending = False
@@ -917,8 +936,29 @@ class CitiSavingsParser(StatementParser):
                     amounts = re.findall(r'([\d,]+\.\d{2})', line)
                     if len(amounts) >= 2:
                         amount = Decimal(amounts[-2].replace(',', ''))
-                        vendor_line = lines[i + 1] if i + 1 < len(lines) else ''
-                        vendor = re.split(r'\s{2,}', vendor_line.strip())[0].strip() or rest
+                        # A description/vendor continuation line only
+                        # exists for some transaction shapes (e.g.
+                        # INSTANT PAYMENT CREDIT's merchant reference);
+                        # a bare DEPOSIT or INTEREST EARNED row has none,
+                        # so the very next line is really the NEXT
+                        # transaction's own date line. Using it as this
+                        # row's vendor produced garbled labels like a
+                        # bare "08/31" or "Total Debits/Credits" on a
+                        # real MP Cheng savings statement. Only treat
+                        # lines[i+1] as a description if it doesn't
+                        # itself look like a transaction or summary line.
+                        next_line = lines[i + 1] if i + 1 < len(lines) else ''
+                        if (re.match(r'^\d{2}/\d{2}\s+', next_line)
+                                or re.search(r'Total Debits/Credits', next_line, re.IGNORECASE)):
+                            vendor_line = ''
+                        else:
+                            vendor_line = next_line
+                        # rest still has the amount columns trailing off it
+                        # (e.g. "DEPOSIT    37,948.54    63,329.58"), so it
+                        # isn't a safe fallback label either -- use the
+                        # matched type keyword itself, title-cased.
+                        vendor = (re.split(r'\s{2,}', vendor_line.strip())[0].strip()
+                                  or trans_type.title())
                         vendor = self.normalize_vendor(vendor)
 
                         if trans_type in self._CREDIT_TYPES:
