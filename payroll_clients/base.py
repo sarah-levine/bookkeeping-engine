@@ -183,16 +183,13 @@ REPO_DIR   = Path(__file__).parent.parent
 # (see log_utils.get_logs_dir), not the public repo.
 import sys as _sys
 _sys.path.insert(0, str(REPO_DIR))
-from log_utils import get_logs_dir as _get_logs_dir
+from log_utils import (
+    get_logs_dir as _get_logs_dir,
+    RECON_LOG_FIELDS, PAYROLL_LOG_FIELDS,
+)
 LOGS_DIR   = _get_logs_dir()
 PAYROLL_LOG_PATH = LOGS_DIR / "payroll_log.csv"
 RECON_LOG_PATH   = LOGS_DIR / "reconciliation_log.csv"
-
-PAYROLL_LOG_FIELDS = ["client", "client_name", "check_date", "bank_credit",
-                      "balanced", "run_timestamp"]
-RECON_LOG_FIELDS   = ["client", "client_name", "account_type", "account_ending",
-                      "statement_date", "beginning_balance", "ending_balance",
-                      "total_payments", "source", "run_timestamp"]
 
 
 def _upsert_csv(log_path: Path, fields: list, key_fields: list, entry: dict):
