@@ -765,9 +765,8 @@ class AmexCheckingParser(StatementParser):
             for v, data in debit_totals.items()
         ]
 
-        # Credit card payments: individual, sorted by date
+        # Credit card payments go to their own section — do NOT mix into withdrawals
         cc_payments.sort(key=lambda x: datetime.strptime(x['date'], '%m/%d/%y'))
-        withdrawals.extend(cc_payments)
 
         withdrawals.sort(key=lambda x: datetime.strptime(x['date'], '%m/%d/%y'))
 
@@ -781,17 +780,18 @@ class AmexCheckingParser(StatementParser):
                                key=lambda x: int(x['check_number']) if x['check_number'].isdigit() else 0,
                                reverse=True)
 
-        return deposits, withdrawals, adp_transactions, checks_sorted
+        return deposits, withdrawals, cc_payments, adp_transactions, checks_sorted
 
     def generate_report(self, check_payee_map=None, check_date_map=None):
         self.parse()
-        deposits, withdrawals, adp, checks = self.aggregate_transactions()
+        deposits, withdrawals, cc_payments, adp, checks = self.aggregate_transactions()
 
         total_deposits    = sum(d['amount'] for d in deposits)
         total_withdrawals = sum(w['amount'] for w in withdrawals)
+        total_cc          = sum(p['amount'] for p in cc_payments)
         total_adp         = sum(a['amount'] for a in adp)
         total_checks      = sum(Decimal(str(c['amount'])) for c in checks)
-        total_debits      = total_withdrawals + total_adp + total_checks
+        total_debits      = total_withdrawals + total_cc + total_adp + total_checks
 
         period = self.statement_date or 'Unknown Period'
         report = _report_header(
@@ -806,6 +806,7 @@ class AmexCheckingParser(StatementParser):
             ('Deposits and Credits',     total_deposits),
             ('Interest Earned',          self.interest_earned if self.interest_earned else None),
             ('Withdrawals and Debits',   total_all_deb),
+            ('  Credit Card Payments',   total_cc if total_cc else None, 'indent'),
             ('  Checks',                 total_checks if total_checks else None, 'indent'),
             ('  Payroll',                total_adp if total_adp else None, 'indent'),
             ('Ending Balance',           self.ending_balance),
@@ -819,6 +820,8 @@ class AmexCheckingParser(StatementParser):
 
         report += _deposits_section(deposits, total_deposits, title='CREDITS / DEPOSITS')
         report += _charges_section(withdrawals, total_withdrawals, title='WITHDRAWALS AND DEBITS')
+        if cc_payments:
+            report += _cc_payments_section(cc_payments, total_cc)
         if checks:
             report += _checks_section(checks, total_checks)
         if adp:

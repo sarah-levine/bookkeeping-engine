@@ -248,10 +248,10 @@ def run_adp_payroll_1099(args, config_name):
         print(f"⚠️  JE out of balance: debits ${total_d:,.2f} vs credits ${total_c:,.2f}")
 
     print_journal_table(rows, cfg["client_name"] + name_suffix, check_date)
+    dispatch_key = (cfg.get("payroll_key") or cfg["client_name"]) + run_suffix
+    append_payroll_log(dispatch_key, cfg["client_name"] + name_suffix, check_date, rows)
+    append_digest_log(cfg["client_name"] + name_suffix, check_date)
     if _qb_confirm(cfg["client_name"] + name_suffix):
-        dispatch_key = (cfg.get("payroll_key") or cfg["client_name"]) + run_suffix
-        append_payroll_log(dispatch_key, cfg["client_name"] + name_suffix, check_date, rows)
-        append_digest_log(cfg["client_name"] + name_suffix, check_date)
         # Plain client_name here (no run suffix) -- archive_payroll_pdf uses
         # it for both the Drive folder path and the filename; suffixing it
         # would fragment the same client's payroll archive into a separate

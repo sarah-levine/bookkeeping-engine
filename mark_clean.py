@@ -70,7 +70,7 @@ def find_pending(client_key: str, account_type: str, statement_date: str | None)
     for i, e in enumerate(entries):
         if e.get("status") != "IN_PROGRESS":
             continue
-        if e.get("type") != "recon":
+        if e.get("type") not in ("recon", None, ""):
             continue
         ck = _normalize_client_key(e.get("client", ""))
         ck_upper, key_upper = ck.upper(), client_key.upper()
