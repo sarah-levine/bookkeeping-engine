@@ -222,12 +222,26 @@ def _upsert_csv(log_path: Path, fields: list, key_fields: list, entry: dict):
     return replaced
 
 
-def append_payroll_log(client: str, client_name: str, check_date: str, rows: list, *, recon_client: str = None):
-    """Upsert one row into payroll_log.csv and reconciliation_log.csv.
+def append_payroll_log(client: str, client_name: str, check_date: str, rows: list, *,
+                        recon_client: str = None, confirmed: bool = True):
+    """Upsert one row into payroll_log.csv (always) and, once QB entry is
+    confirmed, reconciliation_log.csv + the live Google Sheet tracker.
 
     payroll_log.csv key: [client, check_date] — one row per division per date.
-    reconciliation_log.csv key: [client, account_type] — one row per client,
-    updated in-place each run so the tracker always shows the latest date.
+    This is just an operational record that a run happened/balanced, so it
+    always writes, even on a preview/non-interactive run — that part of a
+    prior fix (2026-10-25) was correct.
+
+    reconciliation_log.csv + the Sheet write are different: they're the
+    user-visible tracker, and reconcile_comprehensive.py only touches them
+    after a real "done" confirmation (see its "sheet update deferred" message
+    on --no-prompt/later). A prior fix moved this whole function ahead of
+    _qb_confirm() in adp_payroll_details/professional/1099 to fix the
+    payroll_log.csv gap above, but that also made the tracker CSV + live
+    Sheet write unconditional — so even a mere preview run permanently wrote
+    the live Sheet and set recon_log.json status=DONE with no QuickBooks
+    confirmation at all. `confirmed` restores the gate on just those two
+    user-visible side effects.
     """
     from log_utils import _assert_known_client
     _assert_known_client(client)
@@ -247,7 +261,10 @@ def append_payroll_log(client: str, client_name: str, check_date: str, rows: lis
     verb = "Updated" if replaced else "Logged"
     print(f"  📋 {verb} → payroll_log.csv  ({check_date}  ${float(entry['bank_credit']):,.2f})")
 
-    # Always write to reconciliation_log.csv — regardless of QB confirmation status.
+    if not confirmed:
+        print(f"  ℹ️  Not yet confirmed in QuickBooks — reconciliation_log.csv and sheet update deferred")
+        return
+
     # Use _normalize_client_key so the key matches the cell_map regardless of config naming.
     from log_utils import _normalize_client_key
     normalized_key = _normalize_client_key(recon_client if recon_client else client)
@@ -297,16 +314,20 @@ def _git_push_logs(label: str):
         print(f"  ⚠ Could not push logs ({_e}). Push manually.")
 
 
-def append_digest_log(client_name: str, check_date: str):
+def append_digest_log(client_name: str, check_date: str, *, confirmed: bool = True):
     """Upsert a payroll run entry into recon_log.json
-    so the morning digest picks it up under 'Reconciliation Runs'."""
+    so the morning digest picks it up under 'Reconciliation Runs'.
+
+    status reflects whether QuickBooks entry was actually confirmed —
+    hardcoding "DONE" here previously meant every run (even a preview/
+    non-interactive one) was recorded as done with no real confirmation."""
     try:
         from log_utils import upsert_recon_log
         upsert_recon_log(
             client             = client_name,
             account_type       = "payroll",
             statement_end_date = check_date,
-            status             = "DONE",
+            status             = "DONE" if confirmed else "IN_PROGRESS",
         )
         print(f"  📝 Digest log → recon_log.json")
         _git_push_logs(f"{client_name} payroll {check_date}")
