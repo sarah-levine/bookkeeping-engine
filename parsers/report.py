@@ -292,7 +292,17 @@ def _charges_section(aggregated, total_charges, title='CHARGES', paired_vendors=
         else:
             lines.append(f"{row['date']:<12} {vendor_display[:50]:<50} ${row['amount']:>15,.2f}")
     lines.append(f"{'':63} {'-' * 17}")
-    lines.append(f"{'TOTAL CHARGES:':<63} ${total_charges:>15,.2f}")
+    # Use the section's actual title, not a hardcoded "CHARGES" -- callers
+    # that pass title='WITHDRAWALS AND DEBITS' (Citi/BofA/Amex/US Bank
+    # checking) or title='FINANCE CHARGES' (Chase) got a mislabeled total
+    # line that still said "TOTAL CHARGES:" regardless. Harmless-looking on
+    # its own, but it fooled qa_reconciliation.py's section classifier
+    # (plain substring match on "CHARGES") into bucketing an entire
+    # WITHDRAWALS AND DEBITS section as credit-card charges instead of
+    # checking payments -- found live comparing a real Citi checking
+    # statement against QuickBooks, where it silently zeroed out 9 real
+    # debit transactions from the QA comparison's payments table.
+    lines.append(f"{'TOTAL ' + title + ':':<63} ${total_charges:>15,.2f}")
     lines.append('')
     return '\n'.join(lines) + '\n'
 
