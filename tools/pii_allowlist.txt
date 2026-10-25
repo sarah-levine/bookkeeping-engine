@@ -24,7 +24,7 @@ eftpmt eftpay tax taxes wage pay payr payroll
 
 # ── Generic banking / statement vocabulary ─────────────────────────
 wire transfer domestic incoming outgoing online banking ach debit credit deposit
-withdrawal withdrawals deposits debits credits payment payments autopay
+withdrawal withdrawals deposits debits credits payment payments autopay transit
 electronic interest finance charge charges annual fee fees balance previous new
 total totals account ending closing close date statement cardmember service cardholder
 january february march april may june july august september october november december
