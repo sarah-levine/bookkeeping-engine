@@ -299,6 +299,7 @@ class BankOfAmericaCheckingParser(StatementParser):
         self.debits = []
         self.checks = []
         self.service_fees = Decimal('0')
+        self.service_fee_items = []
         self.closing_date = None
         self.credit_card_payments = []
 
@@ -372,6 +373,7 @@ class BankOfAmericaCheckingParser(StatementParser):
         in_deposits = False
         in_withdrawals = False
         in_checks = False
+        in_service_fees = False
         current_date = current_desc = current_amount = None
 
         for i, line in enumerate(lines):
@@ -416,15 +418,22 @@ class BankOfAmericaCheckingParser(StatementParser):
                 m = re.search(r'-\$?([\d,]+\.\d{2})', line)
                 if m:
                     self.service_fees = Decimal(m.group(1).replace(',', ''))
-                in_deposits = in_withdrawals = in_checks = False
+                in_deposits = in_withdrawals = in_checks = in_service_fees = False
                 continue
 
-            if contains_label(line, 'Service fees') and 'Total' not in line:
+            # The real section header is a standalone "Service fees" line.
+            # The account-summary block near the top of the statement also
+            # has a "Service fees      -6.00   Average ledger balance: ..."
+            # line -- contains_label() alone matched that too, flipping
+            # in_service_fees on far too early (no 'Total' on that line
+            # either) and sweeping up every transaction between there and
+            # the real "Total service fees" line as a bogus fee item.
+            if line.strip() == 'Service fees':
                 if current_date and current_desc and current_amount is not None:
                     save_transaction(current_date, current_desc, current_amount,
                                      in_deposits, in_withdrawals)
                 current_date = current_desc = current_amount = None
-                in_deposits = in_withdrawals = in_checks = False
+                in_deposits, in_withdrawals, in_checks, in_service_fees = False, False, False, True
                 continue
 
             if line.strip().startswith('Date') and 'Description' in line:
@@ -487,6 +496,22 @@ class BankOfAmericaCheckingParser(StatementParser):
                         date=date_c, vendor=check_num, raw_description=check_num,
                         amount=Decimal(amt.replace(',', '')), type='check',
                     ))
+
+            if in_service_fees:
+                # Each fee is self-contained on one line, e.g. "09/23/26
+                # External transfer fee - 3 Day -    09/22/2026   -1.00" —
+                # no continuation lines, unlike deposits/withdrawals. Stored
+                # separately from self.debits (never fed through
+                # _rows_to_legacy_shape) so the report can show these
+                # individually without double-counting them against
+                # self.service_fees, which already drives the balance math.
+                fm = re.match(r'^(\d{2}/\d{2}/\d{2})\s+(.+?)\s+([-]?[\d,]+\.\d{2})\s*$', line.strip())
+                if fm:
+                    self.service_fee_items.append({
+                        'date': fm.group(1),
+                        'vendor': fm.group(2).strip(),
+                        'amount': Decimal(fm.group(3).replace(',', '')),
+                    })
 
         return rows
 
@@ -904,7 +929,10 @@ class BankOfAmericaCheckingParser(StatementParser):
             report += _cc_payments_section(annotated_transfers, total_all_transfers,
                                            title='CREDIT CARD PAYMENTS',
                                            group_vendor_keywords=cc_group_keywords)
-        # Bank Fees shown in summary only
+        service_fee_items = getattr(self, 'service_fee_items', [])
+        if service_fee_items:
+            fee_rows = sorted(service_fee_items, key=lambda x: _safe_date_key(x['date']))
+            report += _individual_section(fee_rows, self.service_fees, 'BANK FEES')
         return report
 
     def _extract_period(self):
