@@ -5,6 +5,36 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
+### `sync_tracker.yml`'s 2-hourly `backfill_tracker()` writes the live Google Sheet from `reconciliation_log.csv` with no status check at all (found 2026-10-25, not fixed)
+
+`sheets_updater.backfill_tracker()` → `send_morning_digest.get_tracker_date()`
+→ `load_reconciliation_log()` picks the most recent `statement_date` per
+(client, account_type) across every row in `reconciliation_log.csv` —
+it never looks at `recon_log.json`'s `status` field at all. Meanwhile
+`log_utils.write_both_logs()` writes `reconciliation_log.csv` on every
+non-ERROR run, DONE or IN_PROGRESS alike (that's how `reconcile_comprehensive.py`
+--no-prompt/"later" previews are visible to the digest). So any IN_PROGRESS
+preview, for ANY account type (not just payroll), sits in
+`reconciliation_log.csv` ready for the next cron tick (every 2 hours) to
+push straight into the live, client-visible Sheet — even though the
+in-chat "sheet update deferred" message implies it won't.
+
+Caught live 2026-10-25: a non-interactive JoJo Hair Studio payroll run
+(before the `append_payroll_log`/`append_digest_log` confirm-gate fix in
+PR #65) wrote `10/15/26` directly via `update_sheet()`, independent of this
+cron path — but the cron path is a second, still-open route to the exact
+same outcome for every account type the fixed-cell tracker covers, not just
+payroll. `payroll_log.csv`/`reconciliation_log.csv` don't carry a
+done/in-progress flag the cron could check, so the real fix needs either:
+(a) a status column added to `reconciliation_log.csv` that `backfill_tracker()`
+filters on, or (b) having `backfill_tracker()` cross-reference
+`recon_log.json`'s `status` per (client, account_type, statement_date)
+before writing a cell. Not fixed this session — scoping it properly (CSV
+schema change touches every writer: `write_both_logs()`, `mark_clean.py`,
+`append_payroll_log()`, `sync_log_from_sheet()`) is a bigger change than
+the immediate payroll regression it was found alongside.
+
+
 ### No supported way to record a QB confirmation in a non-interactive session — `_qb_confirm()` and `manual_statement_entry.py`'s `input()` both hard-require a real TTY (found 2026-09-07, patched not fixed)
 
 `payroll_clients/base.py::_qb_confirm()` auto-answers "later" whenever
