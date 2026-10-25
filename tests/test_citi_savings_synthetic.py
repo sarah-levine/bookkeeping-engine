@@ -221,5 +221,50 @@ class CitiSavingsNoContinuationLineTest(unittest.TestCase):
         self.assertIn('Balance verification: PASSED', report)
 
 
+# Real bug, found reconciling MP Cheng DDS Inc's CitiBusiness IMMA savings
+# statement: SERVICE CHARGE (the "ACCT ANALYSIS DIRECT DB" monthly fee)
+# wasn't in _DEBIT_TYPES, so trans_type stayed None and the whole row was
+# silently dropped -- not logged, not unlabeled, just gone -- failing
+# balance verification by exactly that amount ($5.97).
+_SERVICE_CHARGE_TEXT = (
+    "Statement Period: Sep 1 - Sep 30, 2026\n"
+    "SAVINGS ACTIVITY\n"
+    "Beginning Balance: $63,334.34\n"
+    "Ending Balance: $63,333.58\n"
+    "09/09 SERVICE CHARGE 5.97 63,328.37\n"
+    "  ACCT ANALYSIS DIRECT DB\n"
+    "09/30 INTEREST EARNED 5.21 63,333.58\n"
+    "Total Debits/Credits 5.97 5.21\n"
+)
+
+
+class CitiSavingsServiceChargeTest(unittest.TestCase):
+    def _parser(self, text):
+        p = CitiSavingsParser.__new__(CitiSavingsParser)
+        p.client_name = None
+        p.statement_date = ''
+        p.closing_date = None
+        p.beginning_balance = Decimal('0')
+        p.ending_balance = Decimal('0')
+        p.deposits = []
+        p.withdrawals = []
+        p.total_deposits = Decimal('0')
+        p.total_withdrawals = Decimal('0')
+        p.text = text
+        return p
+
+    def test_service_charge_captured_as_withdrawal(self):
+        p = self._parser(_SERVICE_CHARGE_TEXT)
+        p.parse()
+        self.assertEqual(len(p.withdrawals), 1)
+        self.assertEqual(p.withdrawals[0]['amount'], _d('5.97'))
+
+    def test_balance_ties_with_service_charge_and_interest(self):
+        p = self._parser(_SERVICE_CHARGE_TEXT)
+        p.parse()
+        report = p.generate_report()
+        self.assertIn('Balance verification: PASSED', report)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

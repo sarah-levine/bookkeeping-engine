@@ -891,7 +891,11 @@ class CitiSavingsParser(StatementParser):
 
     _CREDIT_TYPES = {'ACH CREDIT', 'ELECTRONIC CREDIT', 'INSTANT PAYMENT CREDIT',
                      'DEPOSIT', 'INTEREST'}
-    _DEBIT_TYPES  = {'ACH DEBIT', 'WITHDRAWAL', 'TRANSFER OUT'}
+    # SERVICE CHARGE (e.g. "ACCT ANALYSIS DIRECT DB" monthly fee) was missing
+    # here -- a real MP Cheng DDS savings statement had one and it silently
+    # vanished (trans_type stayed None, so the whole row was dropped, not
+    # just unlabeled), failing balance verification by exactly that amount.
+    _DEBIT_TYPES  = {'ACH DEBIT', 'WITHDRAWAL', 'TRANSFER OUT', 'SERVICE CHARGE'}
 
     def _extract_rows(self, lines):
         """Extract stage (see parsers/row_schema.py): raw statement text
