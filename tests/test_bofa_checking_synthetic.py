@@ -325,5 +325,102 @@ class BofaCheckingOnlinePaymentToCardClassificationTest(unittest.TestCase):
         self.assertIn('Balance verification: PASSED', report)
 
 
+# Real bug, found reconciling Bravo Studio LLC's checking statement: the
+# account-summary block near the top of every BofA checking statement has
+# its own "Service fees      -6.00   Average ledger balance: ..." line,
+# which also matched the itemized-section-header check (same text, no
+# "Total" on it either) -- flipping in_service_fees on right at the top of
+# the document and sweeping up every transaction between there and the
+# real "Total service fees" line near the bottom as a bogus fee item.
+_ITEMIZED_FEES_TEXT = (
+    "for September 1, 2026 to September 30, 2026\n"
+    "Beginning balance on 9/1/26 $25,521.23\n"
+    "Ending balance on 9/30/26 $29,955.23\n"
+    # The false-positive summary line -- must NOT trigger itemization.
+    "Service fees                                                                       -6.00       Average ledger balance: $29,304.35\n"
+    "Deposits and other credits\n"
+    "09/30/26 CONTOSO DEPOSIT IN TRANSIT 35508.40\n"
+    "Total deposits and other credits\n"
+    "Withdrawals and other debits\n"
+    "09/02/26 KAISER -115.00\n"
+    "Total withdrawals and other debits\n"
+    # The real, standalone section header.
+    "Service fees\n"
+    "09/23/26 External transfer fee - 3 Day -    09/22/2026 -1.00\n"
+    "09/24/26 External transfer fee - 3 Day -    09/23/2026 -1.00\n"
+    "Total service fees -$2.00\n"
+    "Daily ledger balances\n"
+)
+
+
+class BofaCheckingItemizedServiceFeesTest(unittest.TestCase):
+    def _parser(self, text):
+        p = BankOfAmericaCheckingParser.__new__(BankOfAmericaCheckingParser)
+        p.client_name = "Bravo Studio LLC"
+        p.beginning_balance = None
+        p.ending_balance = None
+        p.credits = []
+        p.debits = []
+        p.checks = []
+        p.service_fees = Decimal('0')
+        p.service_fee_items = []
+        p.closing_date = None
+        p.credit_card_payments = []
+        p.text = text
+        return p
+
+    def test_only_real_fee_lines_itemized(self):
+        p = self._parser(_ITEMIZED_FEES_TEXT)
+        p.parse()
+        self.assertEqual(len(p.service_fee_items), 2)
+        self.assertTrue(all('External transfer fee' in f['vendor'] for f in p.service_fee_items))
+
+    def test_false_positive_summary_line_does_not_sweep_up_transactions(self):
+        # Before the fix, KAISER (a plain withdrawal) and the deposit would
+        # both have been wrongly captured as "fee items" too.
+        p = self._parser(_ITEMIZED_FEES_TEXT)
+        p.parse()
+        fee_vendors = [f['vendor'] for f in p.service_fee_items]
+        self.assertFalse(any('KAISER' in v for v in fee_vendors))
+        self.assertFalse(any('DEPOSIT' in v.upper() for v in fee_vendors))
+        self.assertEqual(len(p.debits), 1)
+        self.assertEqual(len(p.credits), 1)
+
+    def test_service_fees_total_unaffected(self):
+        p = self._parser(_ITEMIZED_FEES_TEXT)
+        p.parse()
+        self.assertEqual(p.service_fees, Decimal('2.00'))
+
+    def test_bank_fees_section_renders_with_itemized_total(self):
+        p = self._parser(_ITEMIZED_FEES_TEXT)
+        p.parse()
+        report = p.generate_report()
+        self.assertIn('BANK FEES', report)
+        fees_section = report.split('BANK FEES', 1)[1]
+        self.assertEqual(fees_section.count('External transfer fee'), 2)
+        self.assertIn('TOTAL BANK FEES:', fees_section)
+        self.assertIn('2.00', fees_section)
+
+    def test_no_fee_items_means_no_bank_fees_section(self):
+        # The existing (pre-fix) shape -- just a "Total service fees" line,
+        # no standalone "Service fees" header -- must still render with no
+        # itemized section at all, same as before this change.
+        p = BankOfAmericaCheckingParser.__new__(BankOfAmericaCheckingParser)
+        p.client_name = "Bravo Studio LLC"
+        p.beginning_balance = None
+        p.ending_balance = None
+        p.credits = []
+        p.debits = []
+        p.checks = []
+        p.service_fees = Decimal('0')
+        p.service_fee_items = []
+        p.closing_date = None
+        p.credit_card_payments = []
+        p.text = _TEXT  # module-level fixture; has only "Total service fees"
+        p.parse()
+        report = p.generate_report()
+        self.assertNotIn('BANK FEES', report)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
