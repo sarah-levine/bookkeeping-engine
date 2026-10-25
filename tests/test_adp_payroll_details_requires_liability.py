@@ -59,8 +59,17 @@ class RequiresLiabilityPdfTest(unittest.TestCase):
              patch.object(mod, "parse_liability", return_value={"wc": 12.34}) as mock_liab, \
              patch.object(mod, "_build_journal", return_value=[]) as mock_build, \
              patch.object(mod, "print_journal_table"), \
+             patch.object(mod, "append_payroll_log") as mock_log, \
+             patch.object(mod, "append_digest_log") as mock_digest, \
              patch.object(mod, "_qb_confirm", return_value=False):
             mod.run_adp_payroll_details(["details.pdf", "liability.pdf"], "test_client.json")
+
+        # confirmed=False must reach both calls (the log always writes; the
+        # tracker/sheet side of append_payroll_log checks `confirmed` itself).
+        mock_log.assert_called_once()
+        self.assertEqual(mock_log.call_args.kwargs.get("confirmed"), False)
+        mock_digest.assert_called_once()
+        self.assertEqual(mock_digest.call_args.kwargs.get("confirmed"), False)
 
         mock_verify.assert_called_once()
         mock_parse.assert_called_once()

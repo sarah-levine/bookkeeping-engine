@@ -51,7 +51,7 @@ class AmexAggregation(unittest.TestCase):
                 {'date': '01/07/26', 'description': 'ACME SPORTS FEE 333', 'amount': _d(-40)},
             ],
         )
-        deposits, withdrawals, adp, checks = p.aggregate_transactions()
+        deposits, withdrawals, cc_payments, adp, checks = p.aggregate_transactions()
 
         rolled = [d for d in deposits if d['vendor'] == 'Acme Sports (PROGRAM FEES)']
         self.assertEqual(len(rolled), 1)
@@ -73,7 +73,7 @@ class AmexAggregation(unittest.TestCase):
             debits=[],
         )
         p.client_name = None  # get_config(None) -> no rules
-        deposits, _, _, _ = p.aggregate_transactions()
+        deposits, _, _, _, _ = p.aggregate_transactions()
         self.assertFalse(any('PROGRAM FEES' in d['vendor'] for d in deposits))
 
 

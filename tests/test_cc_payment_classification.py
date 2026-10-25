@@ -100,11 +100,11 @@ class BofaCheckingCCClassificationTest(unittest.TestCase):
 
 
 class AmexCheckingCCClassificationTest(unittest.TestCase):
-    """AmexCheckingParser.aggregate_transactions() folds CC payments back
-    into `withdrawals` (unlike BofA checking, which keeps a separate
-    bucket) — but CC payments are never vendor-aggregated, so the
-    observable difference is individual (unaggregated) line items vs. one
-    summed line for an ordinary same-vendor debit."""
+    """AmexCheckingParser.aggregate_transactions() keeps CC payments in
+    their own `cc_payments` bucket (like BofA checking) rather than mixing
+    them into `withdrawals` — but CC payments are never vendor-aggregated,
+    so the observable difference is individual (unaggregated) line items vs.
+    one summed line for an ordinary same-vendor debit."""
 
     def _parser(self, debits):
         p = AmexCheckingParser.__new__(AmexCheckingParser)
@@ -119,8 +119,8 @@ class AmexCheckingCCClassificationTest(unittest.TestCase):
             {'date': '06/05/26', 'description': 'CAPITAL ONE ONLINE PAYMENT', 'amount': _d(-500)},
             {'date': '06/20/26', 'description': 'CAPITAL ONE ONLINE PAYMENT', 'amount': _d(-600)},
         ])
-        deposits, withdrawals, adp, checks = p.aggregate_transactions()
-        matching = [w for w in withdrawals if 'CAPITAL ONE' in w['vendor'].upper()]
+        deposits, withdrawals, cc_payments, adp, checks = p.aggregate_transactions()
+        matching = [w for w in cc_payments if 'CAPITAL ONE' in w['vendor'].upper()]
         self.assertEqual(len(matching), 2,
                          "CC payments must stay as individual lines, not a single aggregated line")
 
@@ -129,7 +129,7 @@ class AmexCheckingCCClassificationTest(unittest.TestCase):
             {'date': '06/05/26', 'description': 'CONTOSO WIDGETS INC', 'amount': _d(-40)},
             {'date': '06/20/26', 'description': 'CONTOSO WIDGETS INC', 'amount': _d(-60)},
         ])
-        deposits, withdrawals, adp, checks = p.aggregate_transactions()
+        deposits, withdrawals, cc_payments, adp, checks = p.aggregate_transactions()
         matching = [w for w in withdrawals if 'CONTOSO' in w['vendor'].upper()]
         self.assertEqual(len(matching), 1, "non-CC same-vendor debits should still aggregate to one line")
         self.assertEqual(matching[0]['count'], 2)
