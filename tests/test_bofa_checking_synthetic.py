@@ -342,7 +342,7 @@ _ITEMIZED_FEES_TEXT = (
     "09/30/26 CONTOSO DEPOSIT IN TRANSIT 35508.40\n"
     "Total deposits and other credits\n"
     "Withdrawals and other debits\n"
-    "09/02/26 KAISER -115.00\n"
+    "09/02/26 BRAVO INSURANCE -115.00\n"
     "Total withdrawals and other debits\n"
     # The real, standalone section header.
     "Service fees\n"
@@ -376,12 +376,12 @@ class BofaCheckingItemizedServiceFeesTest(unittest.TestCase):
         self.assertTrue(all('External transfer fee' in f['vendor'] for f in p.service_fee_items))
 
     def test_false_positive_summary_line_does_not_sweep_up_transactions(self):
-        # Before the fix, KAISER (a plain withdrawal) and the deposit would
-        # both have been wrongly captured as "fee items" too.
+        # Before the fix, BRAVO INSURANCE (a plain withdrawal) and the
+        # deposit would both have been wrongly captured as "fee items" too.
         p = self._parser(_ITEMIZED_FEES_TEXT)
         p.parse()
         fee_vendors = [f['vendor'] for f in p.service_fee_items]
-        self.assertFalse(any('KAISER' in v for v in fee_vendors))
+        self.assertFalse(any('BRAVO INSURANCE' in v for v in fee_vendors))
         self.assertFalse(any('DEPOSIT' in v.upper() for v in fee_vendors))
         self.assertEqual(len(p.debits), 1)
         self.assertEqual(len(p.credits), 1)

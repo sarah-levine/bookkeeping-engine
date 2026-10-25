@@ -57,7 +57,7 @@ WITHDRAWALS AND DEBITS
 
 Date         Description                                                  Amount
 --------------------------------------------------------------------------------
-09/02/26     KAISER                                             $        -115.00
+09/02/26     BRAVO INSURANCE                                    $        -115.00
 09/23/26     Life Insurance Co                                  $        -345.16
                                                                 -----------------
 TOTAL WITHDRAWALS AND DEBITS:                                   $        -460.16
@@ -95,7 +95,7 @@ class ParseReconOutputNegativeAmountsTest(unittest.TestCase):
     def test_withdrawals_section_parsed(self):
         data = parse_recon_output(_CHECKING_REPORT)
         vendors = [p['vendor'] for p in data['payments']]
-        self.assertIn('KAISER', vendors)
+        self.assertIn('BRAVO INSURANCE', vendors)
         self.assertIn('Life Insurance Co', vendors)
 
     def test_payroll_and_cc_payments_sections_parsed(self):
