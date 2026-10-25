@@ -131,12 +131,20 @@ def parse_recon_output(recon_text):
     # Dates in these reports are MM/DD/YY (credit card) or bare MM/DD
     # (checking account) — year is optional.
     date_re = r'\d{1,2}/\d{1,2}(?:/\d{2,4})?'
+    # Checking-statement debit sections (WITHDRAWALS AND DEBITS, PAYROLL,
+    # CREDIT CARD PAYMENTS) print amounts with a leading '-' after the '$'
+    # (e.g. "$        -311.49"), unlike the CREDITS/DEPOSITS section or a
+    # credit card's CHARGES section. The optional '-?\s*' here matches that
+    # sign without capturing it, so every debit-section row parses to its
+    # positive magnitude (matching QB's always-positive reconcile grid) —
+    # previously the missing '-?' meant every row in those three sections
+    # silently matched nothing, leaving data['payments'] empty.
     row_re = re.compile(
-        rf'^\s*({date_re})\s+(.+?)\s+\$\s*([\d,]+\.\d{{2}})\s*$'
+        rf'^\s*({date_re})\s+(.+?)\s+\$\s*-?\s*([\d,]+\.\d{{2}})\s*$'
     )
     # Checks rows: "<check#> <date> <payee (may be blank)> $<amount>"
     checks_re = re.compile(
-        rf'^\s*(\d+)\s+({date_re})\s+(.*?)\s+\$\s*([\d,]+\.\d{{2}})\s*$'
+        rf'^\s*(\d+)\s+({date_re})\s+(.*?)\s+\$\s*-?\s*([\d,]+\.\d{{2}})\s*$'
     )
 
     # Split by section
