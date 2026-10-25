@@ -5,6 +5,41 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
+### BofA checking/savings check-payee OCR silently fails on cursive handwriting (found 2026-10-25, not fixed)
+
+`BankOfAmericaCheckingParser.extract_check_payees()`'s default path OCRs
+each check image with pytesseract and feeds the result to
+`_extract_payee_from_ocr()`, which looks for a `"To. PAYEE NAME"` (or
+similar) line. Confirmed live on two separate real checks this session
+(Paintbox Hair Studio LLC, then JoJo Hair Studio Inc check #1095): when the
+"Pay to the order of" line is handwritten in cursive, tesseract's raw
+output is pure noise (`'Senor, 24 ken'`, `'rye aL L7 SF SASMA TSE'` for
+check #1095) with no recognizable payee line at all — `_extract_payee_from_
+OCR()` then has nothing to match against, so `check['payee']` silently
+stays blank with no warning printed anywhere in the report.
+
+This isn't a regex/line-wrap bug in `_extract_payee_from_ocr()` (a
+narrower version of this was diagnosed earlier the same session for
+Paintbox and assumed to be the whole story) — pulling the actual check
+image and viewing it directly confirmed the image itself is legible to a
+human/multimodal reader (check #1095's payee was "JMJ Signature", confirmed
+against the client's own QuickBooks register) but tesseract's OCR output
+on handwritten cursive is fundamentally unusable, regardless of how
+`_extract_payee_from_ocr()`'s parsing is tuned.
+
+The engine already has a working alternative: `BOOKKEEPING_VISION_CHECK_
+PAYEES=1` routes through `extractors/vision_helper.py`'s Claude Vision
+call instead of pytesseract, which should handle cursive far better — but
+it's opt-in (real API cost per statement with check images) and was never
+actually exercised this session; its success rate on handwritten checks is
+unverified. Not fixed this session — needs either (a) turning Vision on by
+default for checks specifically (not full-statement Vision fallback) once
+its cost/accuracy tradeoff is evaluated against a batch of real cursive
+checks, or (b) at minimum, printing a loud "payee not extracted — OCR
+produced no usable text" warning instead of silently leaving the payee
+blank, so this doesn't require a human to notice and ask every time.
+
+
 ### `sync_tracker.yml`'s 2-hourly `backfill_tracker()` writes the live Google Sheet from `reconciliation_log.csv` with no status check at all (found 2026-10-25, not fixed)
 
 `sheets_updater.backfill_tracker()` → `send_morning_digest.get_tracker_date()`
