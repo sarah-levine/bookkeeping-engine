@@ -5,6 +5,37 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
+### `qa_reconciliation.py` doesn't scope a combined checking+savings PDF's two accounts apart (found 2026-10-25, not fixed)
+
+`run_reconciliation()` runs the whole PDF through `reconcile_comprehensive.py`
+in one subprocess call for a combined-statement account (Citi checking+
+savings in one PDF is the same `pdf_path` tagged with both statement types
+-- see the Step-0/PR #63 history above). For a combined account, that one
+subprocess emits BOTH reports' text back-to-back in one stdout blob, and
+`parse_recon_output()` has no concept of "which report this chunk belongs
+to" -- it just scans the entire concatenated text for section markers, so
+a QA run meant to check only the checking side also picks up the savings
+side's CREDITS/DEPOSITS and WITHDRAWALS AND DEBITS sections and merges them
+into the same comparison.
+
+Found live: QA'ing MP Cheng DDS Inc's Citi checking statement against
+QuickBooks, the "DEPOSITS AND OTHER CREDITS" table included the savings
+account's $5.21 INTEREST credit, and "CHECKS AND PAYMENTS" included its
+$5.97 SERVICE CHARGE debit -- neither belongs to the checking account being
+compared. Didn't affect that day's actual finding (a $275 QB data-entry
+error on Kifer Commercial Park HOA, confirmed independently via the
+beginning/ending balance math), but it will silently corrupt a QA
+comparison on any statement where the savings-side noise coincides with a
+real checking-side issue, or just adds persistent false "missing" rows to
+every combined-account QA run. Needs `parse_recon_output()` (or
+`run_reconciliation()`) to split on the per-report header line (e.g.
+"CITI BUSINESS CHECKING" vs "CITI BUSINESS SAVINGS") and scope extraction
+to only the report matching the statement type being QA'd -- not fixed
+this session, since it touches the same shared text-parsing function two
+other fixes landed in today (PRs #67, #72) and deserves its own focused
+pass rather than a third change stacked in the same spot.
+
+
 ### BofA checking/savings check-payee OCR silently fails on cursive handwriting (found 2026-10-25, not fixed)
 
 `BankOfAmericaCheckingParser.extract_check_payees()`'s default path OCRs
