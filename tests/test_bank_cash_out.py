@@ -92,12 +92,16 @@ class AppendPayrollLogBankCreditTest(unittest.TestCase):
         _parsers_base._registry = ClientRegistry(clients_dir=str(self.clients_dir))
 
         self.payroll_log = self.logs_dir / "payroll_log.csv"
+        self.recon_log = self.logs_dir / "reconciliation_log.csv"
         self._orig_payroll_path = _base_mod.PAYROLL_LOG_PATH
+        self._orig_recon_path = _base_mod.RECON_LOG_PATH
         _base_mod.PAYROLL_LOG_PATH = self.payroll_log
+        _base_mod.RECON_LOG_PATH = self.recon_log
 
     def tearDown(self):
         _parsers_base._registry = self._orig_registry
         _base_mod.PAYROLL_LOG_PATH = self._orig_payroll_path
+        _base_mod.RECON_LOG_PATH = self._orig_recon_path
         shutil.rmtree(self.clients_dir)
         shutil.rmtree(self.logs_dir)
 
@@ -116,8 +120,18 @@ class AppendPayrollLogBankCreditTest(unittest.TestCase):
             make_row("10/30/26", "BANK", credit=33.08, memo="Pay by Pay Refund"),
             make_row("10/30/26", "Shareholder Medical", credit=948.13, memo="2%"),
         ]
+        # confirmed=False: this test only cares about payroll_log.csv's
+        # bank_credit, not the confirmed-path side effects (writing
+        # reconciliation_log.csv and calling the live Google Sheet
+        # updater) -- those aren't redirected to a temp path here and
+        # shouldn't run during a unit test at all. A prior version of this
+        # test omitted confirmed=False and leaked a stray TEST_SALON row
+        # into the real private Bookkeeping-clients/reconciliation_log.csv
+        # (RECON_LOG_PATH is a separate module-level path that was never
+        # overridden) -- caught live when a stop-hook flagged an
+        # uncommitted change the test itself had silently caused.
         append_payroll_log("test_salon", "Test Salon LLC", "10/30/2026", rows,
-                            bank_account="BANK")
+                            bank_account="BANK", confirmed=False)
         # True cash-out ($6,855.88), not the full journal credit total ($7,830.93).
         self.assertEqual(self._read_bank_credit(), "6855.88")
 
@@ -126,7 +140,7 @@ class AppendPayrollLogBankCreditTest(unittest.TestCase):
             make_row("1/1/26", "Wages", debit=100.00),
             make_row("1/1/26", "BANK", credit=100.00),
         ]
-        append_payroll_log("test_salon", "Test Salon LLC", "01/01/2026", rows)
+        append_payroll_log("test_salon", "Test Salon LLC", "01/01/2026", rows, confirmed=False)
         self.assertEqual(self._read_bank_credit(), "100.00")
 
 
