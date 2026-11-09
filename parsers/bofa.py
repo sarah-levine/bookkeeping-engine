@@ -563,6 +563,35 @@ class BankOfAmericaCheckingParser(StatementParser):
             elif post_date in check_date_map:
                 check['check_date'] = check_date_map[post_date]
 
+        # Amount-based payee inference — a client-config fallback for
+        # recurring same-amount checks (e.g. a fixed monthly rent or
+        # janitorial invoice), checked BEFORE any image extraction so a
+        # match skips the paid Vision call and the unreliable OCR path
+        # entirely. This is a guess, not a verified read of the check
+        # image: it fires only when exactly one configured amount matches
+        # exactly (string-keyed on the formatted decimal, e.g. "380.00"),
+        # so an ambiguous or stale rule degrades to silently not matching
+        # rather than ever picking the wrong one of two candidates. A rule
+        # is a standing, until-told-otherwise assumption the user set up
+        # for one client, not something this code infers on its own.
+        client_name = getattr(self, 'client_name', None)
+        if client_name:
+            cfg = _registry.get_config(client_name) or {}
+            amount_rules = cfg.get('check_payee_amount_rules', {})
+            if amount_rules:
+                for check in self.checks:
+                    if check.get('payee'):
+                        continue
+                    amount_key = f"{abs(check['amount']):.2f}"
+                    payee = amount_rules.get(amount_key)
+                    if payee:
+                        check['payee'] = payee
+                        print(f"  ℹ check #{check.get('check_number', '?')} (${amount_key}) "
+                              f"payee '{payee}' inferred from check_payee_amount_rules "
+                              f"(amount match, not image-verified) — confirm it's still "
+                              f"correct if this vendor/amount could have changed",
+                              file=sys.stderr)
+
         if not _CHECK_IMAGE_LIBS_AVAILABLE:
             return
 
