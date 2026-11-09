@@ -399,5 +399,122 @@ class VisionCheckPayeeGateTest(unittest.TestCase):
         self.assertEqual(tess.call_count, 2, "should fall back to OCR for both checks")
 
 
+class AmountBasedPayeeInferenceTest(unittest.TestCase):
+    """check_payee_amount_rules (client config): a free, no-API-call
+    fallback for a client's known recurring same-amount checks (e.g. a
+    fixed monthly rent or janitorial invoice), applied before any OCR/
+    Vision attempt so a match skips image extraction entirely. Added after
+    a real client asked to infer payee from amount instead of paying for
+    Vision on every statement, for checks whose amount has been a reliable
+    1:1 signal. Deliberately a client config field (a standing per-client
+    assumption the user set up), not something the code infers on its
+    own -- and it must never override an already-known payee (an explicit
+    check_payee_map entry, or the amount already matching an existing
+    payee from the statement)."""
+
+    def setUp(self):
+        import tempfile
+        import json
+        from pathlib import Path
+        from parsers.base import ClientRegistry
+        import parsers.base as _base_mod
+
+        self._tmpdir = tempfile.TemporaryDirectory()
+        clients_dir = Path(self._tmpdir.name)
+        (clients_dir / "bravo_salon.json").write_text(json.dumps({
+            "client_name": "Bravo Salon LLC",
+            "canonical_name": "BRAVO SALON LLC",
+            "aliases": [],
+            "statement_types": ["bofa_checking"],
+            "check_payee_amount_rules": {
+                "3250.00": "Charlie Plaza Shopping Center",
+                "380.00": "Delta Cleaning Services",
+            },
+        }))
+
+        self._orig_base_registry = _base_mod._registry
+        self._orig_bofa_registry = bofa_mod._registry
+        new_registry = ClientRegistry(clients_dir=str(clients_dir))
+        _base_mod._registry = new_registry
+        bofa_mod._registry = new_registry
+
+        self._orig_check_image_libs = bofa_mod._CHECK_IMAGE_LIBS_AVAILABLE
+        bofa_mod._CHECK_IMAGE_LIBS_AVAILABLE = False
+
+    def tearDown(self):
+        import parsers.base as _base_mod
+        _base_mod._registry = self._orig_base_registry
+        bofa_mod._registry = self._orig_bofa_registry
+        bofa_mod._CHECK_IMAGE_LIBS_AVAILABLE = self._orig_check_image_libs
+        self._tmpdir.cleanup()
+
+    def _parser(self, checks):
+        from decimal import Decimal
+        p = BankOfAmericaCheckingParser.__new__(BankOfAmericaCheckingParser)
+        p.client_name = "Bravo Salon LLC"
+        p.checks = checks
+        return p
+
+    def test_exact_amount_match_assigns_payee(self):
+        from decimal import Decimal
+        # Real check amounts are stored negative (as printed on the
+        # statement's Checks table, e.g. "-3,250.00") -- the rule keys in
+        # client config are plain positive dollar figures, so the lookup
+        # must abs() the check amount. A synthetic positive-only amount
+        # here previously let a sign-mismatch bug (amount_key computed
+        # without abs()) pass silently; caught only when verified against
+        # a real statement, per this repo's real-fixture testing policy.
+        checks = [
+            {"date": "10/02/26", "check_number": "1285", "amount": Decimal("-3250.00"), "payee": ""},
+            {"date": "10/08/26", "check_number": "1286", "amount": Decimal("-380.00"), "payee": ""},
+        ]
+        p = self._parser(checks)
+        p.extract_check_payees()
+        self.assertEqual(checks[0]["payee"], "Charlie Plaza Shopping Center")
+        self.assertEqual(checks[1]["payee"], "Delta Cleaning Services")
+
+    def test_unmatched_amount_stays_blank(self):
+        from decimal import Decimal
+        checks = [{"date": "10/02/26", "check_number": "1290", "amount": Decimal("-99.99"), "payee": ""}]
+        p = self._parser(checks)
+        p.extract_check_payees()
+        self.assertEqual(checks[0]["payee"], "")
+
+    def test_explicit_check_payee_map_takes_priority_over_amount_rule(self):
+        from decimal import Decimal
+        # Amount matches the $380.00 rule, but an explicit override for
+        # this specific check number must win -- the amount rule is only
+        # a fallback for checks nothing else has identified.
+        checks = [{"date": "10/08/26", "check_number": "1286", "amount": Decimal("-380.00"), "payee": ""}]
+        p = self._parser(checks)
+        p.extract_check_payees(check_payee_map={"1286": "Explicit Override Vendor"})
+        self.assertEqual(checks[0]["payee"], "Explicit Override Vendor")
+
+    def test_no_amount_rules_configured_leaves_checks_untouched(self):
+        from decimal import Decimal
+        import json
+        from pathlib import Path
+        from parsers.base import ClientRegistry
+        import parsers.base as _base_mod
+
+        # Reconfigure to a client with no check_payee_amount_rules field at all.
+        (Path(self._tmpdir.name) / "echo_salon.json").write_text(json.dumps({
+            "client_name": "Echo Salon LLC",
+            "canonical_name": "ECHO SALON LLC",
+            "aliases": [],
+            "statement_types": ["bofa_checking"],
+        }))
+        new_registry = ClientRegistry(clients_dir=self._tmpdir.name)
+        _base_mod._registry = new_registry
+        bofa_mod._registry = new_registry
+
+        checks = [{"date": "10/02/26", "check_number": "1300", "amount": Decimal("-3250.00"), "payee": ""}]
+        p = BankOfAmericaCheckingParser.__new__(BankOfAmericaCheckingParser)
+        p.client_name = "Echo Salon LLC"
+        p.checks = checks
+        p.extract_check_payees()
+        self.assertEqual(checks[0]["payee"], "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
