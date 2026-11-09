@@ -5,7 +5,7 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
-### Historical `payroll_log.csv` `bank_credit` values may be overstated for pre-2026-11-08 runs with a non-cash reclass line — needs re-deriving from source PDFs, not a code fix (found 2026-11-08, root cause FIXED, historical backfill still open)
+### Historical `payroll_log.csv` `bank_credit` values may be overstated for pre-2026-11-09 runs with a non-cash reclass line — needs re-deriving from source PDFs, not a code fix (found 2026-11-08, root cause FIXED for all formats, historical backfill still open)
 
 `append_payroll_log()`'s `bank_credit` field used to equal the payroll
 journal's full Credit total (`check_balance()`'s `total_c`), which silently
@@ -32,24 +32,41 @@ $7,830.93 (the full journal total).
 all format runners that have a bank-account concept
 (`adp_payroll_tipped`, `adp_payroll_details`, `adp_payroll_departments`,
 `adp_payroll_professional`, `adp_payroll_1099`, `square_payroll`).
-`adp_labor_distribution` has no `bank_account` config field (its journal
-structure differs) and keeps the old total-credit fallback unchanged.
-Regression coverage: `tests/test_bank_cash_out.py`.
+`adp_labor_distribution` (`duran_hcp`) initially had no `bank_account`
+config field (its journal structure differs), so it was left on the old
+total-credit fallback — **also fixed later the same session** once a real
+Duran HCP checking-statement tie-out exposed the identical pattern in its
+Admin (Div 10) journal: 401k Withholding + VSP credit lines sit alongside
+the real `"210 Payroll Clearing"` bank entries. Each division's config
+already carries a `clearing_account` field that serves the same purpose
+as `bank_account`, so it's now passed the same way. Regression coverage:
+`tests/test_bank_cash_out.py`.
 
 **Still open — historical backfill**: the already-logged `payroll_log.csv`
 rows for clients on the affected formats (`de_anza` — adp_payroll_departments,
 `jojo_hair_studio` — adp_payroll_details, `paintbox_hair_studio` —
-adp_payroll_tipped) predating 2026-11-08 may have an inflated `bank_credit`
-whenever that run had a nonzero S-corp medical / pre-tax health insurance
-line — there's no way to tell which specific historical rows were affected
-without re-parsing each run's original source PDFs (not available in this
-session; would need to be pulled from the archived Payroll PDFs in Google
-Drive under `Bookkeeping/<Client>/Payroll/`, keeping in mind only the 2 most
-recent are retained per client). The one entry this session could correct
-with data actually in hand — Paintbox `10/30/2026` ($7,830.93 → $6,855.88)
-— has been fixed directly in `payroll_log.csv`. Any Mode C tie-out run
-against a pre-2026-11-08 `bank_credit` value for these three clients should
-be treated with suspicion until re-derived.
+adp_payroll_tipped, `duran_hcp` — adp_labor_distribution, Admin division
+only) predating each format's fix date may have an inflated `bank_credit`
+whenever that run had a nonzero non-cash reclass line — there's no way to
+tell which specific historical rows were affected without re-parsing each
+run's original source PDFs (not available in this session; would need to
+be pulled from the archived Payroll PDFs in Google Drive under
+`Bookkeeping/<Client>/Payroll/`, keeping in mind only the 2 most recent are
+retained per client). Entries this session could correct with data
+actually in hand have been fixed directly in `payroll_log.csv`:
+- Paintbox `10/30/2026` ($7,830.93 → $6,855.88)
+- Duran HCP Admin `07/10/2026` and `07/24/2026` ($4,140.30 → $3,662.18 each)
+
+Still unconfirmed and NOT backfilled (no source PDF re-parsed this
+session) — treat any Mode C tie-out against these as suspect until
+re-derived:
+- Duran HCP Admin: `05/01/2026` ($4,140.30), `05/15/2026` ($4,140.31),
+  `05/29/2026` ($4,140.38), `06/12/2026` ($4,140.30), `06/26/2026`
+  ($4,140.30) — all suspiciously identical to the two confirmed-wrong
+  07/2026 values, strongly suggesting the same $478.12 (401k + VSP)
+  overstatement, but not verified against source PDFs.
+- Any pre-2026-11-08 de_anza / jojo_hair_studio / paintbox_hair_studio
+  entries not listed above as already fixed.
 
 
 ### `qa_reconciliation.py` doesn't scope a combined checking+savings PDF's two accounts apart (found 2026-10-25, not fixed)
