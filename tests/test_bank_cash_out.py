@@ -68,6 +68,25 @@ class BankCashOutUnitTest(unittest.TestCase):
         self.assertEqual(bank_cash_out(rows, None), 0.0)
         self.assertEqual(bank_cash_out(rows, ""), 0.0)
 
+    def test_labor_distribution_admin_shape_excludes_401k_and_vsp(self):
+        # adp_labor_distribution's Admin (Div 10) journal: gross + ER taxes
+        # debited, then credits split across "210 Payroll Clearing" (real
+        # bank cash-out) AND separate 401k Withholding / VSP accounts
+        # (non-cash, never touch the bank). Caught live reconciling a real
+        # Duran HCP checking statement: the checking side's actual payroll
+        # debit for this division was $3,662.18, but the logged bank_credit
+        # (before this fix) was $4,140.30 -- the 401k ($477.11) + VSP
+        # ($1.01) credits were wrongly included.
+        rows = [
+            make_row("7/10/26", "501 Admin Compensation:Gross Pay - Admin", debit=3846.15),
+            make_row("7/10/26", "505 Admin Compensation:Payroll Taxes - Admin", debit=294.15),
+            make_row("7/10/26", "214 401k Withholding", credit=477.11),
+            make_row("7/10/26", "598 Benefits and Other Staff Costs:Staff Contribution", credit=1.01),
+            make_row("7/10/26", "210 Payroll Clearing", credit=1231.33, memo="Taxes"),
+            make_row("7/10/26", "210 Payroll Clearing", credit=2430.85),
+        ]
+        self.assertEqual(bank_cash_out(rows, "210 Payroll Clearing"), 3662.18)
+
 
 class AppendPayrollLogBankCreditTest(unittest.TestCase):
     """Integration: append_payroll_log() writes the bank-account-filtered
