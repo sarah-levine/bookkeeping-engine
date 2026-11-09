@@ -242,5 +242,58 @@ class BofaCreditsAccountConfigTest(unittest.TestCase):
         self.assertEqual(p.credits[0]['amount'], _d('40.00'))
 
 
+class BofaCreditYearRolloverTest(unittest.TestCase):
+    """Regression coverage for the row-date year bug: the parser used to
+    assume any Nov/Dec transaction date belonged to statement_year - 1,
+    which is only correct when the statement period itself crosses a
+    calendar year boundary (e.g. Dec->Jan). A same-year cycle that simply
+    ENDS in November or December (e.g. "October 07, 2026 - November 06,
+    2026") was wrongly knocked back a year. Caught live on a real client
+    Oct-Nov 2026 statement -- no existing fixture or synthetic text
+    exercised a non-crossing Nov/Dec-ending period before this."""
+
+    def _parser(self, text):
+        p = BankOfAmericaCreditCardParser.__new__(BankOfAmericaCreditCardParser)
+        p.client_name = None
+        p.previous_balance = None
+        p.new_balance = None
+        p.closing_date = None
+        p.payments = []
+        p.credits = []
+        p.charges = []
+        p.finance_charge = None
+        p.total_payments = Decimal('0')
+        p.fees = Decimal('0')
+        p.text = text
+        return p
+
+    def test_non_crossing_november_closing_keeps_same_year(self):
+        text = (
+            "October 07, 2026 - November 06, 2026\n"
+            "Statement Closing Date ....... 11/06/26\n"
+            "Previous Balance ....... $100.00\n"
+            "New Balance Total ....... $150.00\n"
+            "Purchases and Other Charges\n"
+            + _txn_line("10/26", "10/25", "CONTOSO OCTOBER CHARGE", "20.00") + "\n"
+            + _txn_line("11/04", "11/02", "CONTOSO NOVEMBER CHARGE", "30.00") + "\n"
+            "TOTAL PURCHASES\n"
+        )
+        p = self._parser(text)
+        p.parse()
+        vendors = {c['vendor']: c for c in p.charges}
+        self.assertEqual(vendors['CONTOSO OCTOBER CHARGE']['date'], '10/26/26')
+        # Before the fix this resolved to '11/04/25' (wrongly shifted back a year).
+        self.assertEqual(vendors['CONTOSO NOVEMBER CHARGE']['date'], '11/04/26')
+
+    def test_crossing_december_closing_shifts_to_prior_year(self):
+        p = self._parser(_TEXT)
+        p.parse()
+        vendors = {c['vendor']: c for c in p.charges}
+        # Statement period "December 07, 2025 - January 06, 2026" genuinely
+        # crosses a year boundary, so December transaction dates still
+        # correctly resolve to the prior (start) year.
+        self.assertEqual(vendors['CONTOSO OFFICE SUPPLIES']['date'], '12/15/25')
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

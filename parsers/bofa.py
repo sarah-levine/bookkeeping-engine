@@ -60,11 +60,14 @@ class BankOfAmericaCreditCardParser(StatementParser):
     def parse(self):
         lines = self.text.split('\n')
 
-        # Extract statement closing year from period line e.g. "December 07, 2025 - January 06, 2026"
-        self.statement_year = 2026  # default
+        # Extract statement start/closing year from period line e.g.
+        # "December 07, 2025 - January 06, 2026"
+        self.statement_year = 2026  # default (closing year)
+        self.statement_start_year = 2026  # default (opening year)
         for line in lines:
             m = re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d+,\s+(\d{4})\s*-\s*(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d+,\s+(\d{4})', line)
             if m:
+                self.statement_start_year = int(m.group(2))
                 self.statement_year = int(m.group(3))
                 break
 
@@ -183,10 +186,16 @@ class BankOfAmericaCreditCardParser(StatementParser):
                     post_date = m.group(1)
                     description = m.group(3).strip()
                     amount_str = m.group(5).replace(',', '').replace(' ', '')
-                    # Derive year from statement period: Dec dates -> statement year - 1, Jan dates -> statement year
+                    # Derive year from statement period. Only apply the Nov/Dec ->
+                    # prior-year adjustment when the statement itself crosses a
+                    # calendar year boundary (e.g. "December 07, 2025 - January 06,
+                    # 2026"); a same-year cycle that happens to end in Nov/Dec (e.g.
+                    # "October 07, 2026 - November 06, 2026") must NOT be shifted.
                     month = int(post_date.split('/')[0])
+                    start_yr = getattr(self, 'statement_start_year', self.statement_year)
+                    crosses_year = start_yr != self.statement_year
                     if hasattr(self, 'statement_year'):
-                        yr = (self.statement_year - 1) if month >= 11 else self.statement_year
+                        yr = start_yr if (crosses_year and month >= 11) else self.statement_year
                     else:
                         yr = 2026  # fallback
                     year_2d = str(yr)[-2:]
