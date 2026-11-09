@@ -128,6 +128,33 @@ def check_balance(rows: list) -> tuple:
     return total_d, total_c
 
 
+def bank_cash_out(rows: list, bank_account: str) -> float:
+    """Actual cash leaving the real bank account for one payroll run.
+
+    The journal's overall Debit/Credit totals (see check_balance) include
+    non-cash reclass lines that balance against each other without ever
+    touching the bank -- e.g. an S-corp 2% shareholder medical premium
+    (debited to wages, credited to a shareholder-medical equity/liability
+    account) or a pre-tax health insurance deduction (credited to a health
+    insurance payable account). Only rows actually posted to bank_account
+    represent money ADP debited from the checking account, which is what
+    Mode C's payroll<->checking tie-out needs to match against the bank
+    statement. Falls back to 0.0 if bank_account is falsy so callers that
+    don't have one configured degrade safely rather than crash.
+    """
+    if not bank_account:
+        return 0.0
+    out = 0.0
+    for r in rows:
+        if r.get("Account") != bank_account:
+            continue
+        if r["Credit"]:
+            out += float(r["Credit"])
+        if r["Debit"]:
+            out -= float(r["Debit"])
+    return round(out, 2)
+
+
 def print_journal_table(rows: list, client_name: str, check_date: str):
     """Print a formatted journal entry table."""
     # Shorten long account names for display
@@ -223,7 +250,8 @@ def _upsert_csv(log_path: Path, fields: list, key_fields: list, entry: dict):
 
 
 def append_payroll_log(client: str, client_name: str, check_date: str, rows: list, *,
-                        recon_client: str = None, confirmed: bool = True):
+                        recon_client: str = None, confirmed: bool = True,
+                        bank_account: str = None):
     """Upsert one row into payroll_log.csv (always) and, once QB entry is
     confirmed, reconciliation_log.csv + the live Google Sheet tracker.
 
@@ -248,11 +276,19 @@ def append_payroll_log(client: str, client_name: str, check_date: str, rows: lis
     from datetime import datetime
     total_d, total_c = check_balance(rows)
     balanced = abs(round(total_d - total_c, 2)) < 0.02
+    # bank_credit must reflect actual cash ADP debited from the bank account
+    # (what Mode C ties against the bank statement), not the journal's full
+    # Credit total -- which includes non-cash reclass lines (e.g. S-corp 2%
+    # shareholder medical, pre-tax health insurance) that never touch the
+    # bank. See bank_cash_out(). Falls back to total_c when bank_account
+    # isn't supplied, to preserve existing behavior for callers that don't
+    # pass one.
+    reported_credit = bank_cash_out(rows, bank_account) if bank_account else total_c
     entry = {
         "client":        client,
         "client_name":   client_name,
         "check_date":    check_date,
-        "bank_credit":   f"{total_c:.2f}",
+        "bank_credit":   f"{reported_credit:.2f}",
         "balanced":      "TRUE" if balanced else "FALSE",
         "run_timestamp": _now_pst().strftime("%Y-%m-%d %H:%M:%S"),
     }

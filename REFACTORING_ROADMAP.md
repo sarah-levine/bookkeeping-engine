@@ -5,6 +5,53 @@ Per CLAUDE.md policy: every patch-only fix must land here before being shipped.
 Fix in Claude Code where noted — these require proper branching and testing.
 
 
+### Historical `payroll_log.csv` `bank_credit` values may be overstated for pre-2026-11-08 runs with a non-cash reclass line — needs re-deriving from source PDFs, not a code fix (found 2026-11-08, root cause FIXED, historical backfill still open)
+
+`append_payroll_log()`'s `bank_credit` field used to equal the payroll
+journal's full Credit total (`check_balance()`'s `total_c`), which silently
+includes non-cash reclass lines that never touch the bank — an S-corp 2%
+shareholder medical premium (`adp_payroll_tipped`, `adp_payroll_details`) or
+a pre-tax health insurance deduction (`adp_payroll_departments`). Those
+lines balance the journal but aren't real ADP bank debits, so `bank_credit`
+overstated the true cash-out by exactly that non-cash amount whenever one
+of those lines was present — silently corrupting Mode C's payroll↔checking
+tie-out for every affected run (it would report "DOES NOT TIE" or a false
+variance against the real bank statement, which always reflects the true
+cash-out).
+
+Caught live reconciling a real Paintbox Hair Studio 10/30/2026 payroll run:
+S-corp 2% medical premium $948.13 inflated `bank_credit` from the true
+$6,855.88 cash-out (matching both the ADP Payroll Liability PDF's "Total
+Cash Required" and the checking statement's actual ADP debits) to
+$7,830.93 (the full journal total).
+
+**Root cause fixed** this session: added `bank_cash_out()` in
+`payroll_clients/base.py`, which sums only rows posted to the configured
+`bank_account` (or `payroll_bank_account` for Square), and wired it into
+`append_payroll_log()` via a new optional `bank_account` kwarg, passed from
+all format runners that have a bank-account concept
+(`adp_payroll_tipped`, `adp_payroll_details`, `adp_payroll_departments`,
+`adp_payroll_professional`, `adp_payroll_1099`, `square_payroll`).
+`adp_labor_distribution` has no `bank_account` config field (its journal
+structure differs) and keeps the old total-credit fallback unchanged.
+Regression coverage: `tests/test_bank_cash_out.py`.
+
+**Still open — historical backfill**: the already-logged `payroll_log.csv`
+rows for clients on the affected formats (`de_anza` — adp_payroll_departments,
+`jojo_hair_studio` — adp_payroll_details, `paintbox_hair_studio` —
+adp_payroll_tipped) predating 2026-11-08 may have an inflated `bank_credit`
+whenever that run had a nonzero S-corp medical / pre-tax health insurance
+line — there's no way to tell which specific historical rows were affected
+without re-parsing each run's original source PDFs (not available in this
+session; would need to be pulled from the archived Payroll PDFs in Google
+Drive under `Bookkeeping/<Client>/Payroll/`, keeping in mind only the 2 most
+recent are retained per client). The one entry this session could correct
+with data actually in hand — Paintbox `10/30/2026` ($7,830.93 → $6,855.88)
+— has been fixed directly in `payroll_log.csv`. Any Mode C tie-out run
+against a pre-2026-11-08 `bank_credit` value for these three clients should
+be treated with suspicion until re-derived.
+
+
 ### `qa_reconciliation.py` doesn't scope a combined checking+savings PDF's two accounts apart (found 2026-10-25, not fixed)
 
 `run_reconciliation()` runs the whole PDF through `reconcile_comprehensive.py`

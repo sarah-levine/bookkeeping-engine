@@ -272,7 +272,8 @@ def run_adp_payroll_tipped(args, config_name):
     rows = _build_journal(cfg, officers, support, company, total_1099, check_date)
     print_journal_table(rows, cfg["client_name"], check_date)
     if _qb_confirm(cfg["client_name"]):
-        append_payroll_log(cfg.get("payroll_key") or cfg["client_name"], cfg["client_name"], check_date, rows)
+        append_payroll_log(cfg.get("payroll_key") or cfg["client_name"], cfg["client_name"], check_date, rows,
+                            bank_account=cfg.get("bank_account"))
         append_digest_log(cfg["client_name"], check_date)
         archive_payroll_pdf(pdf_path, cfg["client_name"], check_date)
 
