@@ -341,7 +341,8 @@ def run_adp_payroll_details(args, config_name):
     rows = _build_journal(data, wc_amount, cfg)
     print_journal_table(rows, cfg["client_name"], data["check_date"])
     confirmed = _qb_confirm(cfg["client_name"])
-    append_payroll_log(cfg.get("payroll_key") or cfg["client_name"], cfg["client_name"], data["check_date"], rows, confirmed=confirmed)
+    append_payroll_log(cfg.get("payroll_key") or cfg["client_name"], cfg["client_name"], data["check_date"], rows, confirmed=confirmed,
+                        bank_account=cfg.get("bank_account"))
     append_digest_log(cfg["client_name"], data["check_date"], confirmed=confirmed)
     if confirmed:
         archive_payroll_pdf(pdf, cfg["client_name"], data["check_date"])

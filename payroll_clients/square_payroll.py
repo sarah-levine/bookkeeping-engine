@@ -171,6 +171,7 @@ def run_square_payroll(args, config_name):
 
     print_journal_table(rows, cfg["client_name"], check_date)
     if _qb_confirm(cfg["client_name"]):
-        append_payroll_log(cfg.get("payroll_key") or cfg["client_name"], cfg["client_name"], check_date, rows)
+        append_payroll_log(cfg.get("payroll_key") or cfg["client_name"], cfg["client_name"], check_date, rows,
+                            bank_account=cfg.get("payroll_bank_account"))
         append_digest_log(cfg["client_name"], check_date)
         archive_payroll_pdf(xlsx_path, cfg["client_name"], check_date)
