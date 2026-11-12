@@ -485,8 +485,12 @@ def build_digest_email(recon_entries, manual_entries, log_date, due_items,
 
     def _notes_block(entries):
         items = "".join(
+            # A consolidated multi-item note (e.g. log_utils.append_cc_payment_issue()'s
+            # grouped "Unrecognized <Card> payments" list) embeds literal "\n"s between
+            # bullet lines -- HTML collapses those to whitespace unless converted to
+            # <br>, which would otherwise run every item onto one line.
             f'<div style="padding:5px 12px;font-size:12px;color:#92400e;'
-            f'border-top:1px solid #fde68a">⚠️ {e.get("issue","")}'
+            f'border-top:1px solid #fde68a">⚠️ {e.get("issue","").replace(chr(10), "<br>")}'
             f'<span style="color:#b45309;opacity:0.75;margin-left:6px">'
             f'({e.get("run_time","")[:16].replace("T"," ")})</span></div>'
             for e in entries
