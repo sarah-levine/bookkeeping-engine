@@ -306,8 +306,8 @@ def append_cc_payment_issue(*, client: str, card: str, amount_str: str, date: st
     REFACTORING_ROADMAP.md) and re-flags the same already-reconciled
     payment on every later run that doesn't also reconcile that card's
     statement in the same session -- without consolidation this piles up
-    one full boilerplate sentence per occurrence (confirmed live: Duran
-    HCP accumulated 7+ separate "Unrecognized Amex payment ..." entries,
+    one full boilerplate sentence per occurrence (confirmed live: a single
+    client accumulated 7+ separate "Unrecognized Amex payment ..." entries,
     almost all the same recurring false positive, reworded only by amount
     and date).
     """

@@ -316,7 +316,7 @@ patch — that's why this is logged here rather than fixed inline.
 **Symptom mitigated, root cause still open (2026-11-12):** every occurrence
 used to write its own `append_manual_issue()` entry keyed on the full
 sentence (identical except for amount/date), so a single recurring false
-positive piled up one near-duplicate entry per run — Duran HCP had
+positive piled up one near-duplicate entry per run — one client had
 accumulated 7+ separate "Unrecognized Amex payment ..." entries this way.
 `log_utils.append_cc_payment_issue()` now consolidates all occurrences for
 a given (client, card) into one manual issue holding a growing `items`

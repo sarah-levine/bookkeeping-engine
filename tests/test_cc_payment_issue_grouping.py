@@ -12,8 +12,8 @@ every later run that doesn't also reconcile that card's statement in the
 same session. Before this change, each occurrence wrote its own
 append_manual_issue() entry keyed on the full (differently-worded-only-by-
 amount-and-date) sentence, so a single recurring false positive piled up
-one near-duplicate entry per run -- confirmed live: Duran HCP accumulated
-7+ separate "Unrecognized Amex payment ..." entries this way.
+one near-duplicate entry per run -- confirmed live: a single client
+accumulated 7+ separate "Unrecognized Amex payment ..." entries this way.
 """
 import json
 import sys
