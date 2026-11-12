@@ -297,6 +297,78 @@ def append_manual_issue(*, client: str, issue: str) -> None:
     _save_log(existing)
 
 
+def append_cc_payment_issue(*, client: str, card: str, amount_str: str, date: str) -> None:
+    """Append one unrecognized-CC-payment occurrence to a single running
+    list-style manual issue per (client, card), instead of writing a new
+    near-duplicate full-sentence 'issue' entry per occurrence.
+
+    Mode E's unrecognized-CC-payment check is session-scoped (see
+    REFACTORING_ROADMAP.md) and re-flags the same already-reconciled
+    payment on every later run that doesn't also reconcile that card's
+    statement in the same session -- without consolidation this piles up
+    one full boilerplate sentence per occurrence (confirmed live: a single
+    client accumulated 7+ separate "Unrecognized Amex payment ..." entries,
+    almost all the same recurring false positive, reworded only by amount
+    and date).
+    """
+    client = _normalize_client_name(client)
+    _assert_known_client(client)
+    group_key = f"unrecognized_{card.lower().replace(' ', '_')}_payments"
+    item = {"amount": amount_str, "date": date}
+
+    existing = _load_log()
+    target_idx = None
+    for i, e in enumerate(existing):
+        if e.get("type") == "manual" and e.get("client") == client and e.get("group_key") == group_key:
+            target_idx = i
+            break
+
+    if target_idx is None:
+        items, is_new_item, was_resolved = [item], True, False
+    else:
+        items = list(existing[target_idx].get("items", []))
+        was_resolved = bool(existing[target_idx].get("resolved"))
+        is_new_item = item not in items
+        if is_new_item:
+            items.append(item)
+    items.sort(key=lambda it: _normalize_date_iso(it["date"]))
+
+    lines = "\n".join(f"  • {it['amount']} on {it['date']}" for it in items)
+    issue_text = (
+        f"Unrecognized {card} payments — no {card} statement on file "
+        f"(ASK CLIENT) — Not Recognized Account:\n{lines}"
+    )
+
+    entry = {
+        "run_time":           _now_pst().isoformat(),
+        "type":               "manual",
+        "client":             client,
+        "account_type":       "",
+        "statement_end_date": "",
+        "statement":          "",
+        "beginning_balance":  "",
+        "ending_balance":     "",
+        "difference":         "",
+        "status":             "",
+        "issues":             [],
+        "issue":              issue_text,
+        "items":              items,
+        "group_key":          group_key,
+    }
+    # A genuinely new item reopens an already-resolved note; re-detecting an
+    # item already in the list (no-op append) preserves resolution, matching
+    # append_manual_issue()'s existing-entry convention.
+    if target_idx is not None and was_resolved and not is_new_item:
+        entry["resolved"] = existing[target_idx]["resolved"]
+        entry["resolved_time"] = existing[target_idx].get("resolved_time")
+
+    if target_idx is None:
+        existing.append(entry)
+    else:
+        existing[target_idx] = entry
+    _save_log(existing)
+
+
 def manual_issue_covers_event(client: str, *substrings: str) -> bool:
     """True if an existing (unresolved) manual issue for this client already
     mentions all of the given substrings — e.g. a formatted amount and date.

@@ -313,6 +313,18 @@ semantics (amount-based? date-window-based? just issuer-type presence,
 matching the current coarse check?) need real design thought, not a rushed
 patch — that's why this is logged here rather than fixed inline.
 
+**Symptom mitigated, root cause still open (2026-11-12):** every occurrence
+used to write its own `append_manual_issue()` entry keyed on the full
+sentence (identical except for amount/date), so a single recurring false
+positive piled up one near-duplicate entry per run — one client had
+accumulated 7+ separate "Unrecognized Amex payment ..." entries this way.
+`log_utils.append_cc_payment_issue()` now consolidates all occurrences for
+a given (client, card) into one manual issue holding a growing `items`
+list, rendered as a bulleted list in the `issue` text instead of a wall of
+duplicate sentences. This only de-duplicates the digest/log noise — the
+underlying session-scoped detection above is unchanged and still needs the
+real fix described above.
+
 **Two more prerequisite bugs found (2026-08-24), compounding the above for
 `amex_checking` specifically:**
 
